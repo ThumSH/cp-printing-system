@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* Colourplus Brand Theme 
+  Defining our color palette and typography directly in the CSS engine.
+*/
+@theme {
+  --color-cplus-primary: #0ea5e9;   /* Vibrant Cyan */
+  --color-cplus-secondary: #e11d48; /* Deep Magenta */
+  --color-cplus-accent: #f59e0b;    /* Bright Yellow */
+  --color-cplus-dark: #0f172a;      /* Rich Ink Black */
+  --color-cplus-light: #f8fafc;     /* Paper White */
+  
+  --font-sans: "Inter", sans-serif;
+}
+
+/* Base desktop app styles */
+@layer base {
+  body {
+    background-color: var(--color-cplus-light);
+    color: var(--color-cplus-dark);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden; /* Prevents web-browser-like scrolling on the desktop window */
+  }
+}
