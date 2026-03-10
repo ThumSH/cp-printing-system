@@ -73,10 +73,10 @@ export default function MainLayout() {
       icon: CheckSquare, 
       roles: ['Admin', 'QC'] 
     },
-    { 
-      name: 'Gatepass', 
+   { 
+      name: 'Advice Note (Gatepass)', 
       href: '/gatepass', 
-      icon: Truck, 
+      icon: Truck, // Or FileText, whichever you prefer!
       roles: ['Admin', 'Gatepass'] 
     },
     { 
@@ -133,6 +133,18 @@ export default function MainLayout() {
       href: '/inventory/production', 
       icon: Factory, 
       roles: ['Admin', 'Stores'] 
+    },
+    { 
+      name: 'Advice Note (Dispatch)', 
+      href: '/inventory/advicenote', 
+      icon: FileText, 
+      roles: ['Admin', 'Stores'] 
+    },
+    { 
+      name: 'Audit Reports', 
+      href: '/audit', 
+      icon: ClipboardCheck, 
+      roles: ['Admin', 'Audit'] 
     },
   ];
 

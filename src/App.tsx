@@ -12,6 +12,8 @@ import ApprovalSearch from './pages/admin/ApprovalSearch';
 import StoreInPage from './pages/inventory/StoreInPage';
 import CPIPage from './pages/qc/CPIPage';
 import StoreProductionPage from './pages/inventory/StoreProductionPage';
+import AdviceNotePage from './pages/gatepass/AdviceNotePage';
+import AuditPage from './pages/audit/AuditPage';
 // --- The Gatekeeper Component ---
 // This prevents unauthorized access to the main application
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -55,15 +57,24 @@ function App() {
             <Route path="search" element={<ApprovalSearch />} />
           </Route>
 
-          <Route path="inventory">
+         <Route path="inventory">
             <Route index element={<StoreInPage />} />
             <Route path="in" element={<StoreInPage />} />
-            <Route path="production" element={<StoreProductionPage />} /> {/* NEW */}
+            <Route path="production" element={<StoreProductionPage />} /> 
           </Route>
           
           <Route path="qc">
             <Route index element={<CPIPage />} />
             <Route path="cpi" element={<CPIPage />} />
+          </Route>
+
+          <Route path="audit">
+            <Route index element={<AuditPage />} />
+          </Route>
+
+          <Route path="gatepass">
+            <Route index element={<AdviceNotePage />} />
+            <Route path="advicenote" element={<AdviceNotePage />} />
           </Route>
           
           <Route path="orders" element={<div className="p-4">Orders Page Coming Soon</div>} />
