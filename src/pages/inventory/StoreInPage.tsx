@@ -1,7 +1,7 @@
 // src/pages/inventory/StoreInPage.tsx
-import { useState, useEffect } from 'react';
+import { useState} from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PackageOpen, Plus, Trash2, Edit2, CheckCircle2, AlertCircle, Save } from 'lucide-react';
+import { PackageOpen, Plus, Trash2, Edit2, AlertCircle, Save } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
 import { useAdminStore } from '../../store/adminStore'; // <-- NEW
 import { useInventoryStore, StoreInRecord } from '../../store/inventoryStore';
@@ -317,7 +317,7 @@ export default function StoreInPage() {
                       <td className="px-6 py-4">
                         <p className="font-bold text-slate-900">{record.styleNo}</p>
                         <p className="text-[11px] text-slate-500 mt-0.5">{record.bodyColour} / {record.season}</p>
-                        <p className="text-[11px] text-slate-500 truncate max-w-[120px]">{record.components}</p>
+                        <p className="text-[11px] text-slate-500 truncate max-w-30">{record.components}</p>
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm font-medium text-slate-800">Sch: {record.scheduleNo} | Cut: {record.cutNo}</p>

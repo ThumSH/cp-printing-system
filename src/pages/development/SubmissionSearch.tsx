@@ -1,7 +1,7 @@
 // src/pages/development/SubmissionSearch.tsx
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Search, XCircle, Filter, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { Search, XCircle, Filter, CheckCircle2, Clock } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
 import { useAdminStore } from '../../store/adminStore'; // <-- NEW: Import Admin Store
 
@@ -99,7 +99,7 @@ export default function SubmissionSearch() {
       {/* FILTER PANEL */}
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-6 items-end">
         <div className="w-full md:w-1/3 space-y-1">
-          <label className="block text-sm font-medium text-slate-700 flex items-center">
+          <label className="text-sm font-medium text-slate-700 flex items-center">
             <Filter className="w-4 h-4 mr-1"/> Filter by Customer
           </label>
           <select

@@ -14,6 +14,7 @@ import CPIPage from './pages/qc/CPIPage';
 import StoreProductionPage from './pages/inventory/StoreProductionPage';
 import AdviceNotePage from './pages/gatepass/AdviceNotePage';
 import AuditPage from './pages/audit/AuditPage';
+import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
 // --- The Gatekeeper Component ---
 // This prevents unauthorized access to the main application
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -66,6 +67,7 @@ function App() {
           <Route path="qc">
             <Route index element={<CPIPage />} />
             <Route path="cpi" element={<CPIPage />} />
+            <Route path="delivery-tracker" element={<DeliveryTrackerPage />} />
           </Route>
 
           <Route path="audit">

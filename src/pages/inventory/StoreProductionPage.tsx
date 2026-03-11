@@ -1,7 +1,7 @@
 // src/pages/inventory/StoreProductionPage.tsx
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Factory, Plus, Trash2, Edit2, Save, AlertCircle } from 'lucide-react';
+import { Factory,  Trash2, Edit2, Save } from 'lucide-react';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useStoreProductionStore, StoreProductionRecord } from '../../store/storeProductionStore';
 
@@ -247,7 +247,7 @@ export default function StoreProductionPage() {
                       <td className="px-6 py-4 font-medium text-slate-700">{record.issueDate}</td>
                       <td className="px-6 py-4">
                         <p className="font-bold text-slate-900">{record.styleNo}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-[200px]">{record.components}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-50">{record.components}</p>
                       </td>
                       <td className="px-6 py-4 font-bold text-amber-700">{record.cutNo}</td>
                       <td className="px-6 py-4">

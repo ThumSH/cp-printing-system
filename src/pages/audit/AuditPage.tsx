@@ -294,7 +294,7 @@ export default function AuditPage() {
                   <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">Total QTY</th>
                   <th className="px-4 py-3 font-semibold text-indigo-700 print:text-black print:border print:border-slate-400 print:py-2">Audit QTY</th>
                   <th className="px-4 py-3 font-semibold w-32 print:border print:border-slate-400 print:py-2">Pass/Fail</th>
-                  <th className="px-4 py-3 font-semibold min-w-[200px] print:border print:border-slate-400 print:py-2">Remarks</th>
+                  <th className="px-4 py-3 font-semibold min-w-50 print:border print:border-slate-400 print:py-2">Remarks</th>
                   <th className="px-4 py-3 font-semibold text-right print-hide">Actions</th>
                 </tr>
               </thead>

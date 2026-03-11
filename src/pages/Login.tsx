@@ -32,12 +32,24 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex bg-slate-50">
-      {/* Left Side - Branding (Hidden on very small screens) */}
-      <div className="hidden lg:flex lg:w-1/2 bg-blue-900 items-center justify-center p-12 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white via-transparent to-transparent"></div>
-        <div className="z-10 text-white max-w-lg text-center">
-          <h1 className="text-5xl font-bold mb-6 tracking-tight">Colourplus</h1>
-          <p className="text-xl text-blue-200">
+      {/* Left Side - Branding (White-Blue Shades Blend) */}
+      <div className="hidden lg:flex lg:w-1/2 bg-linear-to-br from-white via-sky-50 to-blue-200 items-center justify-center p-12 relative overflow-hidden">
+        
+        {/* Adjusted the glow to a soft blue so it shows up on the white background */}
+        <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_center,var(--tw-gradient-stops))] from-blue-300/40 via-transparent to-transparent"></div>
+        
+        <div className="z-10 text-center flex flex-col items-center">
+          
+          {/* Image Option inside a beautiful frosted glass frame */}
+          <div className="mb-8 p-6 bg-white/40 backdrop-blur-md rounded-3xl border border-white/60 shadow-xl">
+            <img 
+              src="/logo.svg" /* <-- Replace with your actual logo path like "/StoreLogo.png" */
+              alt="Colourplus Logo" 
+              className="w-48 h-48 object-contain drop-shadow-md"
+            />
+          </div>
+
+          <p className="text-xl text-blue-900 font-bold tracking-wide drop-shadow-sm">
             Enterprise Screen Printing Management System
           </p>
         </div>
@@ -70,7 +82,7 @@ export default function Login() {
                     required
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-blue-600 sm:text-sm transition-colors"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
                     placeholder="Enter your username"
                   />
                 </div>
@@ -87,16 +99,17 @@ export default function Login() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-blue-600 sm:text-sm transition-colors"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
                     placeholder="••••••••"
                   />
                 </div>
               </div>
             </div>
 
+            {/* Button updated to a pure blue gradient to match the new left side */}
             <button
               type="submit"
-              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 transition-colors"
+              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-linear-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
             >
               Sign in securely
             </button>

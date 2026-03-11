@@ -1,5 +1,4 @@
-// src/data/mockAuth.ts
-import { User } from '../types';
+
 
 // We map a password to each user for our mock login simulation
 export const MOCK_CREDENTIALS = [

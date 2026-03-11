@@ -129,6 +129,14 @@ export default function MainLayout() {
       roles: ['Admin', 'QC'] 
     },
     { 
+      
+      name: 'Delivery Tracker', 
+      href: '/qc/delivery-tracker', 
+      icon: LayoutDashboard, 
+      roles: ['Admin', 'QC'] 
+    },
+    { 
+
       name: 'Issue to Production', 
       href: '/inventory/production', 
       icon: Factory, 
@@ -158,10 +166,12 @@ export default function MainLayout() {
       
       {/* --- SIDEBAR --- */}
       <aside className="w-64 bg-white border-r border-slate-200 shadow-sm flex flex-col shrink-0">
-        <div className="h-16 flex items-center px-6 border-b border-slate-200">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-            Colourplus
-          </h1>
+        <div className="h-20 flex items-center px-6 border-b border-slate-200">
+            <img 
+              src="/logo.svg" /* <-- Replace with your actual logo path like "/StoreLogo.png" */
+              alt="Colourplus Logo" 
+              className="w-30 h-20 object-cover drop-shadow-md"
+            />
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">

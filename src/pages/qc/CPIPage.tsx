@@ -1,7 +1,7 @@
 // src/pages/qc/CPIPage.tsx
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ClipboardList, Save, Edit2, Trash2, AlertCircle, FileText } from 'lucide-react';
+import { ClipboardList, Save, Edit2, FileText } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useQCStore, CPIReport, CPIRowData } from '../../store/qcStore';
@@ -17,7 +17,7 @@ const DEFECT_ROWS = [
 export default function CPIPage() {
   const { jobs } = useDevelopmentStore();
   const { storeInRecords } = useInventoryStore();
-  const { cpiReports, addCPIReport, updateCPIReport, deleteCPIReport } = useQCStore();
+  const { cpiReports, addCPIReport, updateCPIReport } = useQCStore();
 
   const todayDate = new Date().toISOString().split('T')[0];
 
@@ -164,7 +164,7 @@ export default function CPIPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12 max-w-[1400px] mx-auto">
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12 max-w-350 mx-auto">
       
       {/* PAGE TITLE */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
@@ -238,19 +238,19 @@ export default function CPIPage() {
               <table className="w-full border-collapse text-[12px] border-b-2 border-slate-800">
                 <thead>
                   <tr className="bg-slate-200 border-b border-slate-800 text-slate-800">
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[60px]">Cut No</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[60px]">Qty</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[80px]">Bundle No</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[60px]">Size</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[80px]">Range</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[100px]">Part</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[80px]">Sample Size</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-left min-w-[200px]">Defect Type</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[90px] bg-slate-300">Before Process</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[90px] bg-slate-300">After Process</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[60px] text-red-700">Total</th>
-                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-[50px] text-red-700">%</th>
-                    <th className="px-2 py-2 font-bold text-center min-w-[150px]">Remarks</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-15">Cut No</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-15">Qty</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-20">Bundle No</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-15">Size</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-20">Range</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-25">Part</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-20">Sample Size</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-left min-w-50">Defect Type</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-22.5 bg-slate-300">Before Process</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-22.5 bg-slate-300">After Process</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-15 text-red-700">Total</th>
+                    <th className="border-r border-slate-800 px-2 py-2 font-bold text-center w-12.5 text-red-700">%</th>
+                    <th className="px-2 py-2 font-bold text-center min-w-37.5">Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300">
@@ -275,7 +275,7 @@ export default function CPIPage() {
                               <td rowSpan={DEFECT_ROWS.length} className="border-r border-slate-800 px-2 py-1 text-center font-bold align-top">{record.size}</td>
                               <td rowSpan={DEFECT_ROWS.length} className="border-r border-slate-800 px-2 py-1 text-center text-[10px] text-slate-500 align-top">{record.numberRange}</td>
                               <td rowSpan={DEFECT_ROWS.length} className="border-r border-slate-800 p-0 align-top bg-white focus-within:bg-indigo-50">
-                                <textarea value={inspectionRows[baseKey]?.part || ''} onChange={(e) => handleRowInputChange(baseKey, 'part', e.target.value)} className="w-full h-full min-h-[100px] p-2 bg-transparent outline-none resize-none text-center" placeholder="Enter Part..." />
+                                <textarea value={inspectionRows[baseKey]?.part || ''} onChange={(e) => handleRowInputChange(baseKey, 'part', e.target.value)} className="w-full h-full min-h-25 p-2 bg-transparent outline-none resize-none text-center" placeholder="Enter Part..." />
                               </td>
                               <td rowSpan={DEFECT_ROWS.length} className="border-r border-slate-800 p-0 align-top bg-white focus-within:bg-indigo-50">
                                 <input type="number" value={inspectionRows[baseKey]?.sampleSize || ''} onChange={(e) => handleRowInputChange(baseKey, 'sampleSize', e.target.value)} className="w-full h-full p-2 bg-transparent outline-none text-center font-bold text-indigo-700" placeholder="Qty" />

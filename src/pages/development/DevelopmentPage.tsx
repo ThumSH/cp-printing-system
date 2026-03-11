@@ -359,15 +359,15 @@ export default function DevelopmentPage() {
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm text-slate-900 font-medium">{sub.bodyColour}</p>
-                        <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[120px]">Wash: {sub.washingStandard}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 truncate max-w-30">Wash: {sub.washingStandard}</p>
                       </td>
                       <td className="px-6 py-4">
                         <p className="font-medium text-slate-900">{sub.printingTechnique}</p>
                         <p className="text-xs text-slate-700 mt-0.5">{sub.printColourQty} Colors</p>
-                        <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[120px]">{sub.printColour}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 truncate max-w-30">{sub.printColour}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-1 max-w-[160px]">
+                        <div className="flex flex-wrap gap-1 max-w-40">
                           {sub.placements.map(p => <span key={p} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[11px] font-medium border border-indigo-100">{p}</span>)}
                         </div>
                       </td>

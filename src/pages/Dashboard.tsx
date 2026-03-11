@@ -1,5 +1,5 @@
 // src/pages/Dashboard.tsx
-import { motion } from 'framer-motion';
+import { motion,Variants } from 'framer-motion';
 import { 
   Code, 
   Send, 
@@ -12,12 +12,12 @@ import { useDevelopmentStore } from '../store/developmentStore';
 import { Link } from 'react-router-dom';
 
 // --- ANIMATION VARIANTS ---
-const containerVariants = {
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { y: 20, opacity: 0 },
   visible: { y: 0, opacity: 1, transition: { type: 'spring', stiffness: 300, damping: 24 } }
 };

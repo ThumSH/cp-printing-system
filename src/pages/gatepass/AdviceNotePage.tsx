@@ -239,7 +239,7 @@ export default function AdviceNotePage() {
           </div>
 
           {/* DYNAMIC BUNDLE TABLE */}
-          <div className="min-h-[300px]">
+          <div className="min-h-75">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-800 text-white divide-x divide-slate-600">
@@ -376,7 +376,7 @@ export default function AdviceNotePage() {
                       </td>
                       <td className="px-6 py-4">
                         <p className="font-medium text-slate-800">{note.attn}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-[200px]">{note.address}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-50">{note.address}</p>
                       </td>
                       <td className="px-6 py-4 text-right space-x-2">
                         <button onClick={() => handleEdit(note)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>
