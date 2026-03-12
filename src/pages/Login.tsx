@@ -1,7 +1,7 @@
 // src/pages/Login.tsx
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User as UserIcon } from 'lucide-react';
+import { Eye, EyeOff, Lock, ShieldCheck, Sparkles, User as UserIcon } from 'lucide-react';
 import { MOCK_CREDENTIALS } from '../data/mockAuth';
 import { useAuthStore } from '../store/authStore';
 
@@ -9,6 +9,7 @@ export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
@@ -49,16 +50,28 @@ export default function Login() {
             />
           </div>
 
-          <p className="text-xl text-blue-900 font-bold tracking-wide drop-shadow-sm">
+          <p className="text-xl text-blue-900 font-bold tracking-wide drop-shadow-sm max-w-md leading-relaxed">
             Enterprise Screen Printing Management System
           </p>
+
+          <div className="mt-8 grid grid-cols-2 gap-3 text-left w-full max-w-md">
+            {['Production-ready workflows', 'Real-time inventory visibility', 'Quality-control tracking', 'Audit-friendly records'].map((feature) => (
+              <div key={feature} className="flex items-start gap-2 rounded-xl bg-white/60 px-3 py-2 border border-white/70 shadow-sm">
+                <Sparkles className="h-4 w-4 text-blue-600 mt-0.5" />
+                <span className="text-xs text-blue-950 font-medium leading-5">{feature}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Right Side - Login Form */}
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-md space-y-8 bg-white p-10 rounded-2xl shadow-xl border border-slate-100">
+      <div className="flex-1 flex items-center justify-center p-8 bg-linear-to-b from-slate-50 to-sky-50/40">
+        <div className="w-full max-w-md space-y-8 bg-white/95 backdrop-blur-sm p-10 rounded-2xl shadow-xl border border-slate-100">
           <div className="text-center">
+            <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 text-blue-700 px-3 py-1 text-xs font-semibold border border-blue-100">
+              <ShieldCheck className="h-3.5 w-3.5" /> Secure access
+            </span>
             <h2 className="text-3xl font-extrabold text-slate-900">Sign in</h2>
             <p className="mt-2 text-sm text-slate-500">Access your workspace</p>
           </div>
@@ -95,13 +108,21 @@ export default function Login() {
                     <Lock className="h-5 w-5 text-slate-400" />
                   </div>
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                    className="block w-full pl-10 pr-11 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
                     placeholder="••••••••"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
               </div>
             </div>
