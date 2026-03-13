@@ -9,7 +9,11 @@ const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL'];
 
 export default function AuditPage() {
   const { storeInRecords } = useInventoryStore();
-  const { auditRecords, addAuditRecord, updateAuditStatus, deleteAuditRecord } = useAuditStore();
+  const { auditRecords, addAuditRecord, updateAuditStatus, deleteAuditRecord, fetchAuditRecords } = useAuditStore();
+
+  useEffect(() => {
+    fetchAuditRecords();
+  }, []);
 
   const todayDate = new Date().toISOString().split('T')[0];
 

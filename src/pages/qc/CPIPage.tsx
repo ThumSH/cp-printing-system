@@ -17,7 +17,7 @@ const DEFECT_ROWS = [
 export default function CPIPage() {
   const { jobs } = useDevelopmentStore();
   const { storeInRecords } = useInventoryStore();
-  const { cpiReports, addCPIReport, updateCPIReport } = useQCStore();
+  const { cpiReports, fetchReports, addCPIReport, updateCPIReport, deleteCPIReport } = useQCStore();
 
   const todayDate = new Date().toISOString().split('T')[0];
 
@@ -26,6 +26,10 @@ export default function CPIPage() {
   const [selectedSchedule, setSelectedSchedule] = useState('');
   
   const [inspectionRows, setInspectionRows] = useState<Record<string, CPIRowData>>({});
+
+  useEffect(() => {
+    fetchReports();
+  }, []);
   
   // NEW: State for the bottom summary section
   const [summaryData, setSummaryData] = useState({

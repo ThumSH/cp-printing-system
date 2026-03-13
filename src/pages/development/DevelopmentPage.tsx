@@ -1,5 +1,5 @@
 // src/pages/development/DevelopmentPage.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Code, Upload, Plus, Trash2, Edit2, CheckCircle2, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
@@ -43,6 +43,13 @@ export default function DevelopmentPage() {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const { jobs: submissions, addJob, updateJob, deleteJob } = useDevelopmentStore();
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  
+const { fetchData } = useDevelopmentStore();
+
+useEffect(() => {
+  fetchData();
+}, []);
   
   // NEW: State to hold our validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});

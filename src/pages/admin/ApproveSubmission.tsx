@@ -15,7 +15,12 @@ const INITIAL_FORM_STATE = {
 
 export default function ApproveSubmission() {
   const { submissions } = useDevelopmentStore();
-  const { approvals, processApproval } = useAdminStore();
+  const { approvals, processApproval, fetchApprovals } = useAdminStore();
+  
+  useEffect(() => {
+    fetchApprovals();
+  }, []);
+
 
   const [selectedSubmissionId, setSelectedSubmissionId] = useState('');
   const [autoFilledLevel, setAutoFilledLevel] = useState('');

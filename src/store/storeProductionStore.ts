@@ -1,33 +1,40 @@
-// src/store/storeProductionStore.ts
 import { create } from 'zustand';
 
 export interface StoreProductionRecord {
-  id: string;
-  issueDate: string;
-  styleNo: string;
-  components: string;
-  cutNo: string;
-  issueQty: number;
-  balanceQty: number; // The remaining qty AFTER this specific issue
-  lineNo: string;
+  id: string; issueDate: string; styleNo: string; components: string;
+  cutNo: string; issueQty: number; balanceQty: number; lineNo: string;
 }
 
 interface StoreProductionStore {
   productionRecords: StoreProductionRecord[];
-  addRecord: (record: StoreProductionRecord) => void;
-  updateRecord: (id: string, record: StoreProductionRecord) => void;
-  deleteRecord: (id: string) => void;
+  fetchRecords: () => Promise<void>;
+  addRecord: (record: StoreProductionRecord) => Promise<void>;
+  updateRecord: (id: string, record: StoreProductionRecord) => Promise<void>;
+  deleteRecord: (id: string) => Promise<void>;
 }
+
+const API_URL = 'http://localhost:5000/api/inventory/production';
+const getHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` });
 
 export const useStoreProductionStore = create<StoreProductionStore>((set) => ({
   productionRecords: [],
-  addRecord: (record) => set((state) => ({ 
-    productionRecords: [record, ...state.productionRecords] 
-  })),
-  updateRecord: (id, updatedRecord) => set((state) => ({
-    productionRecords: state.productionRecords.map((rec) => (rec.id === id ? updatedRecord : rec)),
-  })),
-  deleteRecord: (id) => set((state) => ({
-    productionRecords: state.productionRecords.filter((rec) => rec.id !== id),
-  })),
+  fetchRecords: async () => {
+    const res = await fetch(API_URL, { headers: getHeaders() });
+    if (res.ok) set({ productionRecords: await res.json() });
+  },
+  addRecord: async (record) => {
+    const res = await fetch(API_URL, { method: 'POST', headers: getHeaders(), body: JSON.stringify(record) });
+    if (res.ok) {
+      const saved = await res.json();
+      set((state) => ({ productionRecords: [saved, ...state.productionRecords] }));
+    }
+  },
+  updateRecord: async (id, updatedRecord) => {
+    const res = await fetch(`${API_URL}/${id}`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(updatedRecord) });
+    if (res.ok) set((state) => ({ productionRecords: state.productionRecords.map((rec) => (rec.id === id ? updatedRecord : rec)) }));
+  },
+  deleteRecord: async (id) => {
+    const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE', headers: getHeaders() });
+    if (res.ok) set((state) => ({ productionRecords: state.productionRecords.filter((rec) => rec.id !== id) }));
+  },
 }));

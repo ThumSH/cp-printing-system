@@ -2,7 +2,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Lock, ShieldCheck, Sparkles, User as UserIcon } from 'lucide-react';
-import { MOCK_CREDENTIALS } from '../data/mockAuth';
 import { useAuthStore } from '../store/authStore';
 
 export default function Login() {
@@ -14,18 +13,15 @@ export default function Login() {
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Simulate database lookup
-    const foundAccount = MOCK_CREDENTIALS.find(
-      (acc) => acc.username === username.toLowerCase() && acc.password === password
-    );
+    // Await the real API call from our updated store
+    const success = await login(username, password);
 
-    if (foundAccount) {
-      login(foundAccount.user);
-      navigate('/'); // Redirect to the dashboard/main layout
+    if (success) {
+      navigate('/'); // Redirect to the dashboard
     } else {
       setError('Invalid username or password. Please try again.');
     }

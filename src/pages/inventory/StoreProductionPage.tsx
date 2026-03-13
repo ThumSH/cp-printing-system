@@ -14,7 +14,7 @@ const INITIAL_FORM_STATE = {
 
 export default function StoreProductionPage() {
   const { storeInRecords } = useInventoryStore();
-  const { productionRecords, addRecord, updateRecord, deleteRecord } = useStoreProductionStore();
+  const { productionRecords, addRecord, updateRecord, deleteRecord,fetchRecords } = useStoreProductionStore();
 
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -22,6 +22,10 @@ export default function StoreProductionPage() {
   const [components, setComponents] = useState('');
 
   const todayDate = new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    fetchRecords();
+  }, []);
 
   // --- DYNAMIC DATA CASCADING ---
   // 1. Unique styles currently in the store that have available stock

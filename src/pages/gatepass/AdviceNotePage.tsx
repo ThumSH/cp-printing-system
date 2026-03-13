@@ -22,11 +22,15 @@ const INITIAL_FORM_STATE = {
 
 export default function AdviceNotePage() {
   const { storeInRecords } = useInventoryStore();
-  const { adviceNotes, addAdviceNote, updateAdviceNote, deleteAdviceNote } = useAdviceNoteStore();
+  const { adviceNotes, addAdviceNote, updateAdviceNote, deleteAdviceNote, fetchAdviceNotes } = useAdviceNoteStore();
 
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [rowInputs, setRowInputs] = useState<Record<string, AdviceNoteRow>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+  fetchAdviceNotes();
+}, []);
 
   // --- AUTO-GENERATE AD NO ---
   // If editing, use existing. Otherwise, generate next number (e.g., AD No : 00001)

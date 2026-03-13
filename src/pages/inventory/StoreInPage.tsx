@@ -1,5 +1,5 @@
 // src/pages/inventory/StoreInPage.tsx
-import { useState} from 'react';
+import { useState, useEffect} from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PackageOpen, Plus, Trash2, Edit2, AlertCircle, Save } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
@@ -28,11 +28,15 @@ const INITIAL_FORM_STATE = {
 export default function StoreInPage() {
   const { jobs } = useDevelopmentStore();
   const { approvals } = useAdminStore(); // <-- NEW: Fetch Admin approvals
-  const { storeInRecords, addStoreInRecord, updateStoreInRecord, deleteStoreInRecord } = useInventoryStore();
+  const { storeInRecords, addStoreInRecord, updateStoreInRecord, deleteStoreInRecord,fetchRecords } = useInventoryStore();;
 
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    fetchRecords();
+  }, []);
 
   // --- DYNAMIC DATA: Only show styles that are explicitly 'Approved' by Admin ---
   const approvedRecords = approvals.filter(a => a.status === 'Approved');

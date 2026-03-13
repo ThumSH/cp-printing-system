@@ -19,9 +19,14 @@ export default function DeliveryTrackerPage() {
   const { approvals } = useAdminStore();
   const { storeInRecords } = useInventoryStore();
   const { cpiReports } = useQCStore();
-  const { reports, addReport, updateReport, deleteReport } = useDeliveryTrackerStore();
+  const { reports, addReport, updateReport, deleteReport,fetchReports } = useDeliveryTrackerStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchReports();
+  }, []);
+
   
   // Header State
   const [styleNo, setStyleNo] = useState('');
