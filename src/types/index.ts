@@ -1,6 +1,8 @@
 // src/types/index.ts
 
-export type Role = 'Admin' | 'Developer' | 'QC' | 'Gatepass' | 'Worker' | 'Audit' | 'Stores';
+export const ROLES = ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores'] as const;
+
+export type Role = typeof ROLES[number];
 
 export interface User {
   id: string;

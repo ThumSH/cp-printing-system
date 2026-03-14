@@ -1,150 +1,250 @@
-import React, { useState, useEffect } from 'react';
-import { UserPlus, Shield, UserX, UserCheck } from 'lucide-react';
-import  apiClient  from '../../api/client';
+import { useEffect, useState } from 'react';
+import { ROLES, Role, User } from '../../types';
+import { getUsers, createUser, updateUser, deleteUser, resetPassword } from '../../services/services';
 
-const UserManagement = () => {
-  const [users, setUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [formData, setFormData] = useState({
-    username: '',
-    password: '',
-    name: '',
-    role: 'STORE' // Default role
-  });
+const emptyForm = {
+  id: '',
+  username: '',
+  password: '',
+  name: '',
+  role: 'Developer' as Role,
+};
 
-  // Fetch users on load
-  const fetchUsers = async () => {
+export default function UserManagementPage() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [passwordResetUserId, setPasswordResetUserId] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const loadUsers = async () => {
     try {
-      setIsLoading(true);
-      const response = await apiClient.get('/auth/users');
-      setUsers(response.data);
-    } catch (error) {
-      console.error("Error fetching users:", error);
+      setLoading(true);
+      const data = await getUsers();
+      setUsers(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load users');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchUsers();
+    loadUsers();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+
     try {
-      // POST the new user to the backend
-      await apiClient.post('/auth/register', formData);
-      setFormData({ username: '', password: '', name: '', role: 'STORE' }); // Reset form
-      fetchUsers(); // Refresh list
-      alert("User created successfully!");
-    } catch (error) {
-      alert("Failed to create user. Check if username exists.");
+      if (editingId) {
+        await updateUser(editingId, {
+          username: form.username,
+          name: form.name,
+          role: form.role,
+        });
+      } else {
+        await createUser({
+          username: form.username,
+          password: form.password,
+          name: form.name,
+          role: form.role,
+        });
+      }
+
+      setForm(emptyForm);
+      setEditingId(null);
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    }
+  };
+
+  const handleEdit = (user: User) => {
+    setForm({
+      id: user.id,
+      username: user.username,
+      password: '',
+      name: user.name,
+      role: user.role,
+    });
+    setEditingId(user.id);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this user?')) return;
+
+    try {
+      await deleteUser(id);
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    }
+  };
+
+  const handleResetPassword = async (id: string) => {
+    if (!newPassword.trim()) {
+      setError('Enter a new password first.');
+      return;
+    }
+
+    try {
+      await resetPassword(id, newPassword);
+      setPasswordResetUserId(null);
+      setNewPassword('');
+      alert('Password reset successfully.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Password reset failed');
     }
   };
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-800">User Management</h1>
-        <p className="text-gray-500">Create and manage access for your staff members.</p>
-      </header>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">User Management</h1>
+        <p className="text-sm text-slate-500">Create, update, and manage employee accounts.</p>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* --- CREATE USER FORM --- */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-fit">
-          <div className="flex items-center space-x-2 mb-4">
-            <UserPlus className="text-blue-600" size={20} />
-            <h2 className="font-bold text-gray-800">Add New User</h2>
-          </div>
-          
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-              <input
-                type="text"
-                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <input
-                type="text"
-                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-                value={formData.username}
-                onChange={(e) => setFormData({...formData, username: e.target.value.toLowerCase()})}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input
-                type="password"
-                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">System Role</label>
-              <select
-                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-                value={formData.role}
-                onChange={(e) => setFormData({...formData, role: e.target.value})}
-              >
-                <option value="STORE">STORE (Counter Staff)</option>
-                <option value="DEVELOPMENT">DEVELOPMENT (Printers)</option>
-                <option value="ADMIN">ADMIN (Full Access)</option>
-              </select>
-            </div>
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+
+      <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+        <h2 className="text-lg font-semibold mb-4">
+          {editingId ? 'Edit User' : 'Create User'}
+        </h2>
+
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input
+            type="text"
+            placeholder="Full name"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            className="border rounded-lg px-3 py-2"
+            required
+          />
+
+          <input
+            type="text"
+            placeholder="Username"
+            value={form.username}
+            onChange={(e) => setForm({ ...form, username: e.target.value })}
+            className="border rounded-lg px-3 py-2"
+            required
+          />
+
+          {!editingId && (
+            <input
+              type="password"
+              placeholder="Password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              className="border rounded-lg px-3 py-2"
+              required
+            />
+          )}
+
+          <select
+            value={form.role}
+            onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
+            className="border rounded-lg px-3 py-2"
+          >
+            {ROLES.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+
+          <div className="md:col-span-2 flex gap-3">
             <button
               type="submit"
-              className="w-full bg-blue-600 text-white py-2 rounded-md font-bold hover:bg-blue-700 transition-colors"
+              className="rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
             >
-              Create Account
+              {editingId ? 'Update User' : 'Create User'}
             </button>
-          </form>
-        </div>
 
-        {/* --- USER LIST TABLE --- */}
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-4 border-b border-gray-100 bg-gray-50 font-bold text-gray-800">
-            Registered Staff
+            {editingId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingId(null);
+                  setForm(emptyForm);
+                }}
+                className="rounded-lg border px-4 py-2"
+              >
+                Cancel
+              </button>
+            )}
           </div>
+        </form>
+      </div>
+
+      <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+        <h2 className="text-lg font-semibold mb-4">All Users</h2>
+
+        {loading ? (
+          <p className="text-sm text-slate-500">Loading users...</p>
+        ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="px-6 py-3">Staff Name</th>
-                  <th className="px-6 py-3">Username</th>
-                  <th className="px-6 py-3">Role</th>
-                  <th className="px-6 py-3">Status</th>
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-slate-600">
+                  <th className="py-3 pr-4">Name</th>
+                  <th className="py-3 pr-4">Username</th>
+                  <th className="py-3 pr-4">Role</th>
+                  <th className="py-3 pr-4">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {users.map((u: any) => (
-                  <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-gray-800">{u.name}</td>
-                    <td className="px-6 py-4 text-gray-500">@{u.username}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${
-                        u.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {u.role}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {u.isActive ? (
-                        <span className="flex items-center text-green-600 text-xs font-bold">
-                          <UserCheck size={14} className="mr-1" /> Active
-                        </span>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.id} className="border-b last:border-0">
+                    <td className="py-3 pr-4">{user.name}</td>
+                    <td className="py-3 pr-4">{user.username}</td>
+                    <td className="py-3 pr-4">{user.role}</td>
+                    <td className="py-3 pr-4 flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => handleEdit(user)}
+                        className="rounded-md border px-3 py-1 hover:bg-slate-50"
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        onClick={() => handleDelete(user.id)}
+                        className="rounded-md border border-red-200 text-red-600 px-3 py-1 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
+
+                      {passwordResetUserId === user.id ? (
+                        <div className="flex gap-2">
+                          <input
+                            type="password"
+                            placeholder="New password"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            className="border rounded px-2 py-1"
+                          />
+                          <button
+                            onClick={() => handleResetPassword(user.id)}
+                            className="rounded-md bg-amber-500 text-white px-3 py-1"
+                          >
+                            Save
+                          </button>
+                        </div>
                       ) : (
-                        <span className="flex items-center text-red-500 text-xs font-bold">
-                          <UserX size={14} className="mr-1" /> Inactive
-                        </span>
+                        <button
+                          onClick={() => setPasswordResetUserId(user.id)}
+                          className="rounded-md border border-amber-200 text-amber-700 px-3 py-1 hover:bg-amber-50"
+                        >
+                          Reset Password
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -152,10 +252,8 @@ const UserManagement = () => {
               </tbody>
             </table>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
-};
-
-export default UserManagement;
+}

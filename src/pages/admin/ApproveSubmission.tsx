@@ -1,9 +1,26 @@
 // src/pages/admin/ApproveSubmission.tsx
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ClipboardCheck, AlertCircle, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import {
+  ClipboardCheck,
+  Search,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  PackageCheck,
+  CalendarDays,
+  Palette,
+  Shirt,
+  Layers3,
+  FileImage,
+  User2,
+} from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
-import { useAdminStore, ApprovalStatus, ApprovalRecord } from '../../store/adminStore';
+import {
+  useAdminStore,
+  ApprovalStatus,
+  ApprovalRecord,
+} from '../../store/adminStore';
 
 const INITIAL_FORM_STATE = {
   status: 'Pending' as ApprovalStatus,
@@ -13,261 +30,596 @@ const INITIAL_FORM_STATE = {
   bulkOrderQty: '',
 };
 
+const badgeStyles: Record<ApprovalStatus, string> = {
+  Pending: 'bg-amber-50 text-amber-700 border-amber-200',
+  Approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  Rejected: 'bg-red-50 text-red-700 border-red-200',
+};
+
 export default function ApproveSubmission() {
-  const { submissions } = useDevelopmentStore();
-  const { approvals, processApproval, fetchApprovals } = useAdminStore();
-  
-  useEffect(() => {
-    fetchApprovals();
-  }, []);
+  const { jobs, submissions, fetchData } = useDevelopmentStore();
+  const { approvals, fetchApprovals, processApproval } = useAdminStore();
 
-
+  const [searchCustomer, setSearchCustomer] = useState('');
+  const [searchStyleNo, setSearchStyleNo] = useState('');
   const [selectedSubmissionId, setSelectedSubmissionId] = useState('');
-  const [autoFilledLevel, setAutoFilledLevel] = useState('');
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSaving, setIsSaving] = useState(false);
 
-  // --- DERIVED DATA FOR LISTS ---
-  // A submission is pending if it has no approval record, OR if its record is set to 'Pending'
-  const pendingSubmissions = submissions.filter(sub => {
-    const record = approvals.find(a => a.submissionId === sub.id);
-    return !record || record.status === 'Pending';
-  });
-
-  const rejectedStyles = approvals.filter(a => a.status === 'Rejected');
-
-  // --- AUTO-FILL LOGIC ---
   useEffect(() => {
-    if (selectedSubmissionId) {
-      const sub = submissions.find(s => s.id === selectedSubmissionId);
-      if (sub) {
-        setAutoFilledLevel(sub.level);
-        
-        // If the admin previously worked on this and saved it as pending/rejected, load that data
-        const existingRecord = approvals.find(a => a.submissionId === selectedSubmissionId);
-        if (existingRecord) {
-          setFormData({
-            status: existingRecord.status,
-            boardSet: existingRecord.boardSet || '',
-            approvalCard: existingRecord.approvalCard || '',
-            raMeetingDate: existingRecord.raMeetingDate || '',
-            bulkOrderQty: existingRecord.bulkOrderQty || '',
-          });
-        } else {
-          setFormData(INITIAL_FORM_STATE);
-        }
-      }
+    fetchData();
+    fetchApprovals();
+  }, [fetchData, fetchApprovals]);
+
+  const enrichedSubmissions = useMemo(() => {
+    return submissions.map((sub) => {
+      const matchingJob = jobs.find(
+        (job) =>
+          job.styleNo?.trim().toLowerCase() === sub.styleNo?.trim().toLowerCase() &&
+          job.customer?.trim().toLowerCase() === sub.customerName?.trim().toLowerCase()
+      );
+
+      const approval = approvals.find((a) => a.submissionId === sub.id);
+
+      return {
+        ...sub,
+        job: matchingJob || null,
+        approval: approval || null,
+        currentStatus: (approval?.status || 'Pending') as ApprovalStatus,
+      };
+    });
+  }, [submissions, jobs, approvals]);
+
+  const filteredSubmissions = useMemo(() => {
+    const customerFilter = searchCustomer.trim().toLowerCase();
+    const styleFilter = searchStyleNo.trim().toLowerCase();
+
+    return enrichedSubmissions.filter((sub) => {
+      const matchesCustomer = !customerFilter
+        ? true
+        : sub.customerName.toLowerCase().includes(customerFilter);
+
+      const matchesStyle = !styleFilter
+        ? true
+        : sub.styleNo.toLowerCase().includes(styleFilter);
+
+      return matchesCustomer && matchesStyle;
+    });
+  }, [enrichedSubmissions, searchCustomer, searchStyleNo]);
+
+  const selectedSubmission = useMemo(() => {
+    return enrichedSubmissions.find((sub) => sub.id === selectedSubmissionId) || null;
+  }, [enrichedSubmissions, selectedSubmissionId]);
+
+  useEffect(() => {
+    if (!selectedSubmission) {
+      setFormData(INITIAL_FORM_STATE);
+      return;
+    }
+
+    if (selectedSubmission.approval) {
+      setFormData({
+        status: selectedSubmission.approval.status,
+        boardSet: selectedSubmission.approval.boardSet || '',
+        approvalCard: selectedSubmission.approval.approvalCard || '',
+        raMeetingDate: selectedSubmission.approval.raMeetingDate || '',
+        bulkOrderQty: selectedSubmission.approval.bulkOrderQty || '',
+      });
     } else {
-      setAutoFilledLevel('');
       setFormData(INITIAL_FORM_STATE);
     }
-  }, [selectedSubmissionId, submissions, approvals]);
+  }, [selectedSubmission]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+
+    if (errors[name]) {
+      setErrors((prev) => ({
+        ...prev,
+        [name]: '',
+      }));
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchCustomer('');
+    setSearchStyleNo('');
   };
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-    if (!selectedSubmissionId) newErrors.submission = 'Please select a style to review';
-    
-    // Only enforce these rules if the admin is trying to mark it as Approved
+
+    if (!selectedSubmission) {
+      newErrors.submission = 'Please select a submitted style.';
+    }
+
     if (formData.status === 'Approved') {
-      if (!formData.boardSet.trim()) newErrors.boardSet = 'Board Set is required for approval';
-      if (!formData.approvalCard.trim()) newErrors.approvalCard = 'Approval Card is required';
-      if (!formData.raMeetingDate) newErrors.raMeetingDate = 'RA Meeting Date is required';
-      if (!formData.bulkOrderQty || isNaN(Number(formData.bulkOrderQty))) newErrors.bulkOrderQty = 'Valid Bulk QTY is required';
+      if (!formData.boardSet.trim()) {
+        newErrors.boardSet = 'Board Set is required for approval.';
+      }
+
+      if (!formData.approvalCard.trim()) {
+        newErrors.approvalCard = 'Approval Card is required for approval.';
+      }
+
+      if (!formData.raMeetingDate) {
+        newErrors.raMeetingDate = 'RA Meeting Date is required for approval.';
+      }
+
+      if (!formData.bulkOrderQty.trim() || isNaN(Number(formData.bulkOrderQty))) {
+        newErrors.bulkOrderQty = 'Valid Bulk Order Qty is required.';
+      }
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSaveDecision = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm()) return;
 
-    const sub = submissions.find(s => s.id === selectedSubmissionId);
-    if (!sub) return;
+    if (!validateForm() || !selectedSubmission) return;
+
+    setIsSaving(true);
 
     const newRecord: ApprovalRecord = {
-      id: Math.random().toString(36).substr(2, 9),
-      submissionId: sub.id,
-      styleNo: sub.styleNo,
-      customerName: sub.customerName,
-      level: sub.level,
+      id:
+        selectedSubmission.approval?.id ||
+        crypto.randomUUID(),
+      submissionId: selectedSubmission.id,
+      styleNo: selectedSubmission.styleNo,
+      customerName: selectedSubmission.customerName,
+      level: selectedSubmission.level,
       status: formData.status,
       reviewedAt: new Date().toISOString().split('T')[0],
       ...(formData.status === 'Approved' && {
-        boardSet: formData.boardSet,
-        approvalCard: formData.approvalCard,
+        boardSet: formData.boardSet.trim(),
+        approvalCard: formData.approvalCard.trim(),
         raMeetingDate: formData.raMeetingDate,
-        bulkOrderQty: formData.bulkOrderQty,
-      })
+        bulkOrderQty: formData.bulkOrderQty.trim(),
+      }),
     };
 
-    processApproval(newRecord);
-    
-    // Reset after processing
-    setSelectedSubmissionId('');
-    setFormData(INITIAL_FORM_STATE);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await processApproval(newRecord);
+    await fetchApprovals();
+    setIsSaving(false);
+  };
+
+  const renderStatusIcon = (status: ApprovalStatus) => {
+    if (status === 'Approved') return <CheckCircle2 className="h-4 w-4" />;
+    if (status === 'Rejected') return <XCircle className="h-4 w-4" />;
+    return <Clock className="h-4 w-4" />;
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12">
-      
+    <div className="space-y-8">
       {/* HEADER */}
-      <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
-        <div className="p-2 bg-purple-100 rounded-lg"><ClipboardCheck className="w-6 h-6 text-purple-700" /></div>
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Approve Submissions</h2>
-          <p className="text-slate-500 text-sm">Review development samples, assign status, and unlock production fields.</p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="rounded-2xl bg-blue-50 p-3">
+            <ClipboardCheck className="h-7 w-7 text-blue-600" />
+          </div>
+
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Approve Submissions</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Search by customer or style number, review the full submitted style,
+              then approve, keep pending, or reject.
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* APPROVAL WORKFLOW FORM */}
-      <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
-        <h3 className="text-lg font-semibold text-slate-800 mb-6">Decision Panel</h3>
+      {/* SEARCH PANEL */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center gap-2">
+          <Search className="h-5 w-5 text-slate-500" />
+          <h2 className="text-lg font-semibold text-slate-900">Search Submitted Styles</h2>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 p-6 rounded-lg border border-slate-100">
-            
-            {/* Style Dropdown (Only shows pending items to keep the list clean) */}
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">Select Style No (Pending) <span className="text-red-500">*</span></label>
-              <select
-                value={selectedSubmissionId}
-                onChange={(e) => setSelectedSubmissionId(e.target.value)}
-                className={`w-full px-3 py-2 border rounded-lg outline-none sm:text-sm bg-white ${errors.submission ? 'border-red-400' : 'border-slate-300 focus:ring-2 focus:ring-purple-600'}`}
-              >
-                <option value="">-- Choose Style --</option>
-                {pendingSubmissions.map(sub => (
-                  <option key={sub.id} value={sub.id}>{sub.styleNo} ({sub.customerName})</option>
-                ))}
-              </select>
-              {errors.submission && <p className="text-[11px] text-red-600 mt-1"><AlertCircle className="w-3 h-3 inline mr-1" />{errors.submission}</p>}
-            </div>
-
-            {/* Auto-filled Level (Disabled) */}
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">Submission Level</label>
-              <input
-                type="text"
-                value={autoFilledLevel}
-                readOnly
-                placeholder="Auto-fills on selection..."
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none sm:text-sm bg-slate-100 text-slate-500 cursor-not-allowed"
-              />
-            </div>
-
-            {/* Manual Status Control */}
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">Update Status <span className="text-red-500">*</span></label>
-              <select
-                name="status"
-                value={formData.status}
-                onChange={handleInputChange}
-                disabled={!selectedSubmissionId}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none sm:text-sm bg-white focus:ring-2 focus:ring-purple-600 disabled:opacity-50"
-              >
-                <option value="Pending">Pending (Hold)</option>
-                <option value="Approved">Approved (Proceed to Bulk)</option>
-                <option value="Rejected">Rejected (Requires Revision)</option>
-              </select>
-            </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Customer
+            </label>
+            <input
+              type="text"
+              value={searchCustomer}
+              onChange={(e) => setSearchCustomer(e.target.value)}
+              placeholder="Search by customer"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+            />
           </div>
 
-          {/* CONDITIONAL FIELDS: Only expand if Approved */}
-          <AnimatePresence>
-            {formData.status === 'Approved' && (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Style No
+            </label>
+            <input
+              type="text"
+              value={searchStyleNo}
+              onChange={(e) => setSearchStyleNo(e.target.value)}
+              placeholder="Search by style number"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={clearSearch}
+              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Clear Search
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* MAIN REVIEW GRID */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        {/* LEFT: RESULT LIST */}
+        <div className="xl:col-span-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Matching Submissions</h2>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                {filteredSubmissions.length} found
+              </span>
+            </div>
+
+            <div className="space-y-3 max-h-[700px] overflow-y-auto pr-1">
+              {filteredSubmissions.length > 0 ? (
+                filteredSubmissions.map((sub) => {
+                  const isSelected = selectedSubmissionId === sub.id;
+
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => setSelectedSubmissionId(sub.id)}
+                      className={`w-full rounded-xl border p-4 text-left transition ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{sub.styleNo}</p>
+                          <p className="mt-1 text-sm text-slate-600">{sub.customerName}</p>
+                        </div>
+
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${badgeStyles[sub.currentStatus]}`}
+                        >
+                          {renderStatusIcon(sub.currentStatus)}
+                          {sub.currentStatus}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
+                        <span>Level: {sub.level || '-'}</span>
+                        <span>Date: {sub.submissionDate || '-'}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                  No submissions match the current filters.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: DETAILS + DECISION */}
+        <div className="xl:col-span-8">
+          <AnimatePresence mode="wait">
+            {selectedSubmission ? (
               <motion.div
-                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-4 border-t border-slate-200 overflow-hidden"
+                key={selectedSubmission.id}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -14 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-6"
               >
-                {[
-                  { label: 'Board Set', name: 'boardSet', type: 'text', placeholder: 'e.g. BS-102' },
-                  { label: 'Approval Card', name: 'approvalCard', type: 'text', placeholder: 'e.g. AC-993' },
-                  { label: 'RA Meeting Date', name: 'raMeetingDate', type: 'date' },
-                  { label: 'Bulk Order QTY', name: 'bulkOrderQty', type: 'number', placeholder: 'e.g. 5000' },
-                ].map((field) => (
-                  <div key={field.name} className="space-y-1">
-                    <label className="block text-sm font-medium text-slate-700">{field.label} <span className="text-red-500">*</span></label>
-                    <input
-                      type={field.type}
-                      name={field.name}
-                      value={(formData as any)[field.name]}
-                      onChange={handleInputChange}
-                      placeholder={field.placeholder}
-                      className={`w-full px-3 py-2 border rounded-lg outline-none sm:text-sm ${errors[field.name] ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-purple-600'}`}
-                    />
-                    {errors[field.name] && <p className="text-[11px] text-red-600 mt-1"><AlertCircle className="w-3 h-3 inline mr-1" />{errors[field.name]}</p>}
+                {/* SUBMISSION SUMMARY */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900">
+                        {selectedSubmission.styleNo}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {selectedSubmission.customerName}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium ${badgeStyles[selectedSubmission.currentStatus]}`}
+                    >
+                      {renderStatusIcon(selectedSubmission.currentStatus)}
+                      {selectedSubmission.currentStatus}
+                    </span>
                   </div>
-                ))}
+
+                  <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <InfoCard icon={Layers3} label="Submission Level" value={selectedSubmission.level || '-'} />
+                    <InfoCard icon={CalendarDays} label="Submission Date" value={selectedSubmission.submissionDate || '-'} />
+                    <InfoCard icon={User2} label="Comment" value={selectedSubmission.comment || '-'} />
+                  </div>
+                </div>
+
+                {/* FULL STYLE DETAILS */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="mb-5 flex items-center gap-2">
+                    <PackageCheck className="h-5 w-5 text-slate-500" />
+                    <h3 className="text-lg font-semibold text-slate-900">Full Style Details</h3>
+                  </div>
+
+                  {selectedSubmission.job ? (
+                    <>
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <InfoCard icon={User2} label="Customer" value={selectedSubmission.job.customer || '-'} />
+                        <InfoCard icon={Shirt} label="Style No" value={selectedSubmission.job.styleNo || '-'} />
+                        <InfoCard icon={Layers3} label="Season" value={selectedSubmission.job.season || '-'} />
+                        <InfoCard icon={Palette} label="Printing Technique" value={selectedSubmission.job.printingTechnique || '-'} />
+                        <InfoCard icon={Palette} label="Washing Standard" value={selectedSubmission.job.washingStandard || '-'} />
+                        <InfoCard icon={Palette} label="Body Colour" value={selectedSubmission.job.bodyColour || '-'} />
+                        <InfoCard icon={Palette} label="Print Colour" value={selectedSubmission.job.printColour || '-'} />
+                        <InfoCard icon={Layers3} label="Print Colour Qty" value={selectedSubmission.job.printColourQty || '-'} />
+                        <InfoCard icon={CalendarDays} label="Sample Ordered Date" value={selectedSubmission.job.sampleOrderedDate || '-'} />
+                        <InfoCard icon={CalendarDays} label="Sample Delivery Date" value={selectedSubmission.job.sampleDeliveryDate || '-'} />
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <p className="mb-2 text-sm font-semibold text-slate-800">Placements</p>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedSubmission.job.placements?.length ? (
+                              selectedSubmission.job.placements.map((placement) => (
+                                <span
+                                  key={placement}
+                                  className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                                >
+                                  {placement}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-sm text-slate-500">No placements available</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <div className="mb-2 flex items-center gap-2">
+                            <FileImage className="h-4 w-4 text-slate-500" />
+                            <p className="text-sm font-semibold text-slate-800">Artwork</p>
+                          </div>
+
+                          <p className="text-sm text-slate-600">
+                            File: {selectedSubmission.job.artworkFileName || 'No file name'}
+                          </p>
+
+                          {selectedSubmission.job.artworkPreviewUrl ? (
+                            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <img
+                                src={selectedSubmission.job.artworkPreviewUrl}
+                                alt={selectedSubmission.job.artworkFileName || 'Artwork Preview'}
+                                className="max-h-72 w-full rounded-lg object-contain"
+                              />
+                            </div>
+                          ) : (
+                            <div className="mt-3 rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                              No artwork preview available
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                      Matching development job details were not found for this submission.
+                      Make sure the submission style number and customer match the saved job.
+                    </div>
+                  )}
+                </div>
+
+                {/* DECISION PANEL */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="mb-5 flex items-center gap-2">
+                    <ClipboardCheck className="h-5 w-5 text-slate-500" />
+                    <h3 className="text-lg font-semibold text-slate-900">Admin Decision</h3>
+                  </div>
+
+                  {errors.submission && (
+                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                      {errors.submission}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveDecision} className="space-y-5">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">
+                        Status
+                      </label>
+                      <select
+                        name="status"
+                        value={formData.status}
+                        onChange={handleInputChange}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="Pending">Pending</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                    </div>
+
+                    <AnimatePresence>
+                      {formData.status === 'Approved' && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="grid grid-cols-1 gap-4 md:grid-cols-2"
+                        >
+                          <Field
+                            label="Board Set"
+                            name="boardSet"
+                            value={formData.boardSet}
+                            onChange={handleInputChange}
+                            error={errors.boardSet}
+                            placeholder="e.g. BS-102"
+                          />
+
+                          <Field
+                            label="Approval Card"
+                            name="approvalCard"
+                            value={formData.approvalCard}
+                            onChange={handleInputChange}
+                            error={errors.approvalCard}
+                            placeholder="e.g. AC-993"
+                          />
+
+                          <Field
+                            label="RA Meeting Date"
+                            name="raMeetingDate"
+                            value={formData.raMeetingDate}
+                            onChange={handleInputChange}
+                            error={errors.raMeetingDate}
+                            type="date"
+                          />
+
+                          <Field
+                            label="Bulk Order Qty"
+                            name="bulkOrderQty"
+                            value={formData.bulkOrderQty}
+                            onChange={handleInputChange}
+                            error={errors.bulkOrderQty}
+                            type="number"
+                            placeholder="e.g. 5000"
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {isSaving ? 'Saving...' : 'Save Decision'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSubmissionId('');
+                          setFormData(INITIAL_FORM_STATE);
+                          setErrors({});
+                        }}
+                        className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Clear Selection
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="empty-state"
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -14 }}
+                className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm"
+              >
+                <ClipboardCheck className="mx-auto h-10 w-10 text-slate-400" />
+                <h3 className="mt-4 text-lg font-semibold text-slate-900">
+                  Select a submitted style
+                </h3>
+                <p className="mt-2 text-sm text-slate-500">
+                  Search by customer or style number, then choose a submission to review
+                  all details and make the admin decision.
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
-
-          <div className="flex justify-end pt-4">
-            <button
-              type="submit"
-              disabled={!selectedSubmissionId}
-              className={`px-6 py-2 text-white rounded-lg font-medium flex items-center shadow-sm transition-colors ${
-                formData.status === 'Approved' ? 'bg-emerald-600 hover:bg-emerald-700' : 
-                formData.status === 'Rejected' ? 'bg-red-600 hover:bg-red-700' : 
-                'bg-slate-600 hover:bg-slate-700'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              <CheckCircle2 className="w-4 h-4 mr-2" /> Save Decision
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* STATUS LISTS SPLIT VIEW */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
-        
-        {/* PENDING LIST */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 flex items-center"><Clock className="w-4 h-4 mr-2 text-slate-500" /> Pending Review</h3>
-            <span className="bg-slate-200 text-slate-700 text-xs font-bold px-2 py-0.5 rounded-full">{pendingSubmissions.length}</span>
-          </div>
-          <ul className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
-            {pendingSubmissions.length > 0 ? pendingSubmissions.map(sub => (
-              <li key={sub.id} className="p-4 hover:bg-slate-50 transition-colors">
-                <p className="font-bold text-slate-900">{sub.styleNo}</p>
-                <div className="flex justify-between text-xs text-slate-500 mt-1">
-                  <span>{sub.customerName}</span>
-                  <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{sub.level}</span>
-                </div>
-              </li>
-            )) : <li className="p-6 text-center text-slate-500 text-sm">No pending submissions.</li>}
-          </ul>
         </div>
-
-        {/* REJECTED LIST */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-200 bg-red-50 flex items-center justify-between">
-            <h3 className="font-semibold text-red-800 flex items-center"><XCircle className="w-4 h-4 mr-2 text-red-500" /> Rejected Styles</h3>
-            <span className="bg-red-200 text-red-800 text-xs font-bold px-2 py-0.5 rounded-full">{rejectedStyles.length}</span>
-          </div>
-          <ul className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
-            {rejectedStyles.length > 0 ? rejectedStyles.map(rej => (
-              <li key={rej.id} className="p-4 hover:bg-red-50/50 transition-colors">
-                <p className="font-bold text-slate-900 line-through decoration-red-400">{rej.styleNo}</p>
-                <div className="flex justify-between text-xs text-slate-500 mt-1">
-                  <span>{rej.customerName}</span>
-                  <span className="text-red-600 font-medium">Reviewed: {rej.reviewedAt}</span>
-                </div>
-              </li>
-            )) : <li className="p-6 text-center text-slate-500 text-sm">No rejected styles currently.</li>}
-          </ul>
-        </div>
-
       </div>
-    </motion.div>
+    </div>
+  );
+}
+
+function InfoCard({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <Icon className="h-4 w-4 text-slate-500" />
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+      </div>
+      <p className="text-sm font-semibold text-slate-900 break-words">{value || '-'}</p>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  name,
+  value,
+  onChange,
+  error,
+  type = 'text',
+  placeholder,
+}: {
+  label: string;
+  name: string;
+  value: string;
+  onChange: (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => void;
+  error?: string;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium text-slate-700">
+        {label}
+      </label>
+      <input
+        type={type}
+        name={name}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none ${
+          error
+            ? 'border-red-400 focus:ring-2 focus:ring-red-400'
+            : 'border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500'
+        }`}
+      />
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
   );
 }

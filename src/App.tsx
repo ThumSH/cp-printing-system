@@ -1,4 +1,3 @@
-// src/App.tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import MainLayout from './layouts/MainLayout';
@@ -15,15 +14,43 @@ import StoreProductionPage from './pages/inventory/StoreProductionPage';
 import AdviceNotePage from './pages/gatepass/AdviceNotePage';
 import AuditPage from './pages/audit/AuditPage';
 import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
-// --- The Gatekeeper Component ---
-// This prevents unauthorized access to the main application
+import UserManagementPage from './pages/admin/UserManagement';
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
   if (!isAuthenticated) {
-    // If they aren't logged in, instantly redirect them to the login page
-    // 'replace' prevents them from hitting the "back" button to return to a protected page
     return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+const PublicRoute = ({ children }: { children: React.ReactNode }) => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+const RoleRoute = ({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles: string[];
+}) => {
+  const user = useAuthStore((state) => state.user);
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!allowedRoles.includes(user.role)) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
@@ -33,10 +60,15 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 1. Public Route */}
-        <Route path="/login" element={<Login />} />
+        <Route
+          path="/login"
+          element={
+            <PublicRoute>
+              <Login />
+            </PublicRoute>
+          }
+        />
 
-        {/* 2. Protected Application Routes */}
         <Route
           path="/"
           element={
@@ -45,47 +77,151 @@ function App() {
             </ProtectedRoute>
           }
         >
-          {/* These render INSIDE the MainLayout's <Outlet /> */}
           <Route index element={<Dashboard />} />
+
           <Route path="development">
-            <Route index element={<DevelopmentPage />} />
-            <Route path="submit" element={<DevelopmentSubmission />} />
-            <Route path="search" element={<SubmissionSearch />} />
+            <Route
+              index
+              element={
+                <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                  <DevelopmentPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="submit"
+              element={
+                <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                  <DevelopmentSubmission />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="search"
+              element={
+                <RoleRoute allowedRoles={['Developer', 'Admin', 'QC']}>
+                  <SubmissionSearch />
+                </RoleRoute>
+              }
+            />
           </Route>
-          
+
           <Route path="admin">
-            <Route path="approve" element={<ApproveSubmission />} />
-            <Route path="search" element={<ApprovalSearch />} />
-          </Route>
+            <Route
+              path="approve"
+              element={
+                <RoleRoute allowedRoles={['Admin']}>
+                  <ApproveSubmission />
+                </RoleRoute>
+              }
+            />       
 
-         <Route path="inventory">
-            <Route index element={<StoreInPage />} />
-            <Route path="in" element={<StoreInPage />} />
-            <Route path="production" element={<StoreProductionPage />} /> 
-          </Route>
+          <Route
+            path="users"
+            element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <UserManagementPage />
+              </RoleRoute>
+            }
+          />
           
-          <Route path="qc">
-            <Route index element={<CPIPage />} />
-            <Route path="cpi" element={<CPIPage />} />
-            <Route path="delivery-tracker" element={<DeliveryTrackerPage />} />
+            <Route
+              path="search"
+              element={
+                <RoleRoute allowedRoles={['Admin']}>
+                  <ApprovalSearch />
+                </RoleRoute>
+              }
+            />
           </Route>
 
-          <Route path="audit">
-            <Route index element={<AuditPage />} />
+          <Route path="inventory">
+            <Route
+              index
+              element={
+                <RoleRoute allowedRoles={['Stores', 'Admin']}>
+                  <StoreInPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="in"
+              element={
+                <RoleRoute allowedRoles={['Stores', 'Admin']}>
+                  <StoreInPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="production"
+              element={
+                <RoleRoute allowedRoles={['Stores', 'Admin']}>
+                  <StoreProductionPage />
+                </RoleRoute>
+              }
+            />
           </Route>
+
+          <Route path="qc">
+            <Route
+              index
+              element={
+                <RoleRoute allowedRoles={['QC', 'Admin']}>
+                  <CPIPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="cpi"
+              element={
+                <RoleRoute allowedRoles={['QC', 'Admin']}>
+                  <CPIPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="delivery-tracker"
+              element={
+                <RoleRoute allowedRoles={['QC', 'Admin']}>
+                  <DeliveryTrackerPage />
+                </RoleRoute>
+              }
+            />
+          </Route>
+
+          <Route
+            path="audit"
+            element={
+              <RoleRoute allowedRoles={['Audit', 'Admin']}>
+                <AuditPage />
+              </RoleRoute>
+            }
+          />
 
           <Route path="gatepass">
-            <Route index element={<AdviceNotePage />} />
-            <Route path="advicenote" element={<AdviceNotePage />} />
+            <Route
+              index
+              element={
+                <RoleRoute allowedRoles={['Gatepass', 'Admin']}>
+                  <AdviceNotePage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="advicenote"
+              element={
+                <RoleRoute allowedRoles={['Gatepass', 'Admin']}>
+                  <AdviceNotePage />
+                </RoleRoute>
+              }
+            />
           </Route>
-          
+
           <Route path="orders" element={<div className="p-4">Orders Page Coming Soon</div>} />
           <Route path="customers" element={<div className="p-4">Customers Page Coming Soon</div>} />
-          <Route path="inventory" element={<div className="p-4">Inventory Page Coming Soon</div>} />
           <Route path="settings" element={<div className="p-4">Settings Page Coming Soon</div>} />
         </Route>
 
-        {/* 3. Catch-all: If user types a random URL, send them to the dashboard (or login if caught by gatekeeper) */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

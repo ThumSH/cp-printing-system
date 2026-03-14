@@ -35,126 +35,109 @@ export default function MainLayout() {
 
   // Master list of all possible routes and the roles that can access them
  const ALL_NAV_ITEMS: NavItem[] = [
-    { 
-      name: 'Dashboard', 
-      href: '/', 
-      icon: LayoutDashboard, 
-      roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Worker', 'Audit', 'Stores'] 
-    },
-    // --- NEW DEVELOPMENT MODULE ROUTES ---
-    { 
-      name: 'Development', 
-      href: '/development', 
-      icon: Code, 
-      roles: ['Admin', 'Developer'] 
-    },
-    { 
-      name: 'Submit to QC', 
-      href: '/development/submit', 
-      icon: Send, 
-      roles: ['Admin', 'Developer'] 
-    },
-    { 
-      name: 'Search Submissions', 
-      href: '/development/search', 
-      icon: Search, 
-      roles: ['Admin', 'Developer'] 
-    },
-    // --- REST OF THE ROUTES ---
-    { 
-      name: 'Orders', 
-      href: '/orders', 
-      icon: ShoppingCart, 
-      roles: ['Admin', 'Worker', 'QC'] // Removed 'Developer' from here to keep their view clean
-    },
-    { 
-      name: 'Quality Control', 
-      href: '/qc', 
-      icon: CheckSquare, 
-      roles: ['Admin', 'QC'] 
-    },
-   { 
-      name: 'Advice Note (Gatepass)', 
-      href: '/gatepass', 
-      icon: Truck, // Or FileText, whichever you prefer!
-      roles: ['Admin', 'Gatepass'] 
-    },
-    { 
-      name: 'Inventory (Stores)', 
-      href: '/inventory', 
-      icon: Package, 
-      roles: ['Admin', 'Stores'] 
-    },
-    { 
-      name: 'Customers', 
-      href: '/customers', 
-      icon: Users, 
-      roles: ['Admin', 'Audit'] 
-    },
-    { 
-      name: 'Audit Reports', 
-      href: '/audit', 
-      icon: FileText, 
-      roles: ['Admin', 'Audit'] 
-    },
-    { 
-      name: 'Settings', 
-      href: '/settings', 
-      icon: Settings, 
-      roles: ['Admin'] 
-    },
-
-    { 
-      name: 'Approve Submissions', 
-      href: '/admin/approve', 
-      icon: ClipboardCheck, 
-      roles: ['Admin'] 
-    },
-    { 
-      name: 'Approval Search', 
-      href: '/admin/search', 
-      icon: Search, // You can reuse Search here
-      roles: ['Admin'] 
-    },
-    { 
-      name: 'Store In (Receiving)', 
-      href: '/inventory/in', 
-      icon: PackageOpen, // Import PackageOpen from lucide-react
-      roles: ['Admin', 'Stores'] 
-    },
-    { 
-      name: 'QC Inspection (C.P.I)', 
-      href: '/qc/cpi', 
-      icon: ClipboardList, 
-      roles: ['Admin', 'QC'] 
-    },
-    { 
-      
-      name: 'Delivery Tracker', 
-      href: '/qc/delivery-tracker', 
-      icon: LayoutDashboard, 
-      roles: ['Admin', 'QC'] 
-    },
-    { 
-
-      name: 'Issue to Production', 
-      href: '/inventory/production', 
-      icon: Factory, 
-      roles: ['Admin', 'Stores'] 
-    },
-    { 
-      name: 'Advice Note (Dispatch)', 
-      href: '/inventory/advicenote', 
-      icon: FileText, 
-      roles: ['Admin', 'Stores'] 
-    },
-    { 
-      name: 'Audit Reports', 
-      href: '/audit', 
-      icon: ClipboardCheck, 
-      roles: ['Admin', 'Audit'] 
-    },
-  ];
+  {
+    name: 'Dashboard',
+    href: '/',
+    icon: LayoutDashboard,
+    roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores']
+  },
+  {
+    name: 'Development',
+    href: '/development',
+    icon: Code,
+    roles: ['Admin', 'Developer']
+  },
+  {
+    name: 'Submit to QC',
+    href: '/development/submit',
+    icon: Send,
+    roles: ['Admin', 'Developer']
+  },
+  {
+    name: 'Search Submissions',
+    href: '/development/search',
+    icon: Search,
+    roles: ['Admin', 'Developer']
+  },
+  {
+    name: 'Approve Submissions',
+    href: '/admin/approve',
+    icon: ClipboardCheck,
+    roles: ['Admin']
+  },
+  {
+    name: 'Approval Search',
+    href: '/admin/search',
+    icon: Search,
+    roles: ['Admin']
+  },
+  {
+    name: 'Inventory (Stores)',
+    href: '/inventory',
+    icon: Package,
+    roles: ['Admin', 'Stores']
+  },
+  {
+    name: 'Store In (Receiving)',
+    href: '/inventory/in',
+    icon: PackageOpen,
+    roles: ['Admin', 'Stores']
+  },
+  {
+    name: 'Issue to Production',
+    href: '/inventory/production',
+    icon: Factory,
+    roles: ['Admin', 'Stores']
+  },
+  {
+    name: 'Quality Control',
+    href: '/qc',
+    icon: CheckSquare,
+    roles: ['Admin', 'QC']
+  },
+  {
+    name: 'QC Inspection (C.P.I)',
+    href: '/qc/cpi',
+    icon: ClipboardList,
+    roles: ['Admin', 'QC']
+  },
+  {
+    name: 'Delivery Tracker',
+    href: '/qc/delivery-tracker',
+    icon: LayoutDashboard,
+    roles: ['Admin', 'QC']
+  },
+  {
+    name: 'Advice Note (Gatepass)',
+    href: '/gatepass',
+    icon: Truck,
+    roles: ['Admin', 'Gatepass']
+  },
+  {
+    name: 'Advice Note (Dispatch)',
+    href: '/gatepass/advicenote',
+    icon: FileText,
+    roles: ['Admin', 'Gatepass']
+  },
+  {
+    name: 'Audit Reports',
+    href: '/audit',
+    icon: FileText,
+    roles: ['Admin', 'Audit']
+  },
+  {
+    name: 'Settings',
+    href: '/settings',
+    icon: Settings,
+    roles: ['Admin']
+  },
+  {
+  name: 'User Management',
+  href: '/admin/users',
+  icon: Users,
+  roles: ['Admin']
+}
+];
 
   // Filter the navigation items so the user only sees what their role allows
   const authorizedNavigation = ALL_NAV_ITEMS.filter(

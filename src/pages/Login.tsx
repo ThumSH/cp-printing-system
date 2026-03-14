@@ -1,5 +1,4 @@
-// src/pages/Login.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Lock, ShieldCheck, Sparkles, User as UserIcon } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
@@ -9,39 +8,44 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  
+  const [isLoading, setIsLoading] = useState(false);
+
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/');
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
-    // Await the real API call from our updated store
     const success = await login(username, password);
 
     if (success) {
-      navigate('/'); // Redirect to the dashboard
+      navigate('/');
     } else {
-      setError('Invalid username or password. Please try again.');
+      setError('Login failed. Check your credentials or backend connection.');
     }
+
+    setIsLoading(false);
   };
 
   return (
     <div className="min-h-screen flex bg-slate-50">
-      {/* Left Side - Branding (White-Blue Shades Blend) */}
       <div className="hidden lg:flex lg:w-1/2 bg-linear-to-br from-white via-sky-50 to-blue-200 items-center justify-center p-12 relative overflow-hidden">
-        
-        {/* Adjusted the glow to a soft blue so it shows up on the white background */}
         <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_center,var(--tw-gradient-stops))] from-blue-300/40 via-transparent to-transparent"></div>
-        
+
         <div className="z-10 text-center flex flex-col items-center">
-          
-          {/* Image Option inside a beautiful frosted glass frame */}
           <div className="mb-8 p-6 bg-white/40 backdrop-blur-md rounded-3xl border border-white/60 shadow-xl">
-            <img 
-              src="/logo.svg" /* <-- Replace with your actual logo path like "/StoreLogo.png" */
-              alt="Colourplus Logo" 
+            <img
+              src="/logo.svg"
+              alt="Colourplus Logo"
               className="w-48 h-48 object-contain drop-shadow-md"
             />
           </div>
@@ -51,8 +55,16 @@ export default function Login() {
           </p>
 
           <div className="mt-8 grid grid-cols-2 gap-3 text-left w-full max-w-md">
-            {['Production-ready workflows', 'Real-time inventory visibility', 'Quality-control tracking', 'Audit-friendly records'].map((feature) => (
-              <div key={feature} className="flex items-start gap-2 rounded-xl bg-white/60 px-3 py-2 border border-white/70 shadow-sm">
+            {[
+              'Production-ready workflows',
+              'Real-time inventory visibility',
+              'Quality-control tracking',
+              'Audit-friendly records',
+            ].map((feature) => (
+              <div
+                key={feature}
+                className="flex items-start gap-2 rounded-xl bg-white/60 px-3 py-2 border border-white/70 shadow-sm"
+              >
                 <Sparkles className="h-4 w-4 text-blue-600 mt-0.5" />
                 <span className="text-xs text-blue-950 font-medium leading-5">{feature}</span>
               </div>
@@ -61,7 +73,6 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Right Side - Login Form */}
       <div className="flex-1 flex items-center justify-center p-8 bg-linear-to-b from-slate-50 to-sky-50/40">
         <div className="w-full max-w-md space-y-8 bg-white/95 backdrop-blur-sm p-10 rounded-2xl shadow-xl border border-slate-100">
           <div className="text-center">
@@ -89,9 +100,10 @@ export default function Login() {
                   <input
                     type="text"
                     required
+                    disabled={isLoading}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors disabled:bg-slate-100 disabled:cursor-not-allowed"
                     placeholder="Enter your username"
                   />
                 </div>
@@ -106,9 +118,10 @@ export default function Login() {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
+                    disabled={isLoading}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full pl-10 pr-11 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                    className="block w-full pl-10 pr-11 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors disabled:bg-slate-100 disabled:cursor-not-allowed"
                     placeholder="••••••••"
                   />
                   <button
@@ -123,17 +136,17 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Button updated to a pure blue gradient to match the new left side */}
             <button
               type="submit"
-              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-linear-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+              disabled={isLoading}
+              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-linear-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              Sign in securely
+              {isLoading ? 'Signing in...' : 'Sign in securely'}
             </button>
           </form>
-          
+
           <div className="mt-6 text-xs text-center text-slate-400">
-            For development: Try username 'admin' or 'worker' with password '123'.
+            Use your assigned system credentials to sign in.
           </div>
         </div>
       </div>
