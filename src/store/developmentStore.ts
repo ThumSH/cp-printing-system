@@ -1,7 +1,6 @@
 // src/store/developmentStore.ts
 import { create } from 'zustand';
 
-// 1. Job Interface (Workspace)
 export interface DevelopmentJob {
   id: string;
   customer: string;
@@ -19,7 +18,6 @@ export interface DevelopmentJob {
   placements: string[];
 }
 
-// 2. Submission Interface (Approvals)
 export interface SubmissionForm {
   id: string;
   styleNo: string;
@@ -27,73 +25,119 @@ export interface SubmissionForm {
   submissionDate: string;
   level: string;
   comment: string;
+  revisionNo: number;
+  isLatestRevision: boolean;
 }
 
 interface DevelopmentStore {
   jobs: DevelopmentJob[];
   submissions: SubmissionForm[];
-  
-  // Async actions
   fetchData: () => Promise<void>;
   addJob: (job: DevelopmentJob) => Promise<void>;
   updateJob: (id: string, updatedJob: DevelopmentJob) => Promise<void>;
   deleteJob: (id: string) => Promise<void>;
-  
-  addSubmission: (sub: SubmissionForm) => Promise<void>;
+  addSubmission: (
+    sub: Omit<SubmissionForm, 'id' | 'revisionNo' | 'isLatestRevision'>
+  ) => Promise<void>;
   updateSubmission: (id: string, updatedSub: SubmissionForm) => Promise<void>;
   deleteSubmission: (id: string) => Promise<void>;
 }
 
-// Configuration for your LAN API
-const API_URL = 'http://localhost:5000/api/development'; // Change to your Server's IP later
+const API_URL = 'http://localhost:5000/api/development';
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
-  'Authorization': `Bearer ${localStorage.getItem('token')}` // Grab the JWT token
+  Authorization: `Bearer ${localStorage.getItem('token')}`,
 });
+
+const getSubmissionKey = (sub: Pick<SubmissionForm, 'styleNo' | 'customerName'>) =>
+  `${sub.styleNo.trim().toLowerCase()}__${sub.customerName.trim().toLowerCase()}`;
+
+const normalizeSubmissions = (submissions: SubmissionForm[]): SubmissionForm[] => {
+  const grouped = new Map<string, SubmissionForm[]>();
+
+  submissions.forEach((sub) => {
+    const key = getSubmissionKey(sub);
+    const arr = grouped.get(key) || [];
+    arr.push(sub);
+    grouped.set(key, arr);
+  });
+
+  const normalized: SubmissionForm[] = [];
+
+  grouped.forEach((group) => {
+    const sorted = [...group].sort((a, b) => {
+      const dateDiff =
+        new Date(a.submissionDate).getTime() - new Date(b.submissionDate).getTime();
+
+      if (dateDiff !== 0) return dateDiff;
+
+      return a.id.localeCompare(b.id);
+    });
+
+    sorted.forEach((sub, index) => {
+      normalized.push({
+        ...sub,
+        revisionNo: index + 1,
+        isLatestRevision: index === sorted.length - 1,
+      });
+    });
+  });
+
+  return normalized.sort((a, b) => {
+    const bTime = new Date(b.submissionDate).getTime();
+    const aTime = new Date(a.submissionDate).getTime();
+
+    if (bTime !== aTime) return bTime - aTime;
+    return b.revisionNo - a.revisionNo;
+  });
+};
 
 export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
   jobs: [],
   submissions: [],
 
-  // --- NEW: Fetch Initial Data ---
   fetchData: async () => {
     try {
       const [jobsRes, subsRes] = await Promise.all([
         fetch(`${API_URL}/jobs`, { headers: getHeaders() }),
-        fetch(`${API_URL}/submissions`, { headers: getHeaders() })
+        fetch(`${API_URL}/submissions`, { headers: getHeaders() }),
       ]);
-      
+
       if (jobsRes.ok && subsRes.ok) {
-        set({ 
-          jobs: await jobsRes.json(), 
-          submissions: await subsRes.json() 
+        const jobs = await jobsRes.json();
+        const submissions = await subsRes.json();
+
+        set({
+          jobs,
+          submissions: normalizeSubmissions(submissions),
         });
       }
     } catch (error) {
-      console.error("Failed to fetch development data:", error);
+      console.error('Failed to fetch development data:', error);
     }
   },
 
-  // --- Jobs Implementation ---
   addJob: async (job) => {
     const res = await fetch(`${API_URL}/jobs`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify(job)
+      body: JSON.stringify(job),
     });
+
     if (res.ok) {
       const savedJob = await res.json();
       set((state) => ({ jobs: [savedJob, ...state.jobs] }));
     }
   },
-  
+
   updateJob: async (id, updatedJob) => {
     const res = await fetch(`${API_URL}/jobs/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
-      body: JSON.stringify(updatedJob)
+      body: JSON.stringify(updatedJob),
     });
+
     if (res.ok) {
       set((state) => ({
         jobs: state.jobs.map((job) => (job.id === id ? updatedJob : job)),
@@ -104,8 +148,9 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
   deleteJob: async (id) => {
     const res = await fetch(`${API_URL}/jobs/${id}`, {
       method: 'DELETE',
-      headers: getHeaders()
+      headers: getHeaders(),
     });
+
     if (res.ok) {
       set((state) => ({
         jobs: state.jobs.filter((job) => job.id !== id),
@@ -113,35 +158,60 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
     }
   },
 
-  // --- Submissions Implementation ---
   addSubmission: async (sub) => {
+    const currentSubs = get().submissions;
+    const relatedSubs = currentSubs.filter(
+      (item) =>
+        item.styleNo.trim().toLowerCase() === sub.styleNo.trim().toLowerCase() &&
+        item.customerName.trim().toLowerCase() === sub.customerName.trim().toLowerCase()
+    );
+
+    const nextRevisionNo =
+      relatedSubs.length > 0
+        ? Math.max(...relatedSubs.map((item) => item.revisionNo || 1)) + 1
+        : 1;
+
+    const payload: SubmissionForm = {
+      ...sub,
+      id: crypto.randomUUID(),
+      revisionNo: nextRevisionNo,
+      isLatestRevision: true,
+    };
+
     const res = await fetch(`${API_URL}/submissions`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify(sub)
+      body: JSON.stringify(payload),
     });
+
     if (res.ok) {
       const savedSub = await res.json();
-      set((state) => ({ submissions: [savedSub, ...state.submissions] }));
+
+      set((state) => ({
+        submissions: normalizeSubmissions([...state.submissions, savedSub]),
+      }));
     }
   },
 
   updateSubmission: async (id, updatedSub) => {
-    // Note: Our API backend didn't explicitly implement PUT for submissions yet, 
-    // but the store is ready for it when we do!
     set((state) => ({
-      submissions: state.submissions.map((sub) => (sub.id === id ? updatedSub : sub)),
+      submissions: normalizeSubmissions(
+        state.submissions.map((sub) => (sub.id === id ? updatedSub : sub))
+      ),
     }));
   },
 
   deleteSubmission: async (id) => {
     const res = await fetch(`${API_URL}/submissions/${id}`, {
       method: 'DELETE',
-      headers: getHeaders()
+      headers: getHeaders(),
     });
+
     if (res.ok) {
       set((state) => ({
-        submissions: state.submissions.filter((sub) => sub.id !== id),
+        submissions: normalizeSubmissions(
+          state.submissions.filter((sub) => sub.id !== id)
+        ),
       }));
     }
   },

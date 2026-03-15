@@ -9,6 +9,7 @@ export interface ApprovalRecord {
   styleNo: string;
   customerName: string;
   level: string;
+  revisionNo: number;
   status: ApprovalStatus;
   boardSet?: string;
   approvalCard?: string;
@@ -20,7 +21,7 @@ export interface ApprovalRecord {
 interface AdminStore {
   approvals: ApprovalRecord[];
   fetchApprovals: () => Promise<void>;
-  processApproval: (approval: ApprovalRecord) => Promise<void>;
+  processApproval: (approval: ApprovalRecord) => Promise<ApprovalRecord>;
   deleteApproval: (id: string) => Promise<void>;
 }
 
@@ -28,63 +29,100 @@ const API_URL = 'http://localhost:5000/api/admin';
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
-  'Authorization': `Bearer ${localStorage.getItem('token')}`
+  Authorization: `Bearer ${localStorage.getItem('token')}`,
 });
 
-export const useAdminStore = create<AdminStore>((set, get) => ({
+const sortApprovals = (approvals: ApprovalRecord[]) => {
+  return [...approvals].sort((a, b) => {
+    const bTime = new Date(b.reviewedAt).getTime();
+    const aTime = new Date(a.reviewedAt).getTime();
+
+    if (bTime !== aTime) return bTime - aTime;
+    return b.revisionNo - a.revisionNo;
+  });
+};
+
+export const useAdminStore = create<AdminStore>((set) => ({
   approvals: [],
-  
-  // Fetch initial data
+
   fetchApprovals: async () => {
     try {
-      const res = await fetch(`${API_URL}/approvals`, { headers: getHeaders() });
-      if (res.ok) {
-        set({ approvals: await res.json() });
+      const res = await fetch(`${API_URL}/approvals`, {
+        headers: getHeaders(),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Failed to fetch approvals');
       }
+
+      const data: ApprovalRecord[] = await res.json();
+
+      set({
+        approvals: sortApprovals(data),
+      });
     } catch (error) {
-      console.error("Failed to fetch approvals:", error);
+      console.error('Failed to fetch approvals:', error);
+      throw error;
     }
   },
 
-  // Push data to the API
   processApproval: async (newApproval) => {
     try {
       const res = await fetch(`${API_URL}/approvals`, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify(newApproval)
+        body: JSON.stringify(newApproval),
       });
-      
-      if (res.ok) {
-        const savedApproval = await res.json();
-        set((state) => {
-          const exists = state.approvals.find(a => a.submissionId === savedApproval.submissionId);
-          if (exists) {
-            return { approvals: state.approvals.map(a => a.submissionId === savedApproval.submissionId ? savedApproval : a) };
-          }
-          return { approvals: [savedApproval, ...state.approvals] };
-        });
-      } else {
-        // THIS IS NEW: Catch server rejections (e.g., 400 Bad Request, 403 Forbidden)
+
+      if (!res.ok) {
         const errorText = await res.text();
-        console.error("API Rejected Approval:", res.status, errorText);
-        alert(`Server Error ${res.status}: Check the console or API terminal.\nDetails: ${errorText}`);
+        throw new Error(errorText || `Server Error ${res.status}`);
       }
+
+      const savedApproval: ApprovalRecord = await res.json();
+
+      set((state) => {
+        const exists = state.approvals.find(
+          (a) => a.submissionId === savedApproval.submissionId
+        );
+
+        const updatedApprovals = exists
+          ? state.approvals.map((a) =>
+              a.submissionId === savedApproval.submissionId ? savedApproval : a
+            )
+          : [savedApproval, ...state.approvals];
+
+        return {
+          approvals: sortApprovals(updatedApprovals),
+        };
+      });
+
+      return savedApproval;
     } catch (error) {
-      console.error("Network/Fetch error:", error);
-      alert("Failed to reach the API. Is it running?");
+      console.error('Failed to process approval:', error);
+      throw error;
     }
   },
 
   deleteApproval: async (id) => {
-    const res = await fetch(`${API_URL}/approvals/${id}`, {
-      method: 'DELETE',
-      headers: getHeaders()
-    });
-    if (res.ok) {
+    try {
+      const res = await fetch(`${API_URL}/approvals/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Failed to delete approval (${res.status})`);
+      }
+
       set((state) => ({
-        approvals: state.approvals.filter(a => a.id !== id), 
+        approvals: state.approvals.filter((a) => a.id !== id),
       }));
+    } catch (error) {
+      console.error('Failed to delete approval:', error);
+      throw error;
     }
   },
 }));

@@ -14,6 +14,8 @@ import {
   Layers3,
   FileImage,
   User2,
+  GitBranch,
+  Lock,
 } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
 import {
@@ -43,13 +45,27 @@ export default function ApproveSubmission() {
   const [searchCustomer, setSearchCustomer] = useState('');
   const [searchStyleNo, setSearchStyleNo] = useState('');
   const [selectedSubmissionId, setSelectedSubmissionId] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    fetchData();
-    fetchApprovals();
+    const loadPageData = async () => {
+      try {
+        await Promise.all([fetchData(), fetchApprovals()]);
+      } catch (error) {
+        console.error('Failed to load approval page data:', error);
+        setErrors({
+          submission:
+            error instanceof Error
+              ? error.message
+              : 'Failed to load submissions or approvals.',
+        });
+      }
+    };
+
+    loadPageData();
   }, [fetchData, fetchApprovals]);
 
   const enrichedSubmissions = useMemo(() => {
@@ -75,22 +91,36 @@ export default function ApproveSubmission() {
     const customerFilter = searchCustomer.trim().toLowerCase();
     const styleFilter = searchStyleNo.trim().toLowerCase();
 
-    return enrichedSubmissions.filter((sub) => {
-      const matchesCustomer = !customerFilter
-        ? true
-        : sub.customerName.toLowerCase().includes(customerFilter);
+    return enrichedSubmissions
+      .filter((sub) => {
+        const matchesCustomer = !customerFilter
+          ? true
+          : sub.customerName.toLowerCase().includes(customerFilter);
 
-      const matchesStyle = !styleFilter
-        ? true
-        : sub.styleNo.toLowerCase().includes(styleFilter);
+        const matchesStyle = !styleFilter
+          ? true
+          : sub.styleNo.toLowerCase().includes(styleFilter);
 
-      return matchesCustomer && matchesStyle;
-    });
-  }, [enrichedSubmissions, searchCustomer, searchStyleNo]);
+        const matchesHistory = showHistory ? true : sub.isLatestRevision;
+
+        return matchesCustomer && matchesStyle && matchesHistory;
+      })
+      .sort((a, b) => {
+        const bTime = new Date(b.submissionDate).getTime();
+        const aTime = new Date(a.submissionDate).getTime();
+
+        if (bTime !== aTime) return bTime - aTime;
+        return b.revisionNo - a.revisionNo;
+      });
+  }, [enrichedSubmissions, searchCustomer, searchStyleNo, showHistory]);
 
   const selectedSubmission = useMemo(() => {
     return enrichedSubmissions.find((sub) => sub.id === selectedSubmissionId) || null;
   }, [enrichedSubmissions, selectedSubmissionId]);
+
+  const isLockedOldRevision = selectedSubmission
+    ? !selectedSubmission.isLatestRevision
+    : false;
 
   useEffect(() => {
     if (!selectedSubmission) {
@@ -127,11 +157,13 @@ export default function ApproveSubmission() {
         [name]: '',
       }));
     }
-  };
 
-  const clearSearch = () => {
-    setSearchCustomer('');
-    setSearchStyleNo('');
+    if (errors.submission) {
+      setErrors((prev) => ({
+        ...prev,
+        submission: '',
+      }));
+    }
   };
 
   const validateForm = () => {
@@ -139,6 +171,11 @@ export default function ApproveSubmission() {
 
     if (!selectedSubmission) {
       newErrors.submission = 'Please select a submitted style.';
+    }
+
+    if (selectedSubmission && !selectedSubmission.isLatestRevision) {
+      newErrors.submission =
+        'This is an older revision. Only the latest revision can be edited.';
     }
 
     if (formData.status === 'Approved') {
@@ -166,18 +203,19 @@ export default function ApproveSubmission() {
   const handleSaveDecision = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm() || !selectedSubmission) return;
+    if (!validateForm() || !selectedSubmission || !selectedSubmission.isLatestRevision) {
+      return;
+    }
 
     setIsSaving(true);
 
     const newRecord: ApprovalRecord = {
-      id:
-        selectedSubmission.approval?.id ||
-        crypto.randomUUID(),
+      id: selectedSubmission.approval?.id || crypto.randomUUID(),
       submissionId: selectedSubmission.id,
       styleNo: selectedSubmission.styleNo,
       customerName: selectedSubmission.customerName,
       level: selectedSubmission.level,
+      revisionNo: selectedSubmission.revisionNo,
       status: formData.status,
       reviewedAt: new Date().toISOString().split('T')[0],
       ...(formData.status === 'Approved' && {
@@ -188,9 +226,22 @@ export default function ApproveSubmission() {
       }),
     };
 
-    await processApproval(newRecord);
-    await fetchApprovals();
-    setIsSaving(false);
+    try {
+      await processApproval(newRecord);
+      await fetchApprovals();
+
+      setErrors({});
+    } catch (error) {
+      console.error('Failed to save approval decision:', error);
+      setErrors({
+        submission:
+          error instanceof Error
+            ? error.message
+            : 'Failed to save approval decision.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const renderStatusIcon = (status: ApprovalStatus) => {
@@ -201,7 +252,6 @@ export default function ApproveSubmission() {
 
   return (
     <div className="space-y-8">
-      {/* HEADER */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-start gap-4">
           <div className="rounded-2xl bg-blue-50 p-3">
@@ -211,25 +261,21 @@ export default function ApproveSubmission() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Approve Submissions</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Search by customer or style number, review the full submitted style,
-              then approve, keep pending, or reject.
+              Review the full style details and make decisions only on the latest revision.
             </p>
           </div>
         </div>
       </div>
 
-      {/* SEARCH PANEL */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center gap-2">
           <Search className="h-5 w-5 text-slate-500" />
           <h2 className="text-lg font-semibold text-slate-900">Search Submitted Styles</h2>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Customer
-            </label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Customer</label>
             <input
               type="text"
               value={searchCustomer}
@@ -240,9 +286,7 @@ export default function ApproveSubmission() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Style No
-            </label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Style No</label>
             <input
               type="text"
               value={searchStyleNo}
@@ -253,9 +297,24 @@ export default function ApproveSubmission() {
           </div>
 
           <div className="flex items-end">
+            <label className="flex w-full items-center gap-2 rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={showHistory}
+                onChange={(e) => setShowHistory(e.target.checked)}
+              />
+              Show history revisions
+            </label>
+          </div>
+
+          <div className="flex items-end">
             <button
               type="button"
-              onClick={clearSearch}
+              onClick={() => {
+                setSearchCustomer('');
+                setSearchStyleNo('');
+                setShowHistory(false);
+              }}
               className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Clear Search
@@ -264,9 +323,7 @@ export default function ApproveSubmission() {
         </div>
       </div>
 
-      {/* MAIN REVIEW GRID */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-        {/* LEFT: RESULT LIST */}
         <div className="xl:col-span-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
@@ -285,7 +342,10 @@ export default function ApproveSubmission() {
                     <button
                       key={sub.id}
                       type="button"
-                      onClick={() => setSelectedSubmissionId(sub.id)}
+                      onClick={() => {
+                        setSelectedSubmissionId(sub.id);
+                        setErrors({});
+                      }}
                       className={`w-full rounded-xl border p-4 text-left transition ${
                         isSelected
                           ? 'border-blue-500 bg-blue-50'
@@ -306,6 +366,21 @@ export default function ApproveSubmission() {
                         </span>
                       </div>
 
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 font-medium text-indigo-700">
+                          Rev {sub.revisionNo}
+                        </span>
+                        {sub.isLatestRevision ? (
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 font-medium text-emerald-700">
+                            Latest
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 font-medium text-slate-600">
+                            History
+                          </span>
+                        )}
+                      </div>
+
                       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
                         <span>Level: {sub.level || '-'}</span>
                         <span>Date: {sub.submissionDate || '-'}</span>
@@ -322,7 +397,6 @@ export default function ApproveSubmission() {
           </div>
         </div>
 
-        {/* RIGHT: DETAILS + DECISION */}
         <div className="xl:col-span-8">
           <AnimatePresence mode="wait">
             {selectedSubmission ? (
@@ -334,7 +408,6 @@ export default function ApproveSubmission() {
                 transition={{ duration: 0.2 }}
                 className="space-y-6"
               >
-                {/* SUBMISSION SUMMARY */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
@@ -346,22 +419,53 @@ export default function ApproveSubmission() {
                       </p>
                     </div>
 
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium ${badgeStyles[selectedSubmission.currentStatus]}`}
-                    >
-                      {renderStatusIcon(selectedSubmission.currentStatus)}
-                      {selectedSubmission.currentStatus}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700">
+                        <GitBranch className="h-4 w-4" />
+                        Rev {selectedSubmission.revisionNo}
+                      </span>
+
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium ${badgeStyles[selectedSubmission.currentStatus]}`}
+                      >
+                        {renderStatusIcon(selectedSubmission.currentStatus)}
+                        {selectedSubmission.currentStatus}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <InfoCard icon={Layers3} label="Submission Level" value={selectedSubmission.level || '-'} />
-                    <InfoCard icon={CalendarDays} label="Submission Date" value={selectedSubmission.submissionDate || '-'} />
-                    <InfoCard icon={User2} label="Comment" value={selectedSubmission.comment || '-'} />
+                    <InfoCard
+                      icon={Layers3}
+                      label="Submission Level"
+                      value={selectedSubmission.level || '-'}
+                    />
+                    <InfoCard
+                      icon={CalendarDays}
+                      label="Submission Date"
+                      value={selectedSubmission.submissionDate || '-'}
+                    />
+                    <InfoCard
+                      icon={User2}
+                      label="Comment"
+                      value={selectedSubmission.comment || '-'}
+                    />
                   </div>
+
+                  {!selectedSubmission.isLatestRevision && (
+                    <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <Lock className="h-4 w-4" />
+                        Older revision locked
+                      </div>
+                      <p className="mt-1">
+                        This revision is history only. A newer revision exists, so this decision
+                        cannot be edited anymore.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                {/* FULL STYLE DETAILS */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="mb-5 flex items-center gap-2">
                     <PackageCheck className="h-5 w-5 text-slate-500" />
@@ -431,12 +535,10 @@ export default function ApproveSubmission() {
                   ) : (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                       Matching development job details were not found for this submission.
-                      Make sure the submission style number and customer match the saved job.
                     </div>
                   )}
                 </div>
 
-                {/* DECISION PANEL */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="mb-5 flex items-center gap-2">
                     <ClipboardCheck className="h-5 w-5 text-slate-500" />
@@ -458,7 +560,8 @@ export default function ApproveSubmission() {
                         name="status"
                         value={formData.status}
                         onChange={handleInputChange}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                        disabled={isLockedOldRevision}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                       >
                         <option value="Pending">Pending</option>
                         <option value="Approved">Approved</option>
@@ -481,6 +584,7 @@ export default function ApproveSubmission() {
                             onChange={handleInputChange}
                             error={errors.boardSet}
                             placeholder="e.g. BS-102"
+                            disabled={isLockedOldRevision}
                           />
 
                           <Field
@@ -490,6 +594,7 @@ export default function ApproveSubmission() {
                             onChange={handleInputChange}
                             error={errors.approvalCard}
                             placeholder="e.g. AC-993"
+                            disabled={isLockedOldRevision}
                           />
 
                           <Field
@@ -499,6 +604,7 @@ export default function ApproveSubmission() {
                             onChange={handleInputChange}
                             error={errors.raMeetingDate}
                             type="date"
+                            disabled={isLockedOldRevision}
                           />
 
                           <Field
@@ -509,6 +615,7 @@ export default function ApproveSubmission() {
                             error={errors.bulkOrderQty}
                             type="number"
                             placeholder="e.g. 5000"
+                            disabled={isLockedOldRevision}
                           />
                         </motion.div>
                       )}
@@ -517,7 +624,7 @@ export default function ApproveSubmission() {
                     <div className="flex flex-wrap gap-3">
                       <button
                         type="submit"
-                        disabled={isSaving}
+                        disabled={isSaving || isLockedOldRevision}
                         className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {isSaving ? 'Saving...' : 'Save Decision'}
@@ -551,8 +658,7 @@ export default function ApproveSubmission() {
                   Select a submitted style
                 </h3>
                 <p className="mt-2 text-sm text-slate-500">
-                  Search by customer or style number, then choose a submission to review
-                  all details and make the admin decision.
+                  Search by customer or style number, then choose a submission to review.
                 </p>
               </motion.div>
             )}
@@ -578,7 +684,7 @@ function InfoCard({
         <Icon className="h-4 w-4 text-slate-500" />
         <p className="text-sm font-medium text-slate-600">{label}</p>
       </div>
-      <p className="text-sm font-semibold text-slate-900 break-words">{value || '-'}</p>
+      <p className="break-words text-sm font-semibold text-slate-900">{value || '-'}</p>
     </div>
   );
 }
@@ -591,6 +697,7 @@ function Field({
   error,
   type = 'text',
   placeholder,
+  disabled = false,
 }: {
   label: string;
   name: string;
@@ -601,23 +708,23 @@ function Field({
   error?: string;
   type?: string;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
     <div>
-      <label className="mb-1 block text-sm font-medium text-slate-700">
-        {label}
-      </label>
+      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
       <input
         type={type}
         name={name}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
+        disabled={disabled}
         className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none ${
           error
             ? 'border-red-400 focus:ring-2 focus:ring-red-400'
             : 'border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500'
-        }`}
+        } disabled:bg-slate-100 disabled:cursor-not-allowed`}
       />
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>

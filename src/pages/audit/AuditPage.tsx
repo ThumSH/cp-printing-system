@@ -1,46 +1,83 @@
-// src/pages/audit/AuditPage.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ClipboardCheck, Plus, Trash2, Save, AlertCircle, Printer, Download } from 'lucide-react';
-import { useInventoryStore } from '../../store/inventoryStore';
-import { useAuditStore, AuditRecord, AuditBundle } from '../../store/auditStore';
+import {
+  ClipboardCheck,
+  Plus,
+  Trash2,
+  Save,
+  AlertCircle,
+  Printer,
+  Download,
+  GitBranch,
+  CheckCircle2,
+} from 'lucide-react';
+import {
+  useAuditStore,
+  AuditRecord,
+  AuditBundle,
+  AuditStatus,
+} from '../../store/auditStore';
 
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL'];
 
+const INITIAL_FORM_STATE = {
+  deliveryTrackerReportId: '',
+  date: new Date().toISOString().split('T')[0],
+  styleNo: '',
+  customerName: '',
+  scheduleNo: '',
+  cutNo: '',
+  colour: '',
+  adNo: '',
+  deliveryStatus: '',
+  sizes: '',
+  auditQty: '',
+  status: 'Pending' as AuditStatus,
+  auditorName: '',
+  remarks: '',
+};
+
 export default function AuditPage() {
-  const { storeInRecords } = useInventoryStore();
-  const { auditRecords, addAuditRecord, updateAuditStatus, deleteAuditRecord, fetchAuditRecords } = useAuditStore();
+  const {
+    auditRecords,
+    eligibleAuditItems,
+    fetchAuditRecords,
+    fetchEligibleAuditItems,
+    addAuditRecord,
+    updateAuditRecord,
+    updateAuditStatus,
+    deleteAuditRecord,
+  } = useAuditStore();
 
-  useEffect(() => {
-    fetchAuditRecords();
-  }, []);
-
-  const todayDate = new Date().toISOString().split('T')[0];
-
-  // --- FORM STATE ---
-  const [styleNo, setStyleNo] = useState('');
-  const [scheduleNo, setScheduleNo] = useState('');
-  const [cutNo, setCutNo] = useState('');
-  const [colour, setColour] = useState('');
-  
+  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [bundles, setBundles] = useState<AuditBundle[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // --- DYNAMIC CASCADING ---
-  const availableStyles = Array.from(new Set(storeInRecords.map(r => r.styleNo)));
-  const availableSchedules = styleNo ? Array.from(new Set(storeInRecords.filter(r => r.styleNo === styleNo).map(r => r.scheduleNo))) : [];
-  const availableCuts = scheduleNo ? Array.from(new Set(storeInRecords.filter(r => r.styleNo === styleNo && r.scheduleNo === scheduleNo).map(r => r.cutNo))) : [];
+  const [pageError, setPageError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (cutNo) {
-      const match = storeInRecords.find(r => r.styleNo === styleNo && r.scheduleNo === scheduleNo && r.cutNo === cutNo);
-      setColour(match ? match.bodyColour : '');
-    } else {
-      setColour('');
-    }
-  }, [cutNo, styleNo, scheduleNo, storeInRecords]);
+    const loadPageData = async () => {
+      try {
+        await Promise.all([fetchAuditRecords(), fetchEligibleAuditItems()]);
+      } catch (error) {
+        setPageError(
+          error instanceof Error ? error.message : 'Failed to load audit data.'
+        );
+      }
+    };
 
-  // --- MATH ENGINE (AQL LOGIC) ---
+    loadPageData();
+  }, [fetchAuditRecords, fetchEligibleAuditItems]);
+
+  const selectedEligibleItem = useMemo(() => {
+    return (
+      eligibleAuditItems.find(
+        (item) => item.deliveryTrackerReportId === formData.deliveryTrackerReportId
+      ) || null
+    );
+  }, [eligibleAuditItems, formData.deliveryTrackerReportId]);
+
   const totalQty = bundles.reduce((sum, b) => sum + b.qty, 0);
 
   const calculateAuditQty = (qty: number): number => {
@@ -63,78 +100,288 @@ export default function AuditPage() {
     return 0;
   };
 
-  const auditQty = calculateAuditQty(totalQty);
+  const calculatedAuditQty = calculateAuditQty(totalQty);
 
-  // --- BUNDLE HANDLERS ---
-  const addBundleRow = () => setBundles([...bundles, { id: Math.random().toString(36).substr(2, 9), bundleNo: '', size: '', qty: 0 }]);
-  const removeBundleRow = (id: string) => setBundles(bundles.filter(b => b.id !== id));
-  const updateBundle = (id: string, field: keyof AuditBundle, value: string | number) => setBundles(bundles.map(b => b.id === id ? { ...b, [field]: value } : b));
+  const handleEligibleSelection = (
+    e: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    const value = e.target.value;
+    const matched = eligibleAuditItems.find(
+      (item) => item.deliveryTrackerReportId === value
+    );
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+    if (!matched) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      deliveryTrackerReportId: matched.deliveryTrackerReportId,
+      styleNo: matched.styleNo,
+      customerName: matched.customerName,
+      scheduleNo: matched.scheduleNo,
+      cutNo: matched.cutNo,
+      colour: '',
+      adNo: matched.adNo,
+      deliveryStatus: matched.deliveryStatus,
+      auditQty: '',
+    }));
+
+    setBundles([]);
+    setErrors({});
+    setPageError('');
+  };
+
+  const handleFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = e.target;
+
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+
+    if (errors[name]) {
+      setErrors((prev) => ({
+        ...prev,
+        [name]: '',
+      }));
+    }
+
+    if (pageError) setPageError('');
+  };
+
+  const addBundleRow = () => {
+    setBundles((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        bundleNo: '',
+        size: '',
+        qty: 0,
+      },
+    ]);
+  };
+
+  const removeBundleRow = (id: string) => {
+    setBundles((prev) => prev.filter((b) => b.id !== id));
+  };
+
+  const updateBundle = (
+    id: string,
+    field: keyof AuditBundle,
+    value: string | number
+  ) => {
+    setBundles((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, [field]: value } : b))
+    );
+  };
+
+  const validateForm = () => {
     const newErrors: Record<string, string> = {};
-    if (!styleNo) newErrors.styleNo = 'Required';
-    if (!scheduleNo) newErrors.scheduleNo = 'Required';
-    if (!cutNo) newErrors.cutNo = 'Required';
+
+    if (!formData.deliveryTrackerReportId) {
+      newErrors.deliveryTrackerReportId = 'Tracked delivery selection is required';
+    }
+
+    if (!formData.date) newErrors.date = 'Date is required';
     if (bundles.length === 0) newErrors.bundles = 'Add at least one bundle';
-    
-    const invalidBundle = bundles.some(b => !b.bundleNo.trim() || !b.size || b.qty <= 0);
+
+    const invalidBundle = bundles.some(
+      (b) => !b.bundleNo.trim() || !b.size || b.qty <= 0
+    );
     if (invalidBundle) newErrors.bundles = 'Complete all bundle fields correctly';
 
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+    if (totalQty <= 0) newErrors.totalQty = 'Total quantity must be greater than 0';
+
+    if (
+      selectedEligibleItem &&
+      totalQty > selectedEligibleItem.remainingAuditQty
+    ) {
+      newErrors.totalQty = `Bundle qty exceeds remaining auditable qty (${selectedEligibleItem.remainingAuditQty})`;
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const resetForm = () => {
+    setFormData({
+      ...INITIAL_FORM_STATE,
+      date: new Date().toISOString().split('T')[0],
+    });
+    setBundles([]);
+    setEditingId(null);
+    setErrors({});
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validateForm()) return;
+
+    const uniqueSizes = Array.from(new Set(bundles.map((b) => b.size))).join(', ');
+
+    setIsSaving(true);
+
+    try {
+      if (editingId) {
+        const existing = auditRecords.find((r) => r.id === editingId);
+
+        const updatedRecord: AuditRecord = {
+          id: editingId,
+          deliveryTrackerReportId: formData.deliveryTrackerReportId,
+          adviceNoteId: existing?.adviceNoteId || '',
+          productionRecordId: existing?.productionRecordId || '',
+          storeInRecordId: existing?.storeInRecordId || '',
+          submissionId: existing?.submissionId || '',
+          revisionNo: existing?.revisionNo || 1,
+          date: formData.date,
+          styleNo: formData.styleNo,
+          customerName: formData.customerName,
+          scheduleNo: formData.scheduleNo,
+          cutNo: formData.cutNo,
+          colour: formData.colour,
+          adNo: formData.adNo,
+          deliveryStatus: formData.deliveryStatus,
+          bundles,
+          sizes: uniqueSizes,
+          totalQty: existing?.totalQty || 0,
+          auditQty: calculatedAuditQty,
+          status: formData.status,
+          auditorName: formData.auditorName,
+          remarks: formData.remarks,
+        };
+
+        await updateAuditRecord(editingId, updatedRecord);
+      } else {
+        await addAuditRecord({
+          deliveryTrackerReportId: formData.deliveryTrackerReportId,
+          date: formData.date,
+          bundles,
+          sizes: uniqueSizes,
+          auditQty: calculatedAuditQty,
+          status: formData.status,
+          auditorName: formData.auditorName,
+          remarks: formData.remarks,
+        });
+      }
+
+      resetForm();
+      await fetchEligibleAuditItems();
+      await fetchAuditRecords();
+    } catch (error) {
+      setPageError(
+        error instanceof Error ? error.message : 'Failed to save audit record.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleEdit = (record: AuditRecord) => {
+    setEditingId(record.id);
+    setFormData({
+      deliveryTrackerReportId: record.deliveryTrackerReportId,
+      date: record.date,
+      styleNo: record.styleNo,
+      customerName: record.customerName,
+      scheduleNo: record.scheduleNo,
+      cutNo: record.cutNo,
+      colour: record.colour,
+      adNo: record.adNo,
+      deliveryStatus: record.deliveryStatus,
+      sizes: record.sizes,
+      auditQty: String(record.auditQty),
+      status: record.status,
+      auditorName: record.auditorName,
+      remarks: record.remarks,
+    });
+    setBundles(record.bundles);
+    setErrors({});
+    setPageError('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this audit record?')) {
       return;
     }
 
-    const uniqueSizes = Array.from(new Set(bundles.map(b => b.size))).join(', ');
-
-    const newRecord: AuditRecord = {
-      id: Math.random().toString(36).substr(2, 9),
-      date: todayDate,
-      styleNo,
-      scheduleNo,
-      cutNo,
-      colour,
-      bundles,
-      sizes: uniqueSizes,
-      totalQty,
-      auditQty,
-      status: 'Pending',
-      remarks: '',
-    };
-
-    addAuditRecord(newRecord);
-    setStyleNo(''); setScheduleNo(''); setCutNo(''); setColour('');
-    setBundles([]); setErrors({});
+    try {
+      await deleteAuditRecord(id);
+      await fetchEligibleAuditItems();
+      await fetchAuditRecords();
+    } catch (error) {
+      setPageError(
+        error instanceof Error ? error.message : 'Failed to delete audit record.'
+      );
+    }
   };
 
-  // --- EXPORT & PRINT HANDLERS ---
+  const handleQuickStatusUpdate = async (
+    record: AuditRecord,
+    status: AuditStatus,
+    remarks: string
+  ) => {
+    try {
+      await updateAuditStatus(
+        record.id,
+        status,
+        remarks,
+        record.auditorName || formData.auditorName
+      );
+    } catch (error) {
+      setPageError(
+        error instanceof Error ? error.message : 'Failed to update audit status.'
+      );
+    }
+  };
+
   const exportToCSV = () => {
-    // 1. Create CSV Headers
-    const headers = ['Date', 'Style No', 'Schedule No', 'Cut No', 'Colour', 'Size(s)', 'Total QTY', 'Audit QTY', 'Status', 'Remarks'];
-    
-    // 2. Map data to rows
-    const rows = auditRecords.map(r => [
-      r.date, 
-      r.styleNo, 
-      r.scheduleNo, 
-      r.cutNo, 
-      r.colour, 
-      `"${r.sizes}"`, // Wrap in quotes in case of commas
-      r.totalQty, 
-      r.auditQty, 
-      r.status, 
-      `"${r.remarks}"`
+    const headers = [
+      'Date',
+      'Style No',
+      'Customer',
+      'AD No',
+      'Schedule No',
+      'Cut No',
+      'Status',
+      'Delivery Status',
+      'Size(s)',
+      'Total QTY',
+      'Audit QTY',
+      'Auditor',
+      'Remarks',
+    ];
+
+    const rows = auditRecords.map((r) => [
+      r.date,
+      r.styleNo,
+      `"${r.customerName}"`,
+      r.adNo,
+      r.scheduleNo,
+      r.cutNo,
+      r.status,
+      r.deliveryStatus,
+      `"${r.sizes}"`,
+      r.totalQty,
+      r.auditQty,
+      `"${r.auditorName}"`,
+      `"${r.remarks}"`,
     ]);
 
-    // 3. Construct CSV string
-    const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    
-    // 4. Trigger download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+
+    const blob = new Blob([csvContent], {
+      type: 'text/csv;charset=utf-8;',
+    });
+
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `Audit_Tracking_Report_${todayDate}.csv`);
+    link.setAttribute(
+      'download',
+      `Audit_Tracking_Report_${new Date().toISOString().split('T')[0]}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -145,12 +392,11 @@ export default function AuditPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12 max-w-7xl mx-auto">
-      
-      {/* CSS Print Injection: 
-        This strictly styles the print dialog so that ONLY the table is printed, 
-        making it full width and hiding the sidebar/inputs. 
-      */}
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mx-auto max-w-7xl space-y-8 pb-12"
+    >
       <style>
         {`
           @media print {
@@ -158,175 +404,442 @@ export default function AuditPage() {
             #printable-area, #printable-area * { visibility: visible; }
             #printable-area { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
             .print-hide { display: none !important; }
-            /* Strip borders from inputs during print for a clean look */
-            select, input { border: none !important; appearance: none !important; background: transparent !important; }
+            select, input, textarea { border: none !important; appearance: none !important; background: transparent !important; }
           }
         `}
       </style>
 
-      {/* HEADER (Hidden during print) */}
-      <div className="flex items-center space-x-3 border-b border-slate-200 pb-4 print-hide">
-        <div className="p-2 bg-teal-100 rounded-lg"><ClipboardCheck className="w-6 h-6 text-teal-700" /></div>
+      <div className="print-hide flex items-center space-x-3 border-b border-slate-200 pb-4">
+        <div className="rounded-lg bg-teal-100 p-2">
+          <ClipboardCheck className="h-6 w-6 text-teal-700" />
+        </div>
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Quality Audit Setup</h2>
-          <p className="text-slate-500 text-sm">Calculate required audit quantities based on bundle size.</p>
+          <p className="text-sm text-slate-500">
+            Audit can only be created from tracked delivery records.
+          </p>
         </div>
       </div>
 
-      {/* DATA ENTRY FORM (Hidden during print) */}
-      <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm print-hide">
+      {pageError && (
+        <div className="print-hide rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          {pageError}
+        </div>
+      )}
+
+      <div className="print-hide rounded-xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-slate-50 p-6 rounded-lg border border-slate-100">
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Style No</label>
-              <select value={styleNo} onChange={(e) => { setStyleNo(e.target.value); setScheduleNo(''); setCutNo(''); }} className={`w-full px-3 py-2 border rounded-lg outline-none sm:text-sm bg-white ${errors.styleNo ? 'border-red-400' : 'border-slate-300 focus:border-teal-500'}`}>
-                <option value="" disabled>Select Style...</option>
-                {availableStyles.map(s => <option key={s} value={s}>{s}</option>)}
+          <div className="grid grid-cols-1 gap-6 rounded-lg border border-slate-100 bg-slate-50 p-6 md:grid-cols-4">
+            <div className="space-y-1 md:col-span-2">
+              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+                Eligible Tracked Delivery
+              </label>
+              <select
+                value={formData.deliveryTrackerReportId}
+                onChange={handleEligibleSelection}
+                disabled={!!editingId}
+                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm bg-white ${
+                  errors.deliveryTrackerReportId
+                    ? 'border-red-400'
+                    : 'border-slate-300 focus:border-teal-500'
+                } ${editingId ? 'cursor-not-allowed bg-slate-100 opacity-70' : ''}`}
+              >
+                <option value="" disabled>
+                  Select tracked delivery...
+                </option>
+                {eligibleAuditItems.map((item) => (
+                  <option
+                    key={item.deliveryTrackerReportId}
+                    value={item.deliveryTrackerReportId}
+                  >
+                    {item.adNo} | {item.styleNo} | {item.customerName} | Rev {item.revisionNo}
+                  </option>
+                ))}
               </select>
+              {errors.deliveryTrackerReportId && (
+                <p className="text-[11px] text-red-600">
+                  <AlertCircle className="mr-1 inline h-3 w-3" />
+                  {errors.deliveryTrackerReportId}
+                </p>
+              )}
             </div>
-            
+
+            <ReadOnlyField label="Style No" value={formData.styleNo} />
+            <ReadOnlyField label="Customer" value={formData.customerName} />
+
+            <ReadOnlyField label="AD No" value={formData.adNo} />
+            <ReadOnlyField label="Schedule No" value={formData.scheduleNo} />
+            <ReadOnlyField label="Cut No" value={formData.cutNo} />
+
             <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Schedule No</label>
-              <select value={scheduleNo} onChange={(e) => { setScheduleNo(e.target.value); setCutNo(''); }} disabled={!styleNo} className="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none sm:text-sm bg-white disabled:opacity-50 focus:border-teal-500">
-                <option value="" disabled>Select Schedule...</option>
-                {availableSchedules.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+                Revision
+              </label>
+              <div className="inline-flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-bold text-indigo-700">
+                <GitBranch className="h-4 w-4" />
+                Rev {selectedEligibleItem?.revisionNo || '-'}
+              </div>
+            </div>
+
+            <ReadOnlyField label="Delivery Status" value={formData.deliveryStatus} />
+            <ReadOnlyField
+              label="Remaining Audit Qty"
+              value={
+                selectedEligibleItem
+                  ? String(selectedEligibleItem.remainingAuditQty)
+                  : ''
+              }
+            />
+
+            <div className="space-y-1">
+              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+                Audit Date
+              </label>
+              <input
+                type="date"
+                name="date"
+                value={formData.date}
+                onChange={handleFormChange}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none sm:text-sm focus:border-teal-500"
+              />
             </div>
 
             <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Cut No</label>
-              <select value={cutNo} onChange={(e) => setCutNo(e.target.value)} disabled={!scheduleNo} className="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none sm:text-sm bg-white disabled:opacity-50 focus:border-teal-500">
-                <option value="" disabled>Select Cut...</option>
-                {availableCuts.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+                Auditor Name
+              </label>
+              <input
+                type="text"
+                name="auditorName"
+                value={formData.auditorName}
+                onChange={handleFormChange}
+                placeholder="Auditor name"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none sm:text-sm focus:border-teal-500"
+              />
             </div>
 
             <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Colour</label>
-              <input type="text" value={colour} readOnly placeholder="Auto-fills..." className="w-full px-3 py-2 border border-slate-200 rounded-lg sm:text-sm bg-slate-100 text-slate-600 font-medium" />
+              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+                Audit Status
+              </label>
+              <select
+                name="status"
+                value={formData.status}
+                onChange={handleFormChange}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none sm:text-sm bg-white focus:border-teal-500"
+              >
+                <option value="Pending">Pending</option>
+                <option value="Pass">Pass</option>
+                <option value="Fail">Fail</option>
+              </select>
+            </div>
+
+            <div className="space-y-1 md:col-span-4">
+              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+                Remarks
+              </label>
+              <textarea
+                name="remarks"
+                value={formData.remarks}
+                onChange={handleFormChange}
+                rows={2}
+                placeholder="Audit remarks..."
+                className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 outline-none sm:text-sm focus:border-teal-500"
+              />
             </div>
           </div>
 
-          <div className="border border-slate-200 rounded-lg overflow-hidden">
-            <div className="bg-slate-800 p-3 flex justify-between items-center">
-              <h4 className="text-white font-bold text-sm">Target Bundles</h4>
-              <button type="button" onClick={addBundleRow} className="px-3 py-1 bg-teal-500 hover:bg-teal-400 text-white text-xs font-bold rounded flex items-center transition-colors">
-                <Plus className="w-3 h-3 mr-1" /> Add Bundle
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="flex items-center justify-between bg-slate-800 p-3">
+              <h4 className="text-sm font-bold text-white">Audit Bundles</h4>
+              <button
+                type="button"
+                onClick={addBundleRow}
+                className="flex items-center rounded bg-teal-500 px-3 py-1 text-xs font-bold text-white transition-colors hover:bg-teal-400"
+              >
+                <Plus className="mr-1 h-3 w-3" /> Add Bundle
               </button>
             </div>
-            
-            {errors.bundles && <div className="p-3 bg-red-50 text-red-600 text-sm font-medium border-b border-red-100 flex items-center"><AlertCircle className="w-4 h-4 mr-2"/>{errors.bundles}</div>}
 
-            <table className="w-full text-sm text-left">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[11px] font-bold">
+            {errors.bundles && (
+              <div className="flex items-center border-b border-red-100 bg-red-50 p-3 text-sm font-medium text-red-600">
+                <AlertCircle className="mr-2 h-4 w-4" />
+                {errors.bundles}
+              </div>
+            )}
+
+            {errors.totalQty && (
+              <div className="flex items-center border-b border-red-100 bg-red-50 p-3 text-sm font-medium text-red-600">
+                <AlertCircle className="mr-2 h-4 w-4" />
+                {errors.totalQty}
+              </div>
+            )}
+
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
                 <tr>
                   <th className="px-4 py-2">Bundle No</th>
                   <th className="px-4 py-2">Size</th>
                   <th className="px-4 py-2">Bundle Qty</th>
-                  <th className="px-4 py-2 w-16"></th>
+                  <th className="w-16 px-4 py-2"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {bundles.map((b) => (
                   <tr key={b.id} className="bg-white hover:bg-slate-50">
-                    <td className="px-4 py-2"><input type="text" value={b.bundleNo} onChange={(e) => updateBundle(b.id, 'bundleNo', e.target.value)} placeholder="e.g. B-01" className="w-full p-1.5 border border-slate-300 rounded outline-none focus:border-teal-500" /></td>
                     <td className="px-4 py-2">
-                      <select value={b.size} onChange={(e) => updateBundle(b.id, 'size', e.target.value)} className="w-full p-1.5 border border-slate-300 rounded outline-none focus:border-teal-500">
-                        <option value="" disabled>Size...</option>
-                        {SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                      <input
+                        type="text"
+                        value={b.bundleNo}
+                        onChange={(e) => updateBundle(b.id, 'bundleNo', e.target.value)}
+                        placeholder="e.g. B-01"
+                        className="w-full rounded border border-slate-300 p-1.5 outline-none focus:border-teal-500"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <select
+                        value={b.size}
+                        onChange={(e) => updateBundle(b.id, 'size', e.target.value)}
+                        className="w-full rounded border border-slate-300 p-1.5 outline-none focus:border-teal-500"
+                      >
+                        <option value="" disabled>
+                          Size...
+                        </option>
+                        {SIZES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
                       </select>
                     </td>
-                    <td className="px-4 py-2"><input type="number" value={b.qty || ''} onChange={(e) => updateBundle(b.id, 'qty', parseInt(e.target.value) || 0)} placeholder="0" className="w-full p-1.5 border border-slate-300 rounded outline-none focus:border-teal-500" /></td>
-                    <td className="px-4 py-2 text-center"><button type="button" onClick={() => removeBundleRow(b.id)} className="text-red-500 hover:text-red-700 p-1"><Trash2 className="w-4 h-4" /></button></td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="number"
+                        value={b.qty || ''}
+                        onChange={(e) =>
+                          updateBundle(b.id, 'qty', parseInt(e.target.value) || 0)
+                        }
+                        placeholder="0"
+                        className="w-full rounded border border-slate-300 p-1.5 outline-none focus:border-teal-500"
+                      />
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => removeBundleRow(b.id)}
+                        className="p-1 text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
-                {bundles.length === 0 && <tr><td colSpan={4} className="p-6 text-center text-slate-400">No bundles added yet. Click "Add Bundle" to begin.</td></tr>}
+
+                {bundles.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-6 text-center text-slate-400">
+                      No bundles added yet. Click "Add Bundle" to begin.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
 
-          <div className="flex items-center justify-between bg-teal-50 p-4 rounded-lg border border-teal-100">
+          <div className="flex items-center justify-between rounded-lg border border-teal-100 bg-teal-50 p-4">
             <div className="flex space-x-8">
               <div>
-                <p className="text-xs font-bold text-teal-800 uppercase">Total QTY</p>
+                <p className="text-xs font-bold uppercase text-teal-800">Total QTY</p>
                 <p className="text-2xl font-black text-teal-900">{totalQty}</p>
               </div>
               <div className="border-l-2 border-teal-200 pl-8">
-                <p className="text-xs font-bold text-teal-800 uppercase">Required Audit QTY (AQL)</p>
-                <p className="text-2xl font-black text-teal-600">{auditQty}</p>
+                <p className="text-xs font-bold uppercase text-teal-800">
+                  Required Audit QTY (AQL)
+                </p>
+                <p className="text-2xl font-black text-teal-600">
+                  {calculatedAuditQty}
+                </p>
               </div>
             </div>
-            <button type="submit" className="px-6 py-2.5 bg-slate-800 text-white rounded-lg hover:bg-slate-900 font-bold flex items-center shadow-md">
-               <Save className="w-4 h-4 mr-2" /> Create Audit Record
-            </button>
+
+            <div className="flex gap-3">
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="flex items-center rounded-lg bg-slate-800 px-6 py-2.5 font-bold text-white shadow-md hover:bg-slate-900 disabled:opacity-60"
+              >
+                <Save className="mr-2 h-4 w-4" />
+                {isSaving
+                  ? 'Saving...'
+                  : editingId
+                  ? 'Update Audit Record'
+                  : 'Create Audit Record'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
 
-      {/* --- AUDIT TRACKING TABLE (THIS BECOMES THE PRINTABLE AREA) --- */}
       {auditRecords.length > 0 && (
-        <div id="printable-area" className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-8 print:border-none print:shadow-none">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center print:bg-white print:border-none">
-            <h3 className="text-lg font-bold text-slate-800 uppercase tracking-wider">Audit Tracking Board</h3>
-            
-            {/* Export & Print Buttons */}
-            <div className="flex space-x-2 print-hide">
-              <button 
+        <div
+          id="printable-area"
+          className="mt-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:border-none print:shadow-none"
+        >
+          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 p-4 print:border-none print:bg-white">
+            <h3 className="text-lg font-bold uppercase tracking-wider text-slate-800">
+              Audit Tracking Board
+            </h3>
+
+            <div className="print-hide flex space-x-2">
+              <button
                 onClick={exportToCSV}
-                className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 rounded-lg text-sm font-bold flex items-center transition-colors"
-                title="Download as Excel/CSV"
+                className="flex items-center rounded-lg border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-200"
               >
-                <Download className="w-4 h-4 mr-2" /> CSV
+                <Download className="mr-2 h-4 w-4" /> CSV
               </button>
-              <button 
+              <button
                 onClick={handlePrint}
-                className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg text-sm font-bold flex items-center transition-colors shadow-sm"
-                title="Print or Save as PDF"
+                className="flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-indigo-700 shadow-sm"
               >
-                <Printer className="w-4 h-4 mr-2" /> Print / PDF
+                <Printer className="mr-2 h-4 w-4" /> Print / PDF
               </button>
             </div>
           </div>
 
           <div className="overflow-x-auto">
-             <table className="w-full text-left text-sm whitespace-nowrap min-w-max print:text-[11px] print:border-collapse">
-              <thead className="bg-white text-slate-500 border-b border-slate-200 text-[11px] uppercase tracking-wider print:border-b-2 print:border-black print:text-black">
+            <table className="min-w-max w-full whitespace-nowrap text-left text-sm print:border-collapse print:text-[11px]">
+              <thead className="border-b border-slate-200 bg-white text-[11px] uppercase tracking-wider text-slate-500 print:border-b-2 print:border-black print:text-black">
                 <tr>
-                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">Date / Style</th>
-                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">Schedule & Cut</th>
-                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">Size(s)</th>
-                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">Total QTY</th>
-                  <th className="px-4 py-3 font-semibold text-indigo-700 print:text-black print:border print:border-slate-400 print:py-2">Audit QTY</th>
-                  <th className="px-4 py-3 font-semibold w-32 print:border print:border-slate-400 print:py-2">Pass/Fail</th>
-                  <th className="px-4 py-3 font-semibold min-w-50 print:border print:border-slate-400 print:py-2">Remarks</th>
-                  <th className="px-4 py-3 font-semibold text-right print-hide">Actions</th>
+                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Date / Style
+                  </th>
+                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Customer / AD
+                  </th>
+                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Schedule & Cut
+                  </th>
+                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Size(s)
+                  </th>
+                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Total QTY
+                  </th>
+                  <th className="px-4 py-3 font-semibold text-indigo-700 print:border print:border-slate-400 print:py-2 print:text-black">
+                    Audit QTY
+                  </th>
+                  <th className="px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Auditor
+                  </th>
+                  <th className="w-32 px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Pass/Fail
+                  </th>
+                  <th className="min-w-50 px-4 py-3 font-semibold print:border print:border-slate-400 print:py-2">
+                    Remarks
+                  </th>
+                  <th className="print-hide px-4 py-3 text-right font-semibold">
+                    Actions
+                  </th>
                 </tr>
               </thead>
+
               <tbody className="divide-y divide-slate-100 print:divide-slate-400">
                 <AnimatePresence>
                   {auditRecords.map((record) => (
-                    <motion.tr key={record.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hover:bg-slate-50 transition-colors">
+                    <motion.tr
+                      key={record.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="transition-colors hover:bg-slate-50"
+                    >
                       <td className="px-4 py-3 print:border print:border-slate-400 print:py-1">
-                        <p className="text-xs text-slate-500 font-medium print:text-black">{record.date}</p>
-                        <p className="font-bold text-slate-900 mt-0.5 print:text-black">{record.styleNo}</p>
+                        <p className="text-xs font-medium text-slate-500 print:text-black">
+                          {record.date}
+                        </p>
+                        <p className="mt-0.5 font-bold text-slate-900 print:text-black">
+                          {record.styleNo}
+                        </p>
+                        <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 print:border-none print:bg-transparent print:text-black">
+                          <GitBranch className="h-3 w-3" />
+                          Rev {record.revisionNo}
+                        </div>
                       </td>
+
                       <td className="px-4 py-3 print:border print:border-slate-400 print:py-1">
-                        <p className="font-semibold text-slate-800 print:text-black">Sch: {record.scheduleNo}</p>
-                        <p className="text-xs text-slate-600 mt-0.5 print:text-black">Cut: {record.cutNo} | {record.colour}</p>
+                        <p className="font-semibold text-slate-800 print:text-black">
+                          {record.customerName}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-600 print:text-black">
+                          {record.adNo}
+                        </p>
                       </td>
-                      <td className="px-4 py-3 font-bold text-slate-700 print:border print:border-slate-400 print:py-1 print:text-black">{record.sizes}</td>
-                      <td className="px-4 py-3 font-medium text-slate-600 print:border print:border-slate-400 print:py-1 print:text-black">{record.totalQty}</td>
-                      <td className="px-4 py-3 font-black text-indigo-600 bg-indigo-50/50 text-center print:border print:border-slate-400 print:bg-transparent print:text-black print:py-1">{record.auditQty}</td>
-                      
-                      {/* Inline Status Dropdown */}
+
                       <td className="px-4 py-3 print:border print:border-slate-400 print:py-1">
-                        <select 
-                          value={record.status} 
-                          onChange={(e) => updateAuditStatus(record.id, e.target.value as any, record.remarks)}
-                          className={`w-full px-2 py-1.5 rounded font-bold text-xs border outline-none cursor-pointer print:px-0 print:py-0 print:border-none print:font-bold ${
-                            record.status === 'Pass' ? 'bg-emerald-100 text-emerald-800 border-emerald-200 print:text-black' :
-                            record.status === 'Fail' ? 'bg-red-100 text-red-800 border-red-200 print:text-black' :
-                            'bg-amber-100 text-amber-800 border-amber-200 print:text-black'
+                        <p className="font-semibold text-slate-800 print:text-black">
+                          Sch: {record.scheduleNo}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-600 print:text-black">
+                          Cut: {record.cutNo}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-3 font-bold text-slate-700 print:border print:border-slate-400 print:py-1 print:text-black">
+                        {record.sizes}
+                      </td>
+
+                      <td className="px-4 py-3 font-medium text-slate-600 print:border print:border-slate-400 print:py-1 print:text-black">
+                        {record.totalQty}
+                      </td>
+
+                      <td className="bg-indigo-50/50 px-4 py-3 text-center font-black text-indigo-600 print:border print:border-slate-400 print:bg-transparent print:py-1 print:text-black">
+                        {record.auditQty}
+                      </td>
+
+                      <td className="px-4 py-3 print:border print:border-slate-400 print:py-1">
+                        <input
+                          type="text"
+                          value={record.auditorName}
+                          placeholder="Auditor..."
+                          onChange={(e) =>
+                            handleQuickStatusUpdate(
+                              record,
+                              record.status,
+                              record.remarks
+                            )
+                          }
+                          className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm outline-none transition-colors focus:border-teal-500 print:border-none print:px-0 print:py-0 print:text-black"
+                        />
+                        <p className="mt-1 text-[10px] text-slate-500 print:hidden">
+                          Use edit form to change full details
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-3 print:border print:border-slate-400 print:py-1">
+                        <select
+                          value={record.status}
+                          onChange={(e) =>
+                            handleQuickStatusUpdate(
+                              record,
+                              e.target.value as AuditStatus,
+                              record.remarks
+                            )
+                          }
+                          className={`w-full rounded border px-2 py-1.5 text-xs font-bold outline-none cursor-pointer print:border-none print:px-0 print:py-0 print:font-bold ${
+                            record.status === 'Pass'
+                              ? 'border-emerald-200 bg-emerald-100 text-emerald-800 print:bg-transparent print:text-black'
+                              : record.status === 'Fail'
+                              ? 'border-red-200 bg-red-100 text-red-800 print:bg-transparent print:text-black'
+                              : 'border-amber-200 bg-amber-100 text-amber-800 print:bg-transparent print:text-black'
                           }`}
                         >
                           <option value="Pending">Pending</option>
@@ -335,21 +848,36 @@ export default function AuditPage() {
                         </select>
                       </td>
 
-                      {/* Inline Remarks Input */}
                       <td className="px-4 py-3 print:border print:border-slate-400 print:py-1">
-                        <input 
-                          type="text" 
-                          value={record.remarks} 
+                        <input
+                          type="text"
+                          value={record.remarks}
                           placeholder="Add note..."
-                          onChange={(e) => updateAuditStatus(record.id, record.status, e.target.value)}
-                          className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded outline-none focus:border-teal-500 text-sm transition-colors print:px-0 print:py-0 print:border-none print:text-black"
+                          onChange={(e) =>
+                            handleQuickStatusUpdate(
+                              record,
+                              record.status,
+                              e.target.value
+                            )
+                          }
+                          className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm outline-none transition-colors focus:border-teal-500 print:border-none print:px-0 print:py-0 print:text-black"
                         />
                       </td>
 
-                      {/* Hide Delete button on Print */}
-                      <td className="px-4 py-3 text-right print-hide">
-                        <button onClick={() => deleteAuditRecord(record.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors" title="Delete Audit Record">
-                          <Trash2 className="w-4 h-4" />
+                      <td className="print-hide px-4 py-3 text-right space-x-2">
+                        <button
+                          onClick={() => handleEdit(record)}
+                          className="rounded p-1.5 text-blue-600 transition-colors hover:bg-blue-50"
+                          title="Edit Audit Record"
+                        >
+                          <Plus className="h-4 w-4 rotate-45" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(record.id)}
+                          className="rounded p-1.5 text-red-500 transition-colors hover:bg-red-50"
+                          title="Delete Audit Record"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </td>
                     </motion.tr>
@@ -361,5 +889,27 @@ export default function AuditPage() {
         </div>
       )}
     </motion.div>
+  );
+}
+
+function ReadOnlyField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+        {label}
+      </label>
+      <input
+        type="text"
+        value={value}
+        readOnly
+        className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-slate-700 font-medium outline-none"
+      />
+    </div>
   );
 }
