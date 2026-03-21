@@ -1,10 +1,33 @@
+// src/store/adviceNoteStore.ts
 import { create } from 'zustand';
+
+// ==========================================
+// TYPES
+// ==========================================
 
 export interface AdviceNoteRow {
   productionRecordId: string;
+  colour: string;
+  bundleNo: string;
+  size: string;
+  cutForm: string;
+  totalPcs: number;
   pd: number;
   fd: number;
   goodQty: number;
+}
+
+export interface GatepassBundleInfo {
+  bundleNo: string;
+  bundleQty: number;
+  size: string;
+  numberRange: string;
+}
+
+export interface GatepassCutInfo {
+  cutNo: string;
+  cutQty: number;
+  bundles: GatepassBundleInfo[];
 }
 
 export interface EligibleGatepassItem {
@@ -20,6 +43,13 @@ export interface EligibleGatepassItem {
   lineNo: string;
   issueQty: number;
   remainingDispatchQty: number;
+  // Enriched from Store-In
+  scheduleNo: string;
+  bodyColour: string;
+  printColour: string;
+  season: string;
+  // Cuts and bundles
+  cuts: GatepassCutInfo[];
 }
 
 export interface AdviceNoteRecord {
@@ -43,27 +73,19 @@ export interface AdviceNoteRecord {
   receivedByName: string;
   prepByName: string;
   authByName: string;
+  remarks: string;
 }
+
+// ==========================================
+// STORE
+// ==========================================
 
 interface AdviceNoteStore {
   adviceNotes: AdviceNoteRecord[];
   eligibleDispatchItems: EligibleGatepassItem[];
   fetchAdviceNotes: () => Promise<void>;
   fetchEligibleDispatchItems: () => Promise<void>;
-  addAdviceNote: (
-    note: Omit<
-      AdviceNoteRecord,
-      | 'id'
-      | 'storeInRecordId'
-      | 'submissionId'
-      | 'revisionNo'
-      | 'styleNo'
-      | 'customerName'
-      | 'cutNo'
-      | 'component'
-      | 'balanceQty'
-    >
-  ) => Promise<AdviceNoteRecord>;
+  addAdviceNote: (note: Partial<AdviceNoteRecord>) => Promise<AdviceNoteRecord>;
   updateAdviceNote: (id: string, note: AdviceNoteRecord) => Promise<void>;
   deleteAdviceNote: (id: string) => Promise<void>;
 }
@@ -89,117 +111,49 @@ export const useAdviceNoteStore = create<AdviceNoteStore>((set) => ({
   eligibleDispatchItems: [],
 
   fetchAdviceNotes: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/advicenotes`, {
-        headers: getHeaders(),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to fetch advice notes');
-      }
-
-      const data: AdviceNoteRecord[] = await res.json();
-
-      set({
-        adviceNotes: sortAdviceNotes(data),
-      });
-    } catch (error) {
-      console.error('Failed to fetch advice notes:', error);
-      throw error;
-    }
+    const res = await fetch(`${API_BASE}/advicenotes`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to fetch advice notes');
+    const data: AdviceNoteRecord[] = await res.json();
+    set({ adviceNotes: sortAdviceNotes(data) });
   },
 
   fetchEligibleDispatchItems: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/eligible-dispatch`, {
-        headers: getHeaders(),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to fetch eligible dispatch items');
-      }
-
-      const data: EligibleGatepassItem[] = await res.json();
-
-      set({
-        eligibleDispatchItems: data,
-      });
-    } catch (error) {
-      console.error('Failed to fetch eligible dispatch items:', error);
-      throw error;
-    }
+    const res = await fetch(`${API_BASE}/eligible-dispatch`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to fetch eligible dispatch items');
+    const data: EligibleGatepassItem[] = await res.json();
+    set({ eligibleDispatchItems: data });
   },
 
   addAdviceNote: async (note) => {
-    try {
-      const res = await fetch(`${API_BASE}/advicenotes`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(note),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to create advice note');
-      }
-
-      const saved: AdviceNoteRecord = await res.json();
-
-      set((state) => ({
-        adviceNotes: sortAdviceNotes([saved, ...state.adviceNotes]),
-      }));
-
-      return saved;
-    } catch (error) {
-      console.error('Failed to create advice note:', error);
-      throw error;
-    }
+    const res = await fetch(`${API_BASE}/advicenotes`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(note),
+    });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to create advice note');
+    const saved: AdviceNoteRecord = await res.json();
+    set((state) => ({ adviceNotes: sortAdviceNotes([saved, ...state.adviceNotes]) }));
+    return saved;
   },
 
   updateAdviceNote: async (id, updatedNote) => {
-    try {
-      const res = await fetch(`${API_BASE}/advicenotes/${id}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify(updatedNote),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to update advice note');
-      }
-
-      set((state) => ({
-        adviceNotes: sortAdviceNotes(
-          state.adviceNotes.map((n) => (n.id === id ? updatedNote : n))
-        ),
-      }));
-    } catch (error) {
-      console.error('Failed to update advice note:', error);
-      throw error;
-    }
+    const res = await fetch(`${API_BASE}/advicenotes/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(updatedNote),
+    });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to update advice note');
+    set((state) => ({
+      adviceNotes: sortAdviceNotes(state.adviceNotes.map((n) => (n.id === id ? updatedNote : n))),
+    }));
   },
 
   deleteAdviceNote: async (id) => {
-    try {
-      const res = await fetch(`${API_BASE}/advicenotes/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to delete advice note');
-      }
-
-      set((state) => ({
-        adviceNotes: state.adviceNotes.filter((n) => n.id !== id),
-      }));
-    } catch (error) {
-      console.error('Failed to delete advice note:', error);
-      throw error;
-    }
+    const res = await fetch(`${API_BASE}/advicenotes/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to delete advice note');
+    set((state) => ({ adviceNotes: state.adviceNotes.filter((n) => n.id !== id) }));
   },
 }));

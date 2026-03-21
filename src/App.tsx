@@ -15,6 +15,8 @@ import AdviceNotePage from './pages/gatepass/AdviceNotePage';
 import AuditPage from './pages/audit/AuditPage';
 import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
 import UserManagementPage from './pages/admin/UserManagement';
+import DailyOutputPage from './pages/worker/DailyOutputPage';
+import DowntimeReportPage from './pages/worker/DowntimeReportPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -216,6 +218,13 @@ function App() {
               }
             />
           </Route>
+
+          <Route path="worker" element={<DailyOutputPage />} />
+          <Route path="worker/downtime" element={
+  <RoleRoute allowedRoles={['Worker', 'Admin']}>
+    <DowntimeReportPage />
+  </RoleRoute>
+} />
 
           <Route path="orders" element={<div className="p-4">Orders Page Coming Soon</div>} />
           <Route path="customers" element={<div className="p-4">Customers Page Coming Soon</div>} />

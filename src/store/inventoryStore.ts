@@ -1,4 +1,9 @@
+// src/store/inventoryStore.ts
 import { create } from 'zustand';
+
+// ==========================================
+// TYPES — matches backend DTOs
+// ==========================================
 
 export interface EligibleStoreInItem {
   submissionId: string;
@@ -14,20 +19,22 @@ export interface EligibleStoreInItem {
   season: string;
   components: string;
   approvedBulkQty: number;
+  remainingBulkQty: number; // NEW: global bulk balance
 }
 
-export interface EligibleProductionItem {
-  storeInRecordId: string;
-  submissionId: string;
-  revisionNo: number;
-  styleNo: string;
-  customerName: string;
-  components: string;
+export interface BundleResponse {
+  id: string;
+  bundleNo: string;
+  bundleQty: number;
+  size: string;
+  numberRange: string;
+}
+
+export interface CutResponse {
+  id: string;
   cutNo: string;
-  availableQty: number;
-  inspectionStatus: string;
-  checkedBy: string;
-  summaryDate: string;
+  cutQty: number;
+  bundles: BundleResponse[];
 }
 
 export interface StoreInRecord {
@@ -40,17 +47,82 @@ export interface StoreInRecord {
   printColour: string;
   components: string;
   season: string;
+  scheduleNo: string;
   cutInDate: string;
   bulkQty: number;
   inQty: number;
   balanceBulkQty: number;
-  cutQty: number;
+  totalCutQty: number;
+  uncutBalance: number;
   availableQty: number;
-  scheduleNo: string;
-  cutNo: string;
+  cuts: CutResponse[];
+}
+
+export interface BulkBalance {
+  submissionId: string;
+  styleNo: string;
+  customerName: string;
+  approvedBulkQty: number;
+  totalInQty: number;
+  remainingBulkQty: number;
+  entryCount: number;
+}
+
+// ==========================================
+// CREATE REQUEST — sent to backend
+// ==========================================
+
+export interface CreateBundleInput {
+  bundleNo: string;
   bundleQty: number;
-  numberRange: string;
   size: string;
+  numberRange: string;
+}
+
+export interface CreateCutInput {
+  cutNo: string;
+  cutQty: number;
+  bundles: CreateBundleInput[];
+}
+
+export interface CreateStoreInInput {
+  submissionId: string;
+  scheduleNo: string;
+  cutInDate: string;
+  inQty: number;
+  cuts: CreateCutInput[];
+}
+
+// ==========================================
+// PRODUCTION types (unchanged)
+// ==========================================
+
+export interface ProductionCutInfo {
+  cutRecordId: string;
+  cutNo: string;
+  cutQty: number;
+  alreadyIssued: number;
+  availableQty: number;
+}
+
+export interface EligibleProductionItem {
+  storeInRecordId: string;
+  submissionId: string;
+  revisionNo: number;
+  styleNo: string;
+  customerName: string;
+  components: string;
+  scheduleNo: string;
+  bodyColour: string;
+  printColour: string;
+  season: string;
+  bulkQty: number;
+  bulkBalance: number;
+  totalAvailableQty: number;
+  inspectionStatus: string;
+  checkedBy: string;
+  summaryDate: string;
+  cuts: ProductionCutInfo[];
 }
 
 export interface StoreProductionRecord {
@@ -68,19 +140,28 @@ export interface StoreProductionRecord {
   lineNo: string;
 }
 
+// ==========================================
+// STORE
+// ==========================================
+
 interface InventoryStore {
   storeInRecords: StoreInRecord[];
   eligibleStoreInItems: EligibleStoreInItem[];
+  bulkBalances: BulkBalance[];
   productionRecords: StoreProductionRecord[];
   eligibleProductionItems: EligibleProductionItem[];
+
   fetchRecords: () => Promise<void>;
   fetchEligibleStoreInItems: () => Promise<void>;
-  addStoreInRecord: (record: Omit<StoreInRecord, 'id' | 'styleNo' | 'customerName' | 'revisionNo' | 'bodyColour' | 'printColour' | 'components' | 'season'>) => Promise<StoreInRecord>;
-  updateStoreInRecord: (id: string, record: StoreInRecord) => Promise<void>;
+  fetchBulkBalances: () => Promise<void>;
+  addStoreInRecord: (input: CreateStoreInInput) => Promise<StoreInRecord>;
+  updateStoreInRecord: (id: string, input: CreateStoreInInput) => Promise<void>;
   deleteStoreInRecord: (id: string) => Promise<void>;
+
   fetchProductionRecords: () => Promise<void>;
   fetchEligibleProductionItems: () => Promise<void>;
-  addProductionRecord: (record: Omit<StoreProductionRecord, 'id' | 'submissionId' | 'revisionNo' | 'styleNo' | 'customerName' | 'components' | 'cutNo' | 'balanceQty'>) => Promise<StoreProductionRecord>;
+  addProductionRecord: (record: Partial<StoreProductionRecord>) => Promise<StoreProductionRecord>;
+  batchAddProductionRecords: (records: Partial<StoreProductionRecord>[]) => Promise<StoreProductionRecord[]>;
   updateProductionRecord: (id: string, record: StoreProductionRecord) => Promise<void>;
   deleteProductionRecord: (id: string) => Promise<void>;
 }
@@ -92,13 +173,10 @@ const getHeaders = () => ({
   Authorization: `Bearer ${localStorage.getItem('token')}`,
 });
 
-const sortByDateAndRevision = <T extends { revisionNo: number }>(
-  items: T[],
-  dateField: keyof T
-) => {
-  return [...items].sort((a, b) => {
-    const bTime = new Date(String(b[dateField] || '')).getTime();
-    const aTime = new Date(String(a[dateField] || '')).getTime();
+const sortByDateAndRevision = (records: StoreInRecord[]) => {
+  return [...records].sort((a, b) => {
+    const bTime = new Date(b.cutInDate).getTime();
+    const aTime = new Date(a.cutInDate).getTime();
     if (bTime !== aTime) return bTime - aTime;
     return b.revisionNo - a.revisionNo;
   });
@@ -107,14 +185,17 @@ const sortByDateAndRevision = <T extends { revisionNo: number }>(
 export const useInventoryStore = create<InventoryStore>((set) => ({
   storeInRecords: [],
   eligibleStoreInItems: [],
+  bulkBalances: [],
   productionRecords: [],
   eligibleProductionItems: [],
+
+  // --- STORE IN ---
 
   fetchRecords: async () => {
     const res = await fetch(`${API_BASE}/store-in`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await res.text() || 'Failed to fetch store-in records');
     const data: StoreInRecord[] = await res.json();
-    set({ storeInRecords: sortByDateAndRevision(data, 'cutInDate') });
+    set({ storeInRecords: sortByDateAndRevision(data) });
   },
 
   fetchEligibleStoreInItems: async () => {
@@ -124,33 +205,44 @@ export const useInventoryStore = create<InventoryStore>((set) => ({
     set({ eligibleStoreInItems: data });
   },
 
-  addStoreInRecord: async (record) => {
+  fetchBulkBalances: async () => {
+    const res = await fetch(`${API_BASE}/bulk-balance`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to fetch bulk balances');
+    const data: BulkBalance[] = await res.json();
+    set({ bulkBalances: data });
+  },
+
+  addStoreInRecord: async (input) => {
     const res = await fetch(`${API_BASE}/store-in`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify(record),
+      body: JSON.stringify(input),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to create store-in record');
     const saved: StoreInRecord = await res.json();
     set((state) => ({
-      storeInRecords: sortByDateAndRevision([saved, ...state.storeInRecords], 'cutInDate'),
+      storeInRecords: sortByDateAndRevision([saved, ...state.storeInRecords]),
     }));
     return saved;
   },
 
-  updateStoreInRecord: async (id, updatedRecord) => {
+  updateStoreInRecord: async (id, input) => {
     const res = await fetch(`${API_BASE}/store-in/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
-      body: JSON.stringify(updatedRecord),
+      body: JSON.stringify(input),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to update store-in record');
-    set((state) => ({
-      storeInRecords: sortByDateAndRevision(
-        state.storeInRecords.map((rec) => (rec.id === id ? updatedRecord : rec)),
-        'cutInDate'
-      ),
-    }));
+    // Re-fetch to get updated children
+    const detailRes = await fetch(`${API_BASE}/store-in/${id}`, { headers: getHeaders() });
+    if (detailRes.ok) {
+      const updated: StoreInRecord = await detailRes.json();
+      set((state) => ({
+        storeInRecords: sortByDateAndRevision(
+          state.storeInRecords.map((rec) => (rec.id === id ? updated : rec))
+        ),
+      }));
+    }
   },
 
   deleteStoreInRecord: async (id) => {
@@ -164,11 +256,13 @@ export const useInventoryStore = create<InventoryStore>((set) => ({
     }));
   },
 
+  // --- PRODUCTION ---
+
   fetchProductionRecords: async () => {
     const res = await fetch(`${API_BASE}/production`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await res.text() || 'Failed to fetch production records');
     const data: StoreProductionRecord[] = await res.json();
-    set({ productionRecords: sortByDateAndRevision(data, 'issueDate') });
+    set({ productionRecords: data });
   },
 
   fetchEligibleProductionItems: async () => {
@@ -187,23 +281,34 @@ export const useInventoryStore = create<InventoryStore>((set) => ({
     if (!res.ok) throw new Error(await res.text() || 'Failed to create production record');
     const saved: StoreProductionRecord = await res.json();
     set((state) => ({
-      productionRecords: sortByDateAndRevision([saved, ...state.productionRecords], 'issueDate'),
+      productionRecords: [saved, ...state.productionRecords],
     }));
     return saved;
   },
 
-  updateProductionRecord: async (id, updatedRecord) => {
+  batchAddProductionRecords: async (records) => {
+    const res = await fetch(`${API_BASE}/production/batch`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(records),
+    });
+    if (!res.ok) throw new Error(await res.text() || 'Failed to create production records');
+    const saved: StoreProductionRecord[] = await res.json();
+    set((state) => ({
+      productionRecords: [...saved, ...state.productionRecords],
+    }));
+    return saved;
+  },
+
+  updateProductionRecord: async (id, record) => {
     const res = await fetch(`${API_BASE}/production/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
-      body: JSON.stringify(updatedRecord),
+      body: JSON.stringify(record),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to update production record');
     set((state) => ({
-      productionRecords: sortByDateAndRevision(
-        state.productionRecords.map((rec) => (rec.id === id ? updatedRecord : rec)),
-        'issueDate'
-      ),
+      productionRecords: state.productionRecords.map((r) => (r.id === id ? record : r)),
     }));
   },
 
@@ -214,7 +319,7 @@ export const useInventoryStore = create<InventoryStore>((set) => ({
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to delete production record');
     set((state) => ({
-      productionRecords: state.productionRecords.filter((rec) => rec.id !== id),
+      productionRecords: state.productionRecords.filter((r) => r.id !== id),
     }));
   },
 }));

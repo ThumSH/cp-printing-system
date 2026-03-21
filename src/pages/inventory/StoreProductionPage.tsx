@@ -1,24 +1,39 @@
+// src/pages/inventory/StoreProductionPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Factory, Plus, Edit2, Trash2, Save, AlertCircle, GitBranch, CheckCircle2 } from 'lucide-react';
+import {
+  Factory,
+  Plus,
+  Trash2,
+  Edit2,
+  AlertCircle,
+  Save,
+  GitBranch,
+  CheckCircle2,
+} from 'lucide-react';
 import {
   useInventoryStore,
-  StoreProductionRecord,
   EligibleProductionItem,
+  ProductionCutInfo,
+  StoreProductionRecord,
 } from '../../store/inventoryStore';
 
-const INITIAL_FORM_STATE = {
-  storeInRecordId: '',
-  submissionId: '',
-  revisionNo: 1,
-  styleNo: '',
-  customerName: '',
-  components: '',
-  cutNo: '',
-  issueDate: new Date().toISOString().split('T')[0],
-  issueQty: '',
-  lineNo: '',
-};
+// ==========================================
+// Staging row type (local, not yet saved)
+// ==========================================
+interface StagingRow {
+  tempId: string;
+  styleNo: string;
+  customerName: string;
+  scheduleNo: string;
+  bodyColour: string;
+  component: string;
+  cutNo: string;
+  cutQty: number;
+  issueQty: number;
+  balance: number;
+  lineNo: string;
+}
 
 export default function StoreProductionPage() {
   const {
@@ -26,473 +41,485 @@ export default function StoreProductionPage() {
     eligibleProductionItems,
     fetchProductionRecords,
     fetchEligibleProductionItems,
-    addProductionRecord,
-    updateProductionRecord,
+    batchAddProductionRecords,
     deleteProductionRecord,
+    fetchBulkBalances,
+    bulkBalances,
   } = useInventoryStore();
 
-  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // --- Selection state ---
+  const [selectedStoreInId, setSelectedStoreInId] = useState('');
+  const [selectedCutNo, setSelectedCutNo] = useState('');
+  const [selectedComponent, setSelectedComponent] = useState('');
+  const [issueQty, setIssueQty] = useState('');
+  const [lineNo, setLineNo] = useState('');
+  const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // --- Staging table (accumulate rows before submit) ---
+  const [stagingRows, setStagingRows] = useState<StagingRow[]>([]);
+
+  // --- UI ---
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // --- Load data ---
   useEffect(() => {
-    const loadPageData = async () => {
+    const load = async () => {
       try {
-        await Promise.all([fetchProductionRecords(), fetchEligibleProductionItems()]);
-      } catch (error) {
-        setPageError(
-          error instanceof Error ? error.message : 'Failed to load production data.'
-        );
+        await Promise.all([fetchProductionRecords(), fetchEligibleProductionItems(), fetchBulkBalances()]);
+      } catch (e) {
+        setPageError(e instanceof Error ? e.message : 'Failed to load production data.');
       }
     };
+    load();
+  }, [fetchProductionRecords, fetchEligibleProductionItems, fetchBulkBalances]);
 
-    loadPageData();
-  }, [fetchProductionRecords, fetchEligibleProductionItems]);
+  // --- Selected eligible item ---
+  const selectedItem = useMemo(
+    () => eligibleProductionItems.find((i) => i.storeInRecordId === selectedStoreInId) || null,
+    [eligibleProductionItems, selectedStoreInId]
+  );
 
-  const selectedEligibleItem = useMemo(() => {
-    return (
-      eligibleProductionItems.find(
-        (item) => item.storeInRecordId === formData.storeInRecordId
-      ) || null
-    );
-  }, [eligibleProductionItems, formData.storeInRecordId]);
+  // --- Bulk balance for the selected style ---
+  const styleBulkBalance = useMemo(() => {
+    if (!selectedItem) return null;
+    return bulkBalances.find((b) => b.submissionId === selectedItem.submissionId) || null;
+  }, [selectedItem, bulkBalances]);
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target;
+  // --- Available cuts (adjusted for staging rows already added) ---
+  const adjustedCuts = useMemo(() => {
+    if (!selectedItem) return [];
+    return selectedItem.cuts.map((cut) => {
+      const stagedForThisCut = stagingRows
+        .filter((r) => r.cutNo === cut.cutNo)
+        .reduce((s, r) => s + r.issueQty, 0);
+      return {
+        ...cut,
+        availableQty: Math.max(0, cut.availableQty - stagedForThisCut),
+      };
+    });
+  }, [selectedItem, stagingRows]);
 
-    if (name === 'storeInRecordId') {
-      const matched = eligibleProductionItems.find(
-        (item) => item.storeInRecordId === value
-      );
+  // --- Selected cut info ---
+  const selectedCut = useMemo(
+    () => adjustedCuts.find((c) => c.cutNo === selectedCutNo) || null,
+    [adjustedCuts, selectedCutNo]
+  );
 
-      if (matched) {
-        setFormData((prev) => ({
-          ...prev,
-          storeInRecordId: matched.storeInRecordId,
-          submissionId: matched.submissionId,
-          revisionNo: matched.revisionNo,
-          styleNo: matched.styleNo,
-          customerName: matched.customerName,
-          components: matched.components,
-          cutNo: matched.cutNo,
-          issueQty: '',
-        }));
-      }
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-    }
+  const issueQtyNum = parseInt(issueQty) || 0;
+  const cutBalance = selectedCut ? Math.max(0, selectedCut.availableQty - issueQtyNum) : 0;
 
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
+  // --- Components list from the style ---
+  const componentsList = useMemo(() => {
+    if (!selectedItem?.components) return [];
+    return selectedItem.components.split(',').map((c) => c.trim()).filter(Boolean);
+  }, [selectedItem]);
 
-    if (pageError) setPageError('');
-  };
-
-  const validateForm = () => {
+  // --- Add row to staging ---
+  const handleAddRow = () => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.storeInRecordId) newErrors.storeInRecordId = 'QC-passed item is required';
-    if (!formData.issueDate) newErrors.issueDate = 'Issue Date is required';
-    if (!formData.lineNo.trim()) newErrors.lineNo = 'Line No is required';
-
-    const issueQtyNum = parseInt(formData.issueQty) || 0;
-    if (issueQtyNum <= 0) {
-      newErrors.issueQty = 'Issue Qty must be greater than 0';
-    }
-
-    if (selectedEligibleItem && issueQtyNum > selectedEligibleItem.availableQty) {
-      newErrors.issueQty = `Exceeds available shelf qty (${selectedEligibleItem.availableQty})`;
+    if (!selectedStoreInId) newErrors.storeInRecordId = 'Select a QC-passed item';
+    if (!selectedCutNo) newErrors.cutNo = 'Select a cut';
+    if (!selectedComponent) newErrors.component = 'Select a component';
+    if (!lineNo.trim()) newErrors.lineNo = 'Line No is required';
+    if (issueQtyNum <= 0) newErrors.issueQty = 'Issue Qty must be > 0';
+    if (selectedCut && issueQtyNum > selectedCut.availableQty) {
+      newErrors.issueQty = `Exceeds available (${selectedCut.availableQty})`;
     }
 
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
+    if (Object.keys(newErrors).length > 0) return;
 
-  const resetForm = () => {
-    setFormData({
-      ...INITIAL_FORM_STATE,
-      issueDate: new Date().toISOString().split('T')[0],
-    });
-    setEditingId(null);
+    const newRow: StagingRow = {
+      tempId: crypto.randomUUID(),
+      styleNo: selectedItem?.styleNo ?? '',
+      customerName: selectedItem?.customerName ?? '',
+      scheduleNo: selectedItem?.scheduleNo ?? '',
+      bodyColour: selectedItem?.bodyColour ?? '',
+      component: selectedComponent,
+      cutNo: selectedCutNo,
+      cutQty: selectedCut?.cutQty ?? 0,
+      issueQty: issueQtyNum,
+      balance: cutBalance,
+      lineNo: lineNo.trim(),
+    };
+
+    setStagingRows((prev) => [...prev, newRow]);
+    setIssueQty('');
+    setLineNo('');
+    setSelectedCutNo('');
+    setSelectedComponent('');
     setErrors({});
+    setPageError('');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // --- Remove staging row ---
+  const removeStagingRow = (tempId: string) => {
+    setStagingRows((prev) => prev.filter((r) => r.tempId !== tempId));
+  };
 
-    if (!validateForm()) return;
+  // --- Submit all staging rows to database ---
+  const handleSubmit = async () => {
+    if (stagingRows.length === 0) {
+      setPageError('Add at least one row before submitting.');
+      return;
+    }
 
     setIsSaving(true);
+    setPageError('');
 
     try {
-      if (editingId) {
-        const updatedRecord: StoreProductionRecord = {
-          id: editingId,
-          storeInRecordId: formData.storeInRecordId,
-          submissionId: formData.submissionId,
-          revisionNo: formData.revisionNo,
-          styleNo: formData.styleNo,
-          customerName: formData.customerName,
-          components: formData.components,
-          cutNo: formData.cutNo,
-          issueDate: formData.issueDate,
-          issueQty: parseInt(formData.issueQty),
-          lineNo: formData.lineNo,
-          balanceQty: selectedEligibleItem
-            ? Math.max(0, selectedEligibleItem.availableQty - parseInt(formData.issueQty))
-            : 0,
-        };
+      const records = stagingRows.map((row) => ({
+        storeInRecordId: selectedStoreInId,
+        cutNo: row.cutNo,
+        issueDate,
+        issueQty: row.issueQty,
+        lineNo: row.lineNo,
+        balanceQty: row.balance,
+      }));
 
-        await updateProductionRecord(editingId, updatedRecord);
-      } else {
-        await addProductionRecord({
-          storeInRecordId: formData.storeInRecordId,
-          issueDate: formData.issueDate,
-          issueQty: parseInt(formData.issueQty),
-          lineNo: formData.lineNo,
-        });
-      }
-
-      resetForm();
-      await fetchEligibleProductionItems();
-      await fetchProductionRecords();
+      await batchAddProductionRecords(records);
+      setStagingRows([]);
+      setSelectedStoreInId('');
+      setSelectedCutNo('');
+      setIssueQty('');
+      setLineNo('');
+      await Promise.all([fetchProductionRecords(), fetchEligibleProductionItems(), fetchBulkBalances()]);
     } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : 'Failed to save production issue.'
-      );
+      setPageError(error instanceof Error ? error.message : 'Failed to save production records.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleEdit = (record: StoreProductionRecord) => {
-    setFormData({
-      storeInRecordId: record.storeInRecordId,
-      submissionId: record.submissionId,
-      revisionNo: record.revisionNo,
-      styleNo: record.styleNo,
-      customerName: record.customerName,
-      components: record.components,
-      cutNo: record.cutNo,
-      issueDate: record.issueDate,
-      issueQty: record.issueQty.toString(),
-      lineNo: record.lineNo,
-    });
-
-    setEditingId(record.id);
-    setErrors({});
-    setPageError('');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
+  // --- Delete existing production record ---
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this production issue record?')) {
-      return;
-    }
-
+    if (!window.confirm('Delete this production record?')) return;
     try {
       await deleteProductionRecord(id);
-      await fetchEligibleProductionItems();
-      await fetchProductionRecords();
-    } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : 'Failed to delete production issue.'
-      );
+      await Promise.all([fetchProductionRecords(), fetchEligibleProductionItems(), fetchBulkBalances()]);
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Failed to delete.');
     }
   };
 
+  // ==========================================
+  // RENDER
+  // ==========================================
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-8 pb-12"
+      className="mx-auto max-w-6xl space-y-6 pb-12"
     >
+      {/* Page Header */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="rounded-lg bg-blue-100 p-2">
           <Factory className="h-6 w-6 text-blue-700" />
         </div>
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Issue to Production</h2>
-          <p className="text-sm text-slate-500">
-            Only QC-passed Store-In items can move into Production.
-          </p>
+          <p className="text-sm text-slate-500">Only QC-passed Store-In items can move into Production.</p>
         </div>
       </div>
 
       {pageError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-          {pageError}
-        </div>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{pageError}</div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-        <div className="mb-6 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-800">
-            {editingId ? 'Edit Production Issue' : 'New Production Issue'}
-          </h3>
+      {/* ==========================================
+          FORM
+          ========================================== */}
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        {/* Style selector */}
+        <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50/60 p-5 mb-6">
+          <h4 className="border-b border-blue-200 pb-2 text-sm font-bold uppercase tracking-wider text-blue-800">
+            QC-Passed Item
+          </h4>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-1 lg:col-span-2">
+              <label className="block text-xs font-medium text-slate-600">
+                Eligible Item <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedStoreInId}
+                onChange={(e) => {
+                  setSelectedStoreInId(e.target.value);
+                  setSelectedCutNo('');
+                  setStagingRows([]);
+                }}
+                className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
+                  errors.storeInRecordId ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
+                }`}
+              >
+                <option value="">Select QC-passed item...</option>
+                {eligibleProductionItems.map((item) => (
+                  <option key={item.storeInRecordId} value={item.storeInRecordId}>
+                    {item.styleNo} | {item.customerName} | Sch: {item.scheduleNo} | Available: {item.totalAvailableQty}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-600">Issue Date</label>
+              <input
+                type="date"
+                value={issueDate}
+                onChange={(e) => setIssueDate(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
 
-          {editingId && (
-            <span className="animate-pulse rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">
-              EDIT MODE
-            </span>
+          {/* Auto-populated info + bulk balance */}
+          {selectedItem && (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5 border-t border-blue-200 pt-3">
+              <InfoBox label="Style" value={selectedItem.styleNo} />
+              <InfoBox label="Customer" value={selectedItem.customerName} />
+              <InfoBox label="Schedule" value={selectedItem.scheduleNo} />
+              <InfoBox label="Body Colour" value={selectedItem.bodyColour} />
+              <InfoBox label="Bulk Balance" value={selectedItem.bulkBalance.toString()} highlight />
+            </div>
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-8">
-          <div className="space-y-4 rounded-xl border border-blue-200 bg-blue-50/60 p-5">
-            <h4 className="border-b border-blue-200 pb-2 text-sm font-bold uppercase tracking-wider text-blue-800">
-              QC-Passed Item
+        {/* Cut selector + Component + Issue qty */}
+        {selectedItem && (
+          <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-5 mb-6 space-y-4">
+            <h4 className="border-b border-orange-200 pb-2 text-sm font-bold uppercase tracking-wider text-orange-800">
+              Cut Issue
             </h4>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <div className="space-y-1 lg:col-span-2">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
+              <div className="space-y-1 md:col-span-2">
                 <label className="block text-xs font-medium text-slate-600">
-                  Eligible Production Item <span className="text-red-500">*</span>
+                  Cut No <span className="text-red-500">*</span>
                 </label>
                 <select
-                  name="storeInRecordId"
-                  value={formData.storeInRecordId}
-                  onChange={handleInputChange}
-                  disabled={!!editingId}
-                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-white ${
-                    errors.storeInRecordId
-                      ? 'border-red-400 bg-red-50'
-                      : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
-                  } ${editingId ? 'cursor-not-allowed bg-slate-100' : ''}`}
+                  value={selectedCutNo}
+                  onChange={(e) => setSelectedCutNo(e.target.value)}
+                  className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
+                    errors.cutNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
+                  }`}
                 >
-                  <option value="" disabled>
-                    Select QC-passed item...
-                  </option>
-                  {eligibleProductionItems.map((item) => (
-                    <option key={item.storeInRecordId} value={item.storeInRecordId}>
-                      {item.styleNo} | {item.customerName} | Rev {item.revisionNo} | Avl {item.availableQty}
+                  <option value="">Select cut...</option>
+                  {adjustedCuts.filter((c) => c.availableQty > 0).map((cut) => (
+                    <option key={cut.cutNo} value={cut.cutNo}>
+                      {cut.cutNo} — Qty: {cut.cutQty} — Available: {cut.availableQty}
                     </option>
                   ))}
                 </select>
-                {errors.storeInRecordId && (
-                  <p className="text-[11px] text-red-600">
-                    <AlertCircle className="mr-1 inline h-3 w-3" />
-                    {errors.storeInRecordId}
+                {errors.cutNo && <p className="text-[11px] text-red-600">{errors.cutNo}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-600">
+                  Component <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedComponent}
+                  onChange={(e) => setSelectedComponent(e.target.value)}
+                  className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
+                    errors.component ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
+                  }`}
+                >
+                  <option value="">Select...</option>
+                  {componentsList.map((comp) => (
+                    <option key={comp} value={comp}>{comp}</option>
+                  ))}
+                </select>
+                {errors.component && <p className="text-[11px] text-red-600">{errors.component}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-600">
+                  Issue Qty <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  value={issueQty}
+                  onChange={(e) => setIssueQty(e.target.value)}
+                  placeholder="0"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm font-bold outline-none ${
+                    errors.issueQty ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
+                  }`}
+                />
+                {errors.issueQty && <p className="text-[11px] text-red-600">{errors.issueQty}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-600">
+                  Line No <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={lineNo}
+                  onChange={(e) => setLineNo(e.target.value)}
+                  placeholder="Line 01"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                    errors.lineNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
+                  }`}
+                />
+              </div>
+
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={handleAddRow}
+                  className="inline-flex items-center gap-1 rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 transition-colors w-full justify-center"
+                >
+                  <Plus className="h-4 w-4" /> Add to Table
+                </button>
+              </div>
+            </div>
+
+            {/* Live qty display */}
+            {selectedCut && (
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <div className="rounded-lg bg-white border border-slate-200 px-4 py-2 text-center">
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Cut Qty</p>
+                  <p className="text-lg font-black text-slate-800">{selectedCut.cutQty}</p>
+                </div>
+                <div className="rounded-lg bg-white border border-slate-200 px-4 py-2 text-center">
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Issue Qty</p>
+                  <p className="text-lg font-black text-orange-600">{issueQtyNum}</p>
+                </div>
+                <div className={`rounded-lg border px-4 py-2 text-center ${
+                  cutBalance > 0 ? 'border-blue-200 bg-blue-50' : 'border-emerald-200 bg-emerald-50'
+                }`}>
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Balance</p>
+                  <p className={`text-lg font-black ${cutBalance > 0 ? 'text-blue-700' : 'text-emerald-700'}`}>
+                    {cutBalance}
                   </p>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-600">QC Status</label>
-                <div className="inline-flex w-full items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-                  <CheckCircle2 className="h-4 w-4" />
-                  {selectedEligibleItem?.inspectionStatus || '-'}
                 </div>
               </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-600">Revision</label>
-                <div className="inline-flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700">
-                  <GitBranch className="h-4 w-4" />
-                  Rev {formData.revisionNo}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            <ReadOnlyField label="Style No" value={formData.styleNo} />
-            <ReadOnlyField label="Customer" value={formData.customerName} />
-            <ReadOnlyField label="Cut No" value={formData.cutNo} />
-            <ReadOnlyField label="Components" value={formData.components} />
-            <ReadOnlyField
-              label="Available Shelf Qty"
-              value={selectedEligibleItem ? String(selectedEligibleItem.availableQty) : ''}
-            />
-
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Issue Date <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="date"
-                name="issueDate"
-                value={formData.issueDate}
-                onChange={handleInputChange}
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.issueDate
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
-                }`}
-              />
-              {errors.issueDate && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.issueDate}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Issue Qty <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                name="issueQty"
-                value={formData.issueQty}
-                onChange={handleInputChange}
-                placeholder="e.g. 100"
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.issueQty
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
-                }`}
-              />
-              {errors.issueQty && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.issueQty}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Line No <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                name="lineNo"
-                value={formData.lineNo}
-                onChange={handleInputChange}
-                placeholder="e.g. Line 01"
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.lineNo
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
-                }`}
-              />
-              {errors.lineNo && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.lineNo}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex justify-end space-x-3 border-t border-slate-100 pt-4">
-            {editingId && (
-              <button
-                type="button"
-                onClick={resetForm}
-                className="rounded-lg border px-4 py-2 font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
             )}
-
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="flex items-center rounded-lg bg-blue-600 px-6 py-2 font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {editingId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
-              {isSaving
-                ? editingId
-                  ? 'Updating...'
-                  : 'Saving...'
-                : editingId
-                ? 'Update Production Issue'
-                : 'Save Production Issue'}
-            </button>
           </div>
-        </form>
+        )}
+
+        {/* ==========================================
+            STAGING TABLE
+            ========================================== */}
+        {stagingRows.length > 0 && (
+          <div className="rounded-lg border border-slate-200 overflow-hidden mb-6">
+            <div className="bg-slate-800 px-4 py-2.5 text-sm font-bold text-white">
+              Staging — {stagingRows.length} row(s) ready to submit
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                  <th className="px-3 py-2 text-left">#</th>
+                  <th className="px-3 py-2 text-left">Style</th>
+                  <th className="px-3 py-2 text-left">Customer</th>
+                  <th className="px-3 py-2 text-left">Schedule</th>
+                  <th className="px-3 py-2 text-left">Colour</th>
+                  <th className="px-3 py-2 text-left">Component</th>
+                  <th className="px-3 py-2 text-left">Cut No</th>
+                  <th className="px-3 py-2 text-right">Cut Qty</th>
+                  <th className="px-3 py-2 text-right">Issue Qty</th>
+                  <th className="px-3 py-2 text-right">Balance</th>
+                  <th className="px-3 py-2 text-left">Line</th>
+                  <th className="px-3 py-2 text-right"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {stagingRows.map((row, idx) => (
+                  <tr key={row.tempId} className="hover:bg-slate-50/50">
+                    <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
+                    <td className="px-3 py-2 font-bold text-slate-800">{row.styleNo}</td>
+                    <td className="px-3 py-2 text-slate-600">{row.customerName}</td>
+                    <td className="px-3 py-2 text-slate-600">{row.scheduleNo}</td>
+                    <td className="px-3 py-2 text-slate-600">{row.bodyColour}</td>
+                    <td className="px-3 py-2 text-slate-700 font-medium">{row.component}</td>
+                    <td className="px-3 py-2 font-bold text-slate-800">{row.cutNo}</td>
+                    <td className="px-3 py-2 text-right">{row.cutQty}</td>
+                    <td className="px-3 py-2 text-right font-bold text-orange-600">{row.issueQty}</td>
+                    <td className={`px-3 py-2 text-right font-bold ${row.balance > 0 ? 'text-blue-600' : 'text-emerald-600'}`}>
+                      {row.balance}
+                    </td>
+                    <td className="px-3 py-2">{row.lineNo}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => removeStagingRow(row.tempId)}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold">
+                  <td colSpan={8} className="px-3 py-2 text-right text-xs uppercase text-slate-500">Total</td>
+                  <td className="px-3 py-2 text-right text-orange-700">
+                    {stagingRows.reduce((s, r) => s + r.issueQty, 0)}
+                  </td>
+                  <td colSpan={3}></td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 flex items-center gap-3">
+              <button
+                onClick={handleSubmit}
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {isSaving ? 'Saving...' : 'Submit All to Database'}
+              </button>
+              <button
+                onClick={() => setStagingRows([])}
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* ==========================================
+          EXISTING PRODUCTION RECORDS
+          ========================================== */}
       {productionRecords.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
-            <h3 className="text-lg font-semibold text-slate-800">Production Issue Records</h3>
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+            <h3 className="text-lg font-semibold text-slate-800">Production Records</h3>
+            <p className="text-xs text-slate-500 mt-0.5">{productionRecords.length} record(s)</p>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-max w-full whitespace-nowrap text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-6 py-3 font-semibold">Style / Customer</th>
-                  <th className="px-6 py-3 font-semibold">Revision</th>
-                  <th className="px-6 py-3 font-semibold">Cut / Components</th>
-                  <th className="px-6 py-3 font-semibold">Issue</th>
-                  <th className="px-6 py-3 font-semibold">Balance</th>
-                  <th className="px-6 py-3 font-semibold text-right">Actions</th>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                  <th className="px-4 py-2 text-left">Style / Customer</th>
+                  <th className="px-4 py-2 text-left">Cut No</th>
+                  <th className="px-4 py-2 text-right">Issue Qty</th>
+                  <th className="px-4 py-2 text-right">Balance</th>
+                  <th className="px-4 py-2 text-left">Line</th>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-right">Actions</th>
                 </tr>
               </thead>
-
               <tbody className="divide-y divide-slate-100">
-                <AnimatePresence>
-                  {productionRecords.map((record) => (
-                    <motion.tr
-                      key={record.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="transition-colors hover:bg-slate-50"
-                    >
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-slate-900">{record.styleNo}</p>
-                        <p className="text-xs text-slate-500">{record.customerName}</p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <div className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                          <GitBranch className="h-3 w-3" />
-                          Rev {record.revisionNo}
-                        </div>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <p className="font-medium text-slate-800">Cut: {record.cutNo}</p>
-                        <p className="text-xs text-slate-500">{record.components}</p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <p className="font-medium text-slate-800">Qty: {record.issueQty}</p>
-                        <p className="text-xs text-slate-500">
-                          {record.issueDate} | {record.lineNo}
-                        </p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <span className="font-bold text-emerald-600">{record.balanceQty}</span>
-                      </td>
-
-                      <td className="space-x-2 px-6 py-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(record)}
-                          className="rounded p-1.5 text-blue-600 hover:bg-blue-50"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(record.id)}
-                          className="rounded p-1.5 text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </AnimatePresence>
+                {productionRecords.map((rec) => (
+                  <tr key={rec.id} className="hover:bg-slate-50/50">
+                    <td className="px-4 py-2">
+                      <p className="font-bold text-slate-800">{rec.styleNo}</p>
+                      <p className="text-xs text-slate-500">{rec.customerName}</p>
+                    </td>
+                    <td className="px-4 py-2 font-medium">{rec.cutNo}</td>
+                    <td className="px-4 py-2 text-right font-bold text-orange-600">{rec.issueQty}</td>
+                    <td className="px-4 py-2 text-right font-bold text-blue-600">{rec.balanceQty}</td>
+                    <td className="px-4 py-2">{rec.lineNo}</td>
+                    <td className="px-4 py-2 text-slate-500">{rec.issueDate}</td>
+                    <td className="px-4 py-2 text-right">
+                      <button onClick={() => handleDelete(rec.id)}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -502,16 +529,14 @@ export default function StoreProductionPage() {
   );
 }
 
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
+// ==========================================
+// HELPER
+// ==========================================
+function InfoBox({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-slate-700">{label}</label>
-      <input
-        type="text"
-        readOnly
-        value={value}
-        className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600"
-      />
+    <div className={`rounded-lg border px-3 py-2 ${highlight ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white'}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`text-sm font-bold ${highlight ? 'text-blue-700' : 'text-slate-700'}`}>{value || '-'}</p>
     </div>
   );
 }

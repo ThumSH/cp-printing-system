@@ -1,982 +1,254 @@
 // src/pages/qc/DeliveryTrackerPage.tsx
-import { useState, useEffect, useMemo, Fragment } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  LayoutDashboard,
-  Save,
-  Edit2,
-  Trash2,
-  AlertCircle,
-  GitBranch,
-  CheckCircle2,
-} from 'lucide-react';
-import {
-  useDeliveryTrackerStore,
-  DeliveryTrackerReport,
-  DeliveryTrackerRow,
-  TRACKING_SIZES,
-  SizeData,
-  DeliveryStatus,
-} from '../../store/deliveryTrackerStore';
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { LayoutDashboard, Printer, RefreshCw } from 'lucide-react';
 
-const INITIAL_SIZE_DATA = TRACKING_SIZES.reduce((acc, size) => {
-  acc[size] = { qty: 0, pd: 0, fd: 0 };
-  return acc;
-}, {} as Record<string, SizeData>);
+const SIZES_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'];
 
-const INITIAL_FORM_STATE = {
-  adviceNoteId: '',
-  productionRecordId: '',
-  storeInRecordId: '',
-  submissionId: '',
-  revisionNo: 1,
-  styleNo: '',
-  customerName: '',
-  adNo: '',
-  fpoNo: '',
-  orderQty: '',
-  deliveryQty: '',
-  deliveryStatus: 'Pending' as DeliveryStatus,
-  createdAt: new Date().toISOString().split('T')[0],
-};
+interface SizeData { size: string; qty: number; pd: number; fd: number; }
+interface TrackerRow {
+  inDate: string; deliveryDate: string; styleNo: string; colour: string;
+  inAd: string; ad: string; scheduleNo: string; fpoQty: number;
+  allowedPd: number; cutNo: string; sizeBreakdown: SizeData[];
+  totalQty: number; sizePdTotal: number; fdTotal: number; exceeded: number;
+}
+interface TrackerSummary {
+  styleNo: string; fpoNo: string; customerName: string; orderQty: number;
+  receivedQty: number; deliveredQty: number; balanceToRec: number;
+  pdTotal: number; pdPercentage: string; allSizes: string[];
+  rows: TrackerRow[]; sizeTotals: SizeData[];
+  grandTotalQty: number; grandPdTotal: number; grandFdTotal: number;
+}
+
+const API_BASE = 'http://localhost:5000/api/deliverytracker';
+const getHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 export default function DeliveryTrackerPage() {
-  const {
-    reports,
-    eligibleTrackingItems,
-    fetchReports,
-    fetchEligibleTrackingItems,
-    addReport,
-    updateReport,
-    deleteReport,
-  } = useDeliveryTrackerStore();
+  const [summaries, setSummaries] = useState<TrackerSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState('');
+  const [selectedSchedule, setSelectedSchedule] = useState('');
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
-  const [rows, setRows] = useState<DeliveryTrackerRow[]>([]);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [pageError, setPageError] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    const loadPageData = async () => {
-      try {
-        await Promise.all([fetchReports(), fetchEligibleTrackingItems()]);
-      } catch (error) {
-        setPageError(
-          error instanceof Error ? error.message : 'Failed to load delivery tracker data.'
-        );
-      }
-    };
-
-    loadPageData();
-  }, [fetchReports, fetchEligibleTrackingItems]);
-
-  const selectedEligibleItem = useMemo(() => {
-    return (
-      eligibleTrackingItems.find(
-        (item) => item.adviceNoteId === formData.adviceNoteId
-      ) || null
-    );
-  }, [eligibleTrackingItems, formData.adviceNoteId]);
-
-  const handleAdviceNoteSelection = (
-    e: React.ChangeEvent<HTMLSelectElement>
-  ) => {
-    const value = e.target.value;
-    const matched = eligibleTrackingItems.find((item) => item.adviceNoteId === value);
-
-    if (!matched) return;
-
-    setFormData((prev) => ({
-      ...prev,
-      adviceNoteId: matched.adviceNoteId,
-      productionRecordId: matched.productionRecordId,
-      storeInRecordId: matched.storeInRecordId,
-      submissionId: matched.submissionId,
-      revisionNo: matched.revisionNo,
-      styleNo: matched.styleNo,
-      customerName: matched.customerName,
-      adNo: matched.adNo,
-      fpoNo: matched.scheduleNo,
-      orderQty: String(matched.dispatchQty),
-      deliveryQty: '',
-    }));
-
-    const newRow: DeliveryTrackerRow = {
-      id: crypto.randomUUID(),
-      adviceNoteId: matched.adviceNoteId,
-      inDate: matched.deliveryDate,
-      deliveryDate: '',
-      style: matched.styleNo,
-      colour: '',
-      inAd: matched.adNo,
-      ad: matched.adNo,
-      schedule: matched.scheduleNo,
-      fpoQty: matched.dispatchQty,
-      allowedPd: 0,
-      cutNo: matched.cutNo,
-      sizeData: JSON.parse(JSON.stringify(INITIAL_SIZE_DATA)),
-    };
-
-    setRows([newRow]);
-    setErrors({});
-    setPageError('');
-  };
-
-  const handleFormFieldChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target;
-
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
-
-    if (pageError) {
-      setPageError('');
-    }
-  };
-
-  const handleRowChange = (
-    id: string,
-    field: keyof DeliveryTrackerRow,
-    value: string | number
-  ) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
-    );
-  };
-
-  const handleSizeChange = (
-    rowId: string,
-    size: string,
-    field: keyof SizeData,
-    value: number
-  ) => {
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.id !== rowId) return r;
-
-        const nextSizeData = {
-          ...r.sizeData,
-          [size]: {
-            ...r.sizeData[size],
-            [field]: value,
-          },
-        };
-
-        return {
-          ...r,
-          sizeData: nextSizeData,
-        };
-      })
-    );
-  };
-
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-
-    if (!formData.adviceNoteId) newErrors.adviceNoteId = 'Advice Note is required';
-    if (!formData.createdAt) newErrors.createdAt = 'Tracking date is required';
-    if (!formData.deliveryQty || parseInt(formData.deliveryQty) <= 0) {
-      newErrors.deliveryQty = 'Delivery qty must be greater than 0';
-    }
-
-    if (
-      selectedEligibleItem &&
-      parseInt(formData.deliveryQty || '0') > selectedEligibleItem.remainingTrackableQty
-    ) {
-      newErrors.deliveryQty = `Exceeds remaining trackable qty (${selectedEligibleItem.remainingTrackableQty})`;
-    }
-
-    if (rows.length === 0) {
-      newErrors.rows = 'At least one tracker row is required';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const resetForm = () => {
-    setEditingId(null);
-    setFormData({
-      ...INITIAL_FORM_STATE,
-      createdAt: new Date().toISOString().split('T')[0],
-    });
-    setRows([]);
-    setErrors({});
-  };
-
-  const handleSubmit = async () => {
-    if (!validateForm()) return;
-
-    setIsSaving(true);
-
+  const fetchReport = async () => {
+    setLoading(true); setError('');
     try {
-      if (editingId) {
-        const updatedReport: DeliveryTrackerReport = {
-          id: editingId,
-          adviceNoteId: formData.adviceNoteId,
-          productionRecordId: formData.productionRecordId,
-          storeInRecordId: formData.storeInRecordId,
-          submissionId: formData.submissionId,
-          revisionNo: formData.revisionNo,
-          styleNo: formData.styleNo,
-          customerName: formData.customerName,
-          adNo: formData.adNo,
-          fpoNo: formData.fpoNo,
-          orderQty: Number(formData.orderQty),
-          deliveryQty: Number(formData.deliveryQty),
-          balanceQty: selectedEligibleItem
-            ? Math.max(
-                0,
-                selectedEligibleItem.remainingTrackableQty - Number(formData.deliveryQty)
-              )
-            : 0,
-          deliveryStatus: formData.deliveryStatus,
-          rows,
-          createdAt: formData.createdAt,
-        };
-
-        await updateReport(editingId, updatedReport);
-      } else {
-        await addReport({
-          adviceNoteId: formData.adviceNoteId,
-          fpoNo: formData.fpoNo,
-          deliveryQty: Number(formData.deliveryQty),
-          deliveryStatus: formData.deliveryStatus,
-          rows,
-          createdAt: formData.createdAt,
-        });
-      }
-
-      resetForm();
-      await fetchEligibleTrackingItems();
-      await fetchReports();
-    } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : 'Failed to save tracker report.'
-      );
-    } finally {
-      setIsSaving(false);
-    }
+      const res = await fetch(`${API_BASE}/report`, { headers: getHeaders() });
+      if (!res.ok) throw new Error(await res.text() || 'Failed to fetch');
+      const data: TrackerSummary[] = await res.json();
+      setSummaries(data);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load.'); }
+    finally { setLoading(false); }
   };
 
-  const handleEdit = (report: DeliveryTrackerReport) => {
-    setEditingId(report.id);
-    setFormData({
-      adviceNoteId: report.adviceNoteId,
-      productionRecordId: report.productionRecordId,
-      storeInRecordId: report.storeInRecordId,
-      submissionId: report.submissionId,
-      revisionNo: report.revisionNo,
-      styleNo: report.styleNo,
-      customerName: report.customerName,
-      adNo: report.adNo,
-      fpoNo: report.fpoNo,
-      orderQty: String(report.orderQty),
-      deliveryQty: String(report.deliveryQty),
-      deliveryStatus: report.deliveryStatus,
-      createdAt: report.createdAt,
-    });
-    setRows(report.rows);
-    setErrors({});
-    setPageError('');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  useEffect(() => { fetchReport(); }, []);
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this tracker report?')) {
-      return;
-    }
+  // Build unique style and schedule options from loaded data
+  const styleOptions = [...new Set(summaries.map((s) => s.styleNo))];
+  const scheduleOptions = summaries
+    .filter((s) => !selectedStyle || s.styleNo === selectedStyle)
+    .map((s) => s.fpoNo)
+    .filter((v, i, a) => a.indexOf(v) === i);
 
-    try {
-      await deleteReport(id);
-      await fetchEligibleTrackingItems();
-      await fetchReports();
-    } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : 'Failed to delete tracker report.'
-      );
-    }
-  };
-
-  const totalFpoQty = rows.reduce((sum, r) => sum + (r.fpoQty || 0), 0);
-  const totalAllowedPd = rows.reduce((sum, r) => sum + (r.allowedPd || 0), 0);
-
-  const sizeGrandTotals = TRACKING_SIZES.reduce((acc, size) => {
-    acc[size] = { qty: 0, pd: 0, fd: 0 };
-    rows.forEach((r) => {
-      acc[size].qty += r.sizeData[size]?.qty || 0;
-      acc[size].pd += r.sizeData[size]?.pd || 0;
-      acc[size].fd += r.sizeData[size]?.fd || 0;
-    });
-    return acc;
-  }, {} as Record<string, SizeData>);
-
-  const grandSizeTotal = TRACKING_SIZES.reduce(
-    (sum, size) => sum + sizeGrandTotals[size].qty,
-    0
-  );
-  const grandPdTotal = TRACKING_SIZES.reduce(
-    (sum, size) => sum + sizeGrandTotals[size].pd,
-    0
-  );
-  const grandFdTotal = TRACKING_SIZES.reduce(
-    (sum, size) => sum + sizeGrandTotals[size].fd,
-    0
-  );
-  const grandExceed = grandPdTotal - totalAllowedPd;
-
-  const receivedQty = totalFpoQty;
-  const deliveredQty = grandSizeTotal;
-  const balanceToRec = (Number(formData.orderQty) || 0) - receivedQty;
-  const pdPercentage =
-    deliveredQty > 0 ? ((grandPdTotal / deliveredQty) * 100).toFixed(2) : '0.00';
+  // Filtered summaries
+  const filteredSummaries = summaries.filter((s) => {
+    if (selectedStyle && s.styleNo !== selectedStyle) return false;
+    if (selectedSchedule && s.fpoNo !== selectedSchedule) return false;
+    return true;
+  });
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mx-auto max-w-[1600px] space-y-8 pb-12"
-    >
-      <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
-        <div className="rounded-lg bg-indigo-100 p-2">
-          <LayoutDashboard className="h-6 w-6 text-indigo-700" />
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 pb-12">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+        <div className="flex items-center space-x-3">
+          <div className="rounded-lg bg-indigo-100 p-2"><LayoutDashboard className="h-6 w-6 text-indigo-700" /></div>
+          <div><h2 className="text-2xl font-bold text-slate-900">Delivery Tracker</h2><p className="text-sm text-slate-500">Auto-generated from Store In + Gatepass data. Select a style and schedule to view.</p></div>
         </div>
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">
-            QC Delivery & Defect Tracker
-          </h2>
-          <p className="text-sm text-slate-500">
-            Delivery tracking can only start from dispatched Advice Notes.
-          </p>
-        </div>
+        <button onClick={fetchReport} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+          <RefreshCw className="h-4 w-4" /> Refresh
+        </button>
       </div>
 
-      {pageError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-          {pageError}
+      {/* Filter dropdowns */}
+      {!loading && summaries.length > 0 && (
+        <div className="flex items-end gap-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4">
+          <div className="space-y-1 flex-1 max-w-xs">
+            <label className="block text-[10px] font-bold uppercase tracking-wide text-indigo-800">Style No</label>
+            <select value={selectedStyle} onChange={(e) => { setSelectedStyle(e.target.value); setSelectedSchedule(''); }}
+              className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="">All Styles</option>
+              {styleOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1 flex-1 max-w-xs">
+            <label className="block text-[10px] font-bold uppercase tracking-wide text-indigo-800">Schedule No (FPO)</label>
+            <select value={selectedSchedule} onChange={(e) => setSelectedSchedule(e.target.value)}
+              className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="">All Schedules</option>
+              {scheduleOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          {(selectedStyle || selectedSchedule) && (
+            <button onClick={() => { setSelectedStyle(''); setSelectedSchedule(''); }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors">Clear</button>
+          )}
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-slate-800">
-              {editingId ? 'Editing Tracker Report' : 'New Tracking Report'}
-            </h3>
-          </div>
+      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>}
+      {loading && <div className="py-12 text-center text-slate-400">Loading report...</div>}
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            <div className="space-y-1 md:col-span-2">
-              <label className="block text-xs font-bold uppercase text-slate-500">
-                Eligible Advice Note
-              </label>
-              <select
-                value={formData.adviceNoteId}
-                onChange={handleAdviceNoteSelection}
-                disabled={!!editingId}
-                className={`w-full rounded-lg border px-3 py-2 font-bold outline-none bg-white ${
-                  errors.adviceNoteId
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:border-indigo-500'
-                } ${editingId ? 'cursor-not-allowed bg-slate-100 opacity-70' : ''}`}
-              >
-                <option value="" disabled>
-                  Select Advice Note...
-                </option>
-                {eligibleTrackingItems.map((item) => (
-                  <option key={item.adviceNoteId} value={item.adviceNoteId}>
-                    {item.adNo} | {item.styleNo} | {item.customerName} | Rev {item.revisionNo}
-                  </option>
-                ))}
-              </select>
-              {errors.adviceNoteId && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.adviceNoteId}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase text-slate-500">
-                Tracking Date
-              </label>
-              <input
-                type="date"
-                name="createdAt"
-                value={formData.createdAt}
-                onChange={handleFormFieldChange}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 font-semibold outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <ReadOnlyField label="Style #" value={formData.styleNo} />
-            <ReadOnlyField label="Customer" value={formData.customerName} />
-            <ReadOnlyField label="Advice Note" value={formData.adNo} />
-
-            <ReadOnlyField label="Schedule / FPO" value={formData.fpoNo} />
-            <ReadOnlyField label="Order Qty" value={formData.orderQty} />
-            <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase text-slate-500">
-                Revision
-              </label>
-              <div className="inline-flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-bold text-indigo-700">
-                <GitBranch className="h-4 w-4" />
-                Rev {formData.revisionNo}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase text-slate-500">
-                Delivery Qty
-              </label>
-              <input
-                type="number"
-                name="deliveryQty"
-                value={formData.deliveryQty}
-                onChange={handleFormFieldChange}
-                className={`w-full rounded-lg border px-3 py-2 font-bold text-indigo-700 outline-none ${
-                  errors.deliveryQty
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:border-indigo-500'
-                }`}
-                placeholder="0"
-              />
-              {errors.deliveryQty && (
-                <p className="text-[11px] text-red-600">{errors.deliveryQty}</p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase text-slate-500">
-                Delivery Status
-              </label>
-              <select
-                name="deliveryStatus"
-                value={formData.deliveryStatus}
-                onChange={handleFormFieldChange}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 font-semibold outline-none focus:border-indigo-500 bg-white"
-              >
-                <option value="Pending">Pending</option>
-                <option value="In Transit">In Transit</option>
-                <option value="Delivered">Delivered</option>
-                <option value="Returned">Returned</option>
-                <option value="Delayed">Delayed</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold uppercase text-slate-500">
-                Remaining Trackable
-              </label>
-              <div className="inline-flex w-full items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-bold text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" />
-                {selectedEligibleItem?.remainingTrackableQty ?? '-'}
-              </div>
-            </div>
-          </div>
+      {!loading && summaries.length === 0 && (
+        <div className="py-16 text-center text-slate-400">
+          <LayoutDashboard className="mx-auto mb-3 h-12 w-12 opacity-20" />
+          <p>No delivery data yet. Create advice notes in Gatepass first.</p>
         </div>
+      )}
 
-        <div className="flex flex-col justify-between rounded-xl border-b-4 border-indigo-500 bg-slate-800 p-6 text-white shadow-lg">
-          <h3 className="mb-4 border-b border-slate-700 pb-2 text-sm font-black uppercase tracking-widest text-slate-400">
-            Delivery Summary
-          </h3>
+      {!loading && summaries.length > 0 && filteredSummaries.length === 0 && (selectedStyle || selectedSchedule) && (
+        <div className="py-12 text-center text-slate-400">No data matches the selected filters.</div>
+      )}
 
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-            <div className="text-slate-400">Style #:</div>
-            <div className="text-right font-bold">{formData.styleNo || '-'}</div>
-
-            <div className="text-slate-400">Advice #:</div>
-            <div className="text-right font-bold">{formData.adNo || '-'}</div>
-
-            <div className="text-slate-400">Order Qty:</div>
-            <div className="text-right font-bold text-indigo-300">
-              {formData.orderQty || 0}
+      {filteredSummaries.map((summary, si) => (
+        <div key={si} className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          {/* Header bar */}
+          <div className="flex items-center justify-between bg-slate-800 px-5 py-3 text-white">
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-bold">{summary.styleNo}</span>
+              <span className="text-xs text-slate-300">{summary.customerName}</span>
+              <span className="rounded bg-slate-700 px-2 py-0.5 text-xs font-medium">FPO: {summary.fpoNo}</span>
             </div>
-
-            <div className="col-span-2 my-1 border-b border-slate-700"></div>
-
-            <div className="text-slate-400">Received Qty:</div>
-            <div className="text-right font-bold">{receivedQty}</div>
-
-            <div className="text-slate-400">Delivered Qty:</div>
-            <div className="text-right font-bold">{deliveredQty}</div>
-
-            <div className="text-slate-400">Balance to Rec:</div>
-            <div
-              className={`text-right font-bold ${
-                balanceToRec > 0 ? 'text-amber-400' : 'text-emerald-400'
-              }`}
-            >
-              {balanceToRec}
-            </div>
-
-            <div className="col-span-2 my-1 border-b border-slate-700"></div>
-
-            <div className="font-bold text-slate-400">PD TOTAL:</div>
-            <div className="text-right text-lg font-black text-red-400">
-              {grandPdTotal}
-            </div>
-
-            <div className="font-bold text-slate-400">PD %:</div>
-            <div className="text-right text-lg font-black text-red-400">
-              {pdPercentage}%
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
-        <div className="border-b border-slate-300 bg-slate-50 p-4">
-          <h3 className="font-bold text-slate-800">Batch Control Grid</h3>
-          {errors.rows && (
-            <p className="mt-2 text-[11px] text-red-600">{errors.rows}</p>
-          )}
-        </div>
-
-        <div className="w-full overflow-x-auto pb-4">
-          <table className="min-w-max w-full border-collapse whitespace-nowrap text-[11px]">
-            <thead>
-              <tr className="divide-x divide-slate-300 border-b border-slate-400 bg-slate-200 text-slate-800">
-                <th colSpan={10} className="bg-slate-300 px-2 py-2 text-center font-black">
-                  BATCH IDENTIFICATION & PLANNING
-                </th>
-                {TRACKING_SIZES.map((size) => (
-                  <th
-                    key={size}
-                    colSpan={3}
-                    className="border-l-2 border-slate-400 px-2 py-2 text-center font-black"
-                  >
-                    {size}
-                  </th>
-                ))}
-                <th
-                  colSpan={4}
-                  className="border-l-2 border-slate-400 bg-slate-300 px-2 py-2 text-center font-black"
-                >
-                  ROW TOTALS
-                </th>
-              </tr>
-
-              <tr className="divide-x divide-slate-300 border-b-2 border-slate-400 bg-slate-100 text-slate-600">
-                <th className="px-2 py-1.5 font-bold">In Date</th>
-                <th className="px-2 py-1.5 font-bold">Del Date</th>
-                <th className="px-2 py-1.5 font-bold">Style</th>
-                <th className="px-2 py-1.5 font-bold">Colour</th>
-                <th className="px-2 py-1.5 font-bold">IN AD</th>
-                <th className="px-2 py-1.5 font-bold">AD</th>
-                <th className="px-2 py-1.5 font-bold">Schedule</th>
-                <th className="px-2 py-1.5 font-bold text-indigo-700">FPO QTY</th>
-                <th className="px-2 py-1.5 font-bold text-indigo-700">Allow PD</th>
-                <th className="px-2 py-1.5 font-bold text-indigo-700">Cut No</th>
-
-                {TRACKING_SIZES.map((size) => (
-                  <Fragment key={size}>
-                    <th className="w-16 border-l-2 border-slate-400 px-2 py-1.5 font-bold">
-                      QTY
-                    </th>
-                    <th className="w-12 bg-pink-50 px-2 py-1.5 font-bold text-pink-700">
-                      PD
-                    </th>
-                    <th className="w-12 bg-blue-50 px-2 py-1.5 font-bold text-blue-700">
-                      FD
-                    </th>
-                  </Fragment>
-                ))}
-
-                <th className="border-l-2 border-slate-400 px-2 py-1.5 font-black">
-                  SIZE TOT
-                </th>
-                <th className="px-2 py-1.5 font-black text-red-600">PD TOT</th>
-                <th className="px-2 py-1.5 font-black text-red-600">FD TOT</th>
-                <th className="px-2 py-1.5 font-black">EXCEED</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-300">
-              {rows.length > 0 ? (
-                rows.map((row) => {
-                  let rowSizeTot = 0;
-                  let rowPdTot = 0;
-                  let rowFdTot = 0;
-
-                  TRACKING_SIZES.forEach((s) => {
-                    rowSizeTot += row.sizeData[s].qty;
-                    rowPdTot += row.sizeData[s].pd;
-                    rowFdTot += row.sizeData[s].fd;
-                  });
-
-                  const rowExceed = rowPdTot - row.allowedPd;
-
-                  return (
-                    <tr
-                      key={row.id}
-                      className="divide-x divide-slate-300 transition-colors hover:bg-indigo-50/20"
-                    >
-                      <td className="p-0">
-                        <input
-                          type="date"
-                          value={row.inDate}
-                          onChange={(e) => handleRowChange(row.id, 'inDate', e.target.value)}
-                          className="w-24 bg-transparent p-1.5 outline-none"
-                        />
-                      </td>
-                      <td className="p-0">
-                        <input
-                          type="date"
-                          value={row.deliveryDate}
-                          onChange={(e) =>
-                            handleRowChange(row.id, 'deliveryDate', e.target.value)
-                          }
-                          className="w-24 bg-transparent p-1.5 outline-none focus:bg-white"
-                        />
-                      </td>
-                      <td className="p-0">
-                        <input
-                          type="text"
-                          value={row.style}
-                          onChange={(e) => handleRowChange(row.id, 'style', e.target.value)}
-                          className="w-20 bg-transparent p-1.5 font-bold outline-none"
-                        />
-                      </td>
-                      <td className="p-0">
-                        <input
-                          type="text"
-                          value={row.colour}
-                          onChange={(e) => handleRowChange(row.id, 'colour', e.target.value)}
-                          className="w-20 bg-transparent p-1.5 text-slate-600 outline-none"
-                        />
-                      </td>
-                      <td className="p-0">
-                        <input
-                          type="text"
-                          value={row.inAd}
-                          onChange={(e) => handleRowChange(row.id, 'inAd', e.target.value)}
-                          className="w-24 bg-transparent p-1.5 outline-none focus:bg-white"
-                        />
-                      </td>
-                      <td className="p-0">
-                        <input
-                          type="text"
-                          value={row.ad}
-                          onChange={(e) => handleRowChange(row.id, 'ad', e.target.value)}
-                          className="w-24 bg-transparent p-1.5 outline-none focus:bg-white"
-                        />
-                      </td>
-                      <td className="p-0">
-                        <input
-                          type="text"
-                          value={row.schedule}
-                          onChange={(e) =>
-                            handleRowChange(row.id, 'schedule', e.target.value)
-                          }
-                          className="w-24 bg-transparent p-1.5 outline-none"
-                        />
-                      </td>
-                      <td className="bg-indigo-50/30 p-0">
-                        <input
-                          type="number"
-                          value={row.fpoQty || ''}
-                          onChange={(e) =>
-                            handleRowChange(
-                              row.id,
-                              'fpoQty',
-                              parseInt(e.target.value) || 0
-                            )
-                          }
-                          className="w-16 bg-transparent p-1.5 text-center font-bold text-indigo-700 outline-none"
-                          placeholder="0"
-                        />
-                      </td>
-                      <td className="bg-amber-50/50 p-0">
-                        <input
-                          type="number"
-                          value={row.allowedPd || ''}
-                          onChange={(e) =>
-                            handleRowChange(
-                              row.id,
-                              'allowedPd',
-                              parseInt(e.target.value) || 0
-                            )
-                          }
-                          className="w-16 bg-transparent p-1.5 text-center font-bold text-amber-700 outline-none focus:bg-white"
-                          placeholder="0"
-                        />
-                      </td>
-                      <td className="bg-indigo-50/30 p-0">
-                        <input
-                          type="text"
-                          value={row.cutNo}
-                          onChange={(e) => handleRowChange(row.id, 'cutNo', e.target.value)}
-                          className="w-16 bg-transparent p-1.5 text-center font-bold text-indigo-700 outline-none"
-                        />
-                      </td>
-
-                      {TRACKING_SIZES.map((size) => (
-                        <Fragment key={size}>
-                          <td className="border-l-2 border-slate-400 p-0">
-                            <input
-                              type="number"
-                              value={row.sizeData[size].qty || ''}
-                              onChange={(e) =>
-                                handleSizeChange(
-                                  row.id,
-                                  size,
-                                  'qty',
-                                  parseInt(e.target.value) || 0
-                                )
-                              }
-                              className="w-16 bg-transparent p-1.5 text-center font-semibold outline-none focus:bg-slate-100"
-                              placeholder="0"
-                            />
-                          </td>
-                          <td className="bg-pink-50/50 p-0">
-                            <input
-                              type="number"
-                              value={row.sizeData[size].pd || ''}
-                              onChange={(e) =>
-                                handleSizeChange(
-                                  row.id,
-                                  size,
-                                  'pd',
-                                  parseInt(e.target.value) || 0
-                                )
-                              }
-                              className="w-12 bg-transparent p-1.5 text-center font-bold text-pink-700 outline-none focus:bg-pink-100"
-                              placeholder="0"
-                            />
-                          </td>
-                          <td className="bg-blue-50/50 p-0">
-                            <input
-                              type="number"
-                              value={row.sizeData[size].fd || ''}
-                              onChange={(e) =>
-                                handleSizeChange(
-                                  row.id,
-                                  size,
-                                  'fd',
-                                  parseInt(e.target.value) || 0
-                                )
-                              }
-                              className="w-12 bg-transparent p-1.5 text-center font-bold text-blue-700 outline-none focus:bg-blue-100"
-                              placeholder="0"
-                            />
-                          </td>
-                        </Fragment>
-                      ))}
-
-                      <td className="border-l-2 border-slate-400 bg-slate-100 px-2 py-1.5 text-center font-black">
-                        {rowSizeTot}
-                      </td>
-                      <td className="bg-red-50/50 px-2 py-1.5 text-center font-bold text-red-600">
-                        {rowPdTot}
-                      </td>
-                      <td className="bg-red-50/50 px-2 py-1.5 text-center font-bold text-red-600">
-                        {rowFdTot}
-                      </td>
-                      <td
-                        className={`px-2 py-1.5 text-center font-black ${
-                          rowExceed > 0 ? 'text-red-600' : 'text-emerald-600'
-                        }`}
-                      >
-                        {rowExceed}
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={35} className="p-8 text-center text-slate-400">
-                    Select an Advice Note to load delivery tracking data.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-
-            {rows.length > 0 && (
-              <tfoot className="divide-x divide-slate-600 bg-slate-800 font-black text-white">
-                <tr>
-                  <td colSpan={7} className="px-4 py-2 text-right uppercase tracking-widest text-slate-300">
-                    Grand Totals:
-                  </td>
-                  <td className="px-2 py-2 text-center text-indigo-300">{totalFpoQty}</td>
-                  <td className="px-2 py-2 text-center text-indigo-300">{totalAllowedPd}</td>
-                  <td className="px-2 py-2"></td>
-
-                  {TRACKING_SIZES.map((size) => (
-                    <Fragment key={`tot-${size}`}>
-                      <td className="border-l-2 border-slate-500 px-2 py-2 text-center">
-                        {sizeGrandTotals[size].qty}
-                      </td>
-                      <td className="bg-pink-900/30 px-2 py-2 text-center text-pink-300">
-                        {sizeGrandTotals[size].pd}
-                      </td>
-                      <td className="bg-blue-900/30 px-2 py-2 text-center text-blue-300">
-                        {sizeGrandTotals[size].fd}
-                      </td>
-                    </Fragment>
-                  ))}
-
-                  <td className="border-l-2 border-slate-500 px-2 py-2 text-center">
-                    {grandSizeTotal}
-                  </td>
-                  <td className="px-2 py-2 text-center text-red-400">{grandPdTotal}</td>
-                  <td className="px-2 py-2 text-center text-red-400">{grandFdTotal}</td>
-                  <td
-                    className={`px-2 py-2 text-center ${
-                      grandExceed > 0 ? 'text-red-400' : 'text-emerald-400'
-                    }`}
-                  >
-                    {grandExceed}
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-
-        <div className="flex justify-end space-x-3 border-t border-slate-300 bg-slate-100 p-4">
-          {editingId && (
-            <button
-              type="button"
-              onClick={resetForm}
-              className="rounded-lg border border-slate-300 bg-white px-6 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Cancel Edit
+            <button onClick={() => printTracker(summary)} className="inline-flex items-center gap-1 rounded bg-slate-700 px-3 py-1 text-xs font-medium text-white hover:bg-slate-600 transition-colors">
+              <Printer className="h-3 w-3" /> Print
             </button>
-          )}
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSaving}
-            className="flex items-center rounded bg-indigo-600 px-8 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            <Save className="mr-2 h-4 w-4" />
-            {isSaving
-              ? 'SAVING TRACKER'
-              : editingId
-              ? 'UPDATE TRACKER'
-              : 'SAVE TRACKER REPORT'}
-          </button>
-        </div>
-      </div>
-
-      {reports.length > 0 && (
-        <div className="mt-12 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 bg-slate-50 p-4">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">
-              Tracker Archive
-            </h3>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full whitespace-nowrap text-left text-sm">
-              <thead className="border-b border-slate-200 bg-white text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-6 py-3 font-semibold">Date / Style</th>
-                  <th className="px-6 py-3 font-semibold">Advice / Customer</th>
-                  <th className="px-6 py-3 font-semibold">Revision / Status</th>
-                  <th className="px-6 py-3 font-semibold">Tracked Qty</th>
-                  <th className="px-6 py-3 font-semibold">Rows Logged</th>
-                  <th className="px-6 py-3 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-100">
-                <AnimatePresence>
-                  {reports.map((report) => (
-                    <motion.tr
-                      key={report.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="hover:bg-slate-50"
-                    >
-                      <td className="px-6 py-4">
-                        <p className="text-xs font-medium text-slate-500">{report.createdAt}</p>
-                        <p className="text-lg font-bold text-slate-900">{report.styleNo}</p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-indigo-700">{report.adNo}</p>
-                        <p className="mt-0.5 text-xs text-slate-600">{report.customerName}</p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <div className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                          <GitBranch className="h-3 w-3" />
-                          Rev {report.revisionNo}
-                        </div>
-                        <p className="mt-2 text-xs font-bold text-slate-700">
-                          {report.deliveryStatus}
-                        </p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-slate-800">{report.deliveryQty}</p>
-                        <p className="mt-0.5 text-xs text-emerald-600">
-                          Balance: {report.balanceQty}
-                        </p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
-                          {report.rows.length} Rows Logged
-                        </span>
-                      </td>
-
-                      <td className="space-x-2 px-6 py-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(report)}
-                          className="rounded p-2 text-blue-600 hover:bg-blue-50"
-                          title="Edit Report"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(report.id)}
-                          className="rounded p-2 text-red-600 hover:bg-red-50"
-                          title="Delete Report"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </motion.tr>
+          <div className="flex">
+            {/* Main table */}
+            <div className="flex-1 overflow-x-auto">
+              <table className="w-max min-w-full border-collapse text-[10px]">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700">
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold whitespace-nowrap">IN DATE</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold whitespace-nowrap">DELIVERY DATE</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold">STYLE</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold">COLOUR</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold">IN AD</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold">AD</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold">SCHEDULE</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold whitespace-nowrap">FPO QTY</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold whitespace-nowrap">ALLOWED PD</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold whitespace-nowrap">CUT NO</th>
+                    {summary.allSizes.map((size) => ([
+                      <th key={`${size}`} className="border border-slate-300 px-1.5 py-1.5 font-bold text-center bg-blue-50">{size}</th>,
+                      <th key={`${size}-pd`} className="border border-slate-300 px-1 py-1.5 font-bold text-center bg-red-50 text-red-700" style={{ fontSize: '8px' }}>PD</th>,
+                      <th key={`${size}-fd`} className="border border-slate-300 px-1 py-1.5 font-bold text-center bg-amber-50 text-amber-700" style={{ fontSize: '8px' }}>FD</th>,
+                    ]))}
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold bg-slate-200 whitespace-nowrap">SIZE PD TOTAL</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold bg-slate-200 whitespace-nowrap">FD TOTAL</th>
+                    <th className="border border-slate-300 px-2 py-1.5 font-bold bg-red-100 text-red-800">EXCEEDED</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.rows.map((row, ri) => (
+                    <tr key={ri} className="hover:bg-slate-50/50">
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.inDate}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.deliveryDate}</td>
+                      <td className="border border-slate-200 px-2 py-1 font-medium">{row.styleNo}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.colour}</td>
+                      <td className="border border-slate-200 px-2 py-1 font-medium">{row.inAd}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.ad}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.scheduleNo}</td>
+                      <td className="border border-slate-200 px-2 py-1 text-center font-bold">{row.fpoQty}</td>
+                      <td className="border border-slate-200 px-2 py-1 text-center">{row.allowedPd}</td>
+                      <td className="border border-slate-200 px-2 py-1 text-center font-medium">{row.cutNo}</td>
+                      {summary.allSizes.map((size) => {
+                        const sd = row.sizeBreakdown.find((s) => s.size === size);
+                        return [
+                          <td key={`${size}`} className="border border-slate-200 px-1 py-1 text-center bg-blue-50/30 font-medium">{sd?.qty || ''}</td>,
+                          <td key={`${size}-pd`} className="border border-slate-200 px-1 py-1 text-center bg-red-50/30 text-red-600 font-bold">{sd?.pd || ''}</td>,
+                          <td key={`${size}-fd`} className="border border-slate-200 px-1 py-1 text-center bg-amber-50/30 text-amber-600">{sd?.fd || ''}</td>,
+                        ];
+                      })}
+                      <td className="border border-slate-200 px-2 py-1 text-center font-bold text-red-700 bg-slate-50">{row.sizePdTotal || ''}</td>
+                      <td className="border border-slate-200 px-2 py-1 text-center font-bold bg-slate-50">{row.fdTotal || ''}</td>
+                      <td className={`border border-slate-200 px-2 py-1 text-center font-black ${row.exceeded > 0 ? 'bg-red-100 text-red-800' : ''}`}>{row.exceeded || ''}</td>
+                    </tr>
                   ))}
-                </AnimatePresence>
-              </tbody>
-            </table>
+                  {/* Totals row */}
+                  <tr className="bg-slate-100 font-bold border-t-2 border-slate-400">
+                    <td colSpan={7} className="border border-slate-300 px-2 py-1.5 text-right text-[9px] uppercase tracking-wide text-slate-500">TOTALS</td>
+                    <td className="border border-slate-300 px-2 py-1.5 text-center">{summary.rows.reduce((s, r) => s + r.fpoQty, 0)}</td>
+                    <td className="border border-slate-300 px-2 py-1.5 text-center"></td>
+                    <td className="border border-slate-300 px-2 py-1.5"></td>
+                    {summary.allSizes.map((size) => {
+                      const st = summary.sizeTotals.find((s) => s.size === size);
+                      return [
+                        <td key={size} className="border border-slate-300 px-1 py-1.5 text-center bg-blue-50/50">{st?.qty || ''}</td>,
+                        <td key={`${size}-pd`} className="border border-slate-300 px-1 py-1.5 text-center bg-red-50/50 text-red-700">{st?.pd || ''}</td>,
+                        <td key={`${size}-fd`} className="border border-slate-300 px-1 py-1.5 text-center bg-amber-50/50 text-amber-700">{st?.fd || ''}</td>,
+                      ];
+                    })}
+                    <td className="border border-slate-300 px-2 py-1.5 text-center text-red-700 bg-slate-200">{summary.grandPdTotal || ''}</td>
+                    <td className="border border-slate-300 px-2 py-1.5 text-center bg-slate-200">{summary.grandFdTotal || ''}</td>
+                    <td className="border border-slate-300 px-2 py-1.5 text-center bg-red-100"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Right summary panel */}
+            <div className="w-52 shrink-0 border-l border-slate-300 bg-slate-50 p-4 space-y-2 text-xs">
+              <div className="flex justify-between"><span className="font-bold text-slate-600">Style #</span><span className="font-bold text-slate-900">{summary.styleNo}</span></div>
+              <div className="flex justify-between"><span className="font-bold text-slate-600">FPO #</span><span className="font-medium">{summary.fpoNo}</span></div>
+              <div className="border-t border-slate-200 pt-2 flex justify-between"><span className="text-slate-600">Order qty</span><span className="font-bold">{summary.orderQty}</span></div>
+              <div className="flex justify-between"><span className="text-slate-600">Received qty</span><span className="font-bold">{summary.receivedQty}</span></div>
+              <div className="flex justify-between"><span className="text-slate-600">Delivered qty</span><span className="font-bold text-emerald-700">{summary.deliveredQty}</span></div>
+              <div className="flex justify-between border-t border-slate-200 pt-2">
+                <span className="font-bold text-slate-600">Balance to rec</span>
+                <span className={`font-black ${summary.balanceToRec > 0 ? 'text-blue-700' : 'text-emerald-700'}`}>{summary.balanceToRec}</span>
+              </div>
+              <div className="border-t border-slate-200 pt-2 flex justify-between"><span className="text-red-600 font-bold">PD TOTAL</span><span className="font-black text-red-700">{summary.pdTotal}</span></div>
+              <div className="flex justify-between"><span className="text-red-600 font-bold">PD %</span><span className="font-black text-red-700">{summary.pdPercentage}%</span></div>
+            </div>
           </div>
         </div>
-      )}
+      ))}
     </motion.div>
   );
 }
 
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="space-y-1">
-      <label className="block text-xs font-bold uppercase text-slate-500">{label}</label>
-      <input
-        type="text"
-        value={value}
-        readOnly
-        className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700 outline-none"
-      />
-    </div>
-  );
+// ==========================================
+// PRINT
+// ==========================================
+function printTracker(summary: TrackerSummary) {
+  const sizes = summary.allSizes;
+  let hdrCols = sizes.map(s => `<th class="sz">${s}</th><th class="pd">PD</th><th class="fd">FD</th>`).join('');
+  let bodyRows = '';
+  summary.rows.forEach((r, i) => {
+    let sizeCells = sizes.map(s => { const d = r.sizeBreakdown.find(x => x.size === s); return `<td class="sz">${d?.qty || ''}</td><td class="pd">${d?.pd || ''}</td><td class="fd">${d?.fd || ''}</td>`; }).join('');
+    bodyRows += `<tr><td>${r.inDate}</td><td>${r.deliveryDate}</td><td>${r.styleNo}</td><td>${r.colour}</td><td>${r.inAd}</td><td>${r.ad}</td><td>${r.scheduleNo}</td><td class="c bold">${r.fpoQty}</td><td class="c">${r.allowedPd}</td><td class="c">${r.cutNo}</td>${sizeCells}<td class="c bold red">${r.sizePdTotal || ''}</td><td class="c bold">${r.fdTotal || ''}</td><td class="c bold ${r.exceeded > 0 ? 'red' : ''}">${r.exceeded || ''}</td></tr>`;
+  });
+  // Totals
+  let totSz = sizes.map(s => { const t = summary.sizeTotals.find(x => x.size === s); return `<td class="sz bold">${t?.qty || ''}</td><td class="pd bold">${t?.pd || ''}</td><td class="fd bold">${t?.fd || ''}</td>`; }).join('');
+  bodyRows += `<tr class="total"><td colspan="7" style="text-align:right;font-size:7px">TOTALS</td><td class="c bold">${summary.rows.reduce((s,r)=>s+r.fpoQty,0)}</td><td></td><td></td>${totSz}<td class="c bold red">${summary.grandPdTotal||''}</td><td class="c bold">${summary.grandFdTotal||''}</td><td></td></tr>`;
+
+  const html = `<!DOCTYPE html><html><head><title>Delivery Tracker - ${summary.styleNo}</title>
+<style>@page{size:A3 landscape;margin:5mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:8px;color:#000}
+.hdr{display:flex;justify-content:space-between;margin-bottom:4px}.hdr h2{font-size:12px;font-weight:900}
+.info{display:flex;gap:20px;margin-bottom:4px;font-size:9px}.info b{margin-right:4px}
+table{width:100%;border-collapse:collapse;border:1px solid #000}th,td{border:0.5px solid #888;padding:1px 3px;font-size:7px;white-space:nowrap;text-align:center}
+th{background:#e8e8e8;font-weight:700}.sz{background:#eef4ff}.pd{background:#fff0f0;color:#c00;font-size:6px}.fd{background:#fffbe6;color:#a50;font-size:6px}
+.c{text-align:center}.bold{font-weight:700}.red{color:#c00}.total td{border-top:2px solid #000;font-weight:700}
+.summary{margin-top:6px;font-size:9px}.summary td{padding:2px 6px;border:none}.summary .lbl{font-weight:700;text-align:right}.summary .val{font-weight:900;text-align:left;padding-left:8px}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
+<div class="hdr"><h2>DELIVERY TRACKER — ${summary.styleNo} — ${summary.fpoNo}</h2><span>${summary.customerName}</span></div>
+<div class="info"><span><b>Style #:</b>${summary.styleNo}</span><span><b>FPO #:</b>${summary.fpoNo}</span><span><b>Order Qty:</b>${summary.orderQty}</span><span><b>Received:</b>${summary.receivedQty}</span><span><b>Delivered:</b>${summary.deliveredQty}</span><span><b>Balance:</b>${summary.balanceToRec}</span></div>
+<table><thead><tr><th>IN DATE</th><th>DELIVERY DATE</th><th>STYLE</th><th>COLOUR</th><th>IN AD</th><th>AD</th><th>SCHEDULE</th><th>FPO QTY</th><th>ALLOWED PD</th><th>CUT NO</th>${hdrCols}<th>SIZE PD TOTAL</th><th>FD TOTAL</th><th>EXCEEDED</th></tr></thead><tbody>${bodyRows}</tbody></table>
+<table class="summary" style="width:auto;margin-top:8px;border:1px solid #000"><tr><td class="lbl">PD TOTAL</td><td class="val red">${summary.pdTotal}</td></tr><tr><td class="lbl">PD %</td><td class="val red">${summary.pdPercentage}%</td></tr></table>
+</body></html>`;
+
+  const ef = document.getElementById('tracker-print-frame') as HTMLIFrameElement | null; if (ef) ef.remove();
+  const f = document.createElement('iframe'); f.id = 'tracker-print-frame'; f.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:1600px;height:1000px'; document.body.appendChild(f);
+  const d = f.contentDocument || f.contentWindow?.document; if (d) { d.open(); d.write(html); d.close(); setTimeout(() => { f.contentWindow?.print(); setTimeout(() => f.remove(), 1000); }, 300); }
 }

@@ -16,7 +16,8 @@ import {
   ClipboardCheck,
   PackageOpen,
   ClipboardList,
-  Factory
+  Factory,
+  Clock
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
@@ -136,6 +137,18 @@ export default function MainLayout() {
   href: '/admin/users',
   icon: Users,
   roles: ['Admin']
+},
+{
+  name: 'Worker Output',
+  href: '/worker',
+  icon: Factory,
+  roles: ['Admin','Worker']
+},
+{
+  name: 'Downtime Report',
+  href: '/worker/downtime',
+  icon: Clock,
+  roles: ['Admin', 'Worker']
 }
 ];
 

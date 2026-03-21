@@ -10,35 +10,59 @@ import {
   Save,
   GitBranch,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Layers,
+  X,
 } from 'lucide-react';
 import {
   useInventoryStore,
   StoreInRecord,
   EligibleStoreInItem,
+  CreateCutInput,
+  CreateBundleInput,
 } from '../../store/inventoryStore';
 
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL'];
 
-const INITIAL_FORM_STATE = {
-  submissionId: '',
-  styleNo: '',
-  customerName: '',
-  revisionNo: 1,
-  bodyColour: '',
-  printColour: '',
-  components: '',
-  season: '',
-  cutInDate: '',
-  bulkQty: '',
-  inQty: '',
-  cutQty: '',
-  scheduleNo: '',
-  cutNo: '',
-  bundleQty: '',
-  numberRange: '',
-  size: '',
-};
+// ==========================================
+// TYPES for local form state
+// ==========================================
+interface BundleFormRow {
+  tempId: string;
+  bundleNo: string;
+  bundleQty: string;
+  size: string;
+  numberRange: string;
+}
 
+interface CutFormRow {
+  tempId: string;
+  cutNo: string;
+  cutQty: string;
+  bundles: BundleFormRow[];
+  expanded: boolean;
+}
+
+const makeBundleRow = (): BundleFormRow => ({
+  tempId: crypto.randomUUID(),
+  bundleNo: '',
+  bundleQty: '',
+  size: '',
+  numberRange: '',
+});
+
+const makeCutRow = (): CutFormRow => ({
+  tempId: crypto.randomUUID(),
+  cutNo: '',
+  cutQty: '',
+  bundles: [makeBundleRow()],
+  expanded: true,
+});
+
+// ==========================================
+// COMPONENT
+// ==========================================
 export default function StoreInPage() {
   const {
     storeInRecords,
@@ -48,256 +72,336 @@ export default function StoreInPage() {
     deleteStoreInRecord,
     fetchRecords,
     fetchEligibleStoreInItems,
+    fetchBulkBalances,
+    bulkBalances,
   } = useInventoryStore();
 
-  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
+  // --- Top-level form fields ---
+  const [submissionId, setSubmissionId] = useState('');
+  const [scheduleNo, setScheduleNo] = useState('');
+  const [cutInDate, setCutInDate] = useState('');
+  const [inQty, setInQty] = useState('');
+
+  // --- Nested cuts/bundles ---
+  const [cuts, setCuts] = useState<CutFormRow[]>([makeCutRow()]);
+
+  // --- UI state ---
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
 
+  // --- Load data ---
   useEffect(() => {
-    const loadPageData = async () => {
+    const load = async () => {
       try {
-        await Promise.all([fetchRecords(), fetchEligibleStoreInItems()]);
+        await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
       } catch (error) {
-        setPageError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to load inventory data.'
-        );
+        setPageError(error instanceof Error ? error.message : 'Failed to load inventory data.');
       }
     };
+    load();
+  }, [fetchRecords, fetchEligibleStoreInItems, fetchBulkBalances]);
 
-    loadPageData();
-  }, [fetchRecords, fetchEligibleStoreInItems]);
+  // --- Selected eligible item ---
+  const selectedItem = useMemo(() => {
+    return eligibleStoreInItems.find((item) => item.submissionId === submissionId) || null;
+  }, [eligibleStoreInItems, submissionId]);
 
-  const selectedEligibleItem = useMemo(() => {
-    return (
-      eligibleStoreInItems.find(
-        (item) => item.submissionId === formData.submissionId
-      ) || null
-    );
-  }, [eligibleStoreInItems, formData.submissionId]);
+  // --- Computed quantities ---
+  const inQtyNum = parseInt(inQty) || 0;
+  const totalCutQty = cuts.reduce((sum, c) => sum + (parseInt(c.cutQty) || 0), 0);
+  const uncutBalance = Math.max(0, inQtyNum - totalCutQty);
+  const remainingBulk = selectedItem?.remainingBulkQty ?? 0;
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target;
-
-    if (name === 'submissionId') {
-      const matchedItem = eligibleStoreInItems.find(
-        (item) => item.submissionId === value
-      );
-
-      if (matchedItem) {
-        setFormData((prev) => ({
-          ...prev,
-          submissionId: matchedItem.submissionId,
-          styleNo: matchedItem.styleNo,
-          customerName: matchedItem.customerName,
-          revisionNo: matchedItem.revisionNo,
-          bodyColour: matchedItem.bodyColour,
-          printColour: matchedItem.printColour,
-          components: matchedItem.components,
-          season: matchedItem.season,
-          bulkQty: matchedItem.approvedBulkQty.toString(),
-        }));
-      }
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-    }
-
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
-
-    if (pageError) {
-      setPageError('');
-    }
+  // --- Handle style selection ---
+  const handleStyleChange = (newSubmissionId: string) => {
+    const matched = eligibleStoreInItems.find((item) => item.submissionId === newSubmissionId);
+    setSubmissionId(newSubmissionId);
+    if (errors.submissionId) setErrors((prev) => ({ ...prev, submissionId: '' }));
+    if (pageError) setPageError('');
   };
 
-  const bulkQtyNum = parseInt(formData.bulkQty) || 0;
-  const inQtyNum = parseInt(formData.inQty) || 0;
-  const cutQtyNum = parseInt(formData.cutQty) || 0;
+  // --- Cut management ---
+  const addCut = () => setCuts((prev) => [...prev, makeCutRow()]);
 
-  const balanceBulkQty = Math.max(0, bulkQtyNum - inQtyNum);
-  const availableQty = Math.max(0, inQtyNum - cutQtyNum);
+  const removeCut = (tempId: string) => {
+    setCuts((prev) => prev.filter((c) => c.tempId !== tempId));
+  };
 
+  const updateCutField = (tempId: string, field: string, value: string) => {
+    setCuts((prev) =>
+      prev.map((c) => (c.tempId === tempId ? { ...c, [field]: value } : c))
+    );
+  };
+
+  const toggleCutExpanded = (tempId: string) => {
+    setCuts((prev) =>
+      prev.map((c) => (c.tempId === tempId ? { ...c, expanded: !c.expanded } : c))
+    );
+  };
+
+  // --- Bundle management ---
+  const addBundle = (cutTempId: string) => {
+    setCuts((prev) =>
+      prev.map((c) =>
+        c.tempId === cutTempId ? { ...c, bundles: [...c.bundles, makeBundleRow()] } : c
+      )
+    );
+  };
+
+  const removeBundle = (cutTempId: string, bundleTempId: string) => {
+    setCuts((prev) =>
+      prev.map((c) =>
+        c.tempId === cutTempId
+          ? { ...c, bundles: c.bundles.filter((b) => b.tempId !== bundleTempId) }
+          : c
+      )
+    );
+  };
+
+  const updateBundleField = (
+    cutTempId: string,
+    bundleTempId: string,
+    field: string,
+    value: string
+  ) => {
+    setCuts((prev) =>
+      prev.map((c) =>
+        c.tempId === cutTempId
+          ? {
+              ...c,
+              bundles: c.bundles.map((b) =>
+                b.tempId === bundleTempId ? { ...b, [field]: value } : b
+              ),
+            }
+          : c
+      )
+    );
+  };
+
+  // --- Validation ---
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.submissionId) newErrors.submissionId = 'Approved revision is required';
-    if (!formData.cutInDate) newErrors.cutInDate = 'Cut In Date is required';
-    if (!formData.scheduleNo.trim()) newErrors.scheduleNo = 'Schedule No is required';
-    if (!formData.cutNo.trim()) newErrors.cutNo = 'Cut No is required';
-    if (!formData.numberRange.trim()) newErrors.numberRange = 'Number Range is required';
-    if (!formData.size) newErrors.size = 'Please select a Size';
+    if (!submissionId) newErrors.submissionId = 'Please select an approved style';
+    if (!scheduleNo.trim()) newErrors.scheduleNo = 'Schedule No is required';
+    if (!cutInDate) newErrors.cutInDate = 'Cut In Date is required';
 
-    if (inQtyNum <= 0) newErrors.inQty = 'Must be greater than 0';
-    if (inQtyNum > bulkQtyNum) {
-      newErrors.inQty = `Exceeds Approved Bulk Qty (${bulkQtyNum})`;
+    if (inQtyNum <= 0) {
+      newErrors.inQty = 'IN Qty must be greater than 0';
+    } else if (inQtyNum > remainingBulk && !editingId) {
+      newErrors.inQty = `Exceeds remaining bulk balance (${remainingBulk})`;
     }
 
-    if (cutQtyNum < 0) newErrors.cutQty = 'Cannot be negative';
-    if (cutQtyNum > inQtyNum) {
-      newErrors.cutQty = `Exceeds IN Qty (${inQtyNum})`;
+    if (cuts.length === 0) {
+      newErrors.cuts = 'At least one cut is required';
     }
 
-    if (!formData.bundleQty || parseInt(formData.bundleQty) <= 0) {
-      newErrors.bundleQty = 'Invalid Bundle Qty';
+    if (totalCutQty > inQtyNum) {
+      newErrors.cuts = `Total cut qty (${totalCutQty}) exceeds IN qty (${inQtyNum})`;
     }
+
+    cuts.forEach((cut, ci) => {
+      if (!cut.cutNo.trim()) newErrors[`cut_${ci}_cutNo`] = 'Required';
+      const cq = parseInt(cut.cutQty) || 0;
+      if (cq <= 0) newErrors[`cut_${ci}_cutQty`] = 'Must be > 0';
+
+      if (cut.bundles.length === 0) {
+        newErrors[`cut_${ci}_bundles`] = 'At least one bundle required';
+      }
+
+      const totalBundleQty = cut.bundles.reduce((s, b) => s + (parseInt(b.bundleQty) || 0), 0);
+      if (totalBundleQty > cq) {
+        newErrors[`cut_${ci}_bundles`] = `Bundle total (${totalBundleQty}) exceeds cut qty (${cq})`;
+      }
+
+      cut.bundles.forEach((bundle, bi) => {
+        if (!bundle.bundleNo.trim()) newErrors[`cut_${ci}_b_${bi}_no`] = 'Required';
+        if ((parseInt(bundle.bundleQty) || 0) <= 0) newErrors[`cut_${ci}_b_${bi}_qty`] = '> 0';
+        if (!bundle.size) newErrors[`cut_${ci}_b_${bi}_size`] = 'Required';
+      });
+    });
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  // --- Reset ---
   const resetForm = () => {
-    setFormData(INITIAL_FORM_STATE);
+    setSubmissionId('');
+    setScheduleNo('');
+    setCutInDate('');
+    setInQty('');
+    setCuts([makeCutRow()]);
     setEditingId(null);
     setErrors({});
+    setPageError('');
   };
 
+  // --- Submit ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!validateForm()) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
     setIsSaving(true);
+    setPageError('');
 
     try {
-      if (editingId) {
-        const updatedRecord: StoreInRecord = {
-          id: editingId,
-          submissionId: formData.submissionId,
-          revisionNo: formData.revisionNo,
-          styleNo: formData.styleNo,
-          customerName: formData.customerName,
-          bodyColour: formData.bodyColour,
-          printColour: formData.printColour,
-          components: formData.components,
-          season: formData.season,
-          cutInDate: formData.cutInDate,
-          bulkQty: bulkQtyNum,
-          inQty: inQtyNum,
-          balanceBulkQty,
-          cutQty: cutQtyNum,
-          availableQty,
-          scheduleNo: formData.scheduleNo,
-          cutNo: formData.cutNo,
-          bundleQty: parseInt(formData.bundleQty),
-          numberRange: formData.numberRange,
-          size: formData.size,
-        };
+      const payload = {
+        submissionId,
+        scheduleNo: scheduleNo.trim(),
+        cutInDate,
+        inQty: inQtyNum,
+        cuts: cuts.map((c) => ({
+          cutNo: c.cutNo.trim(),
+          cutQty: parseInt(c.cutQty) || 0,
+          bundles: c.bundles.map((b) => ({
+            bundleNo: b.bundleNo.trim(),
+            bundleQty: parseInt(b.bundleQty) || 0,
+            size: b.size,
+            numberRange: b.numberRange.trim(),
+          })),
+        })),
+      };
 
-        await updateStoreInRecord(editingId, updatedRecord);
+      if (editingId) {
+        await updateStoreInRecord(editingId, payload);
       } else {
-        await addStoreInRecord({
-          submissionId: formData.submissionId,
-          cutInDate: formData.cutInDate,
-          bulkQty: bulkQtyNum,
-          inQty: inQtyNum,
-          balanceBulkQty,
-          cutQty: cutQtyNum,
-          availableQty,
-          scheduleNo: formData.scheduleNo,
-          cutNo: formData.cutNo,
-          bundleQty: parseInt(formData.bundleQty),
-          numberRange: formData.numberRange,
-          size: formData.size,
-        });
+        await addStoreInRecord(payload);
       }
 
       resetForm();
+      await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
     } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : 'Failed to save Store-In record.'
-      );
+      setPageError(error instanceof Error ? error.message : 'Failed to save.');
     } finally {
       setIsSaving(false);
     }
   };
 
+  // --- Edit existing ---
   const handleEdit = (record: StoreInRecord) => {
-    setFormData({
-      submissionId: record.submissionId,
-      styleNo: record.styleNo,
-      customerName: record.customerName,
-      revisionNo: record.revisionNo,
-      bodyColour: record.bodyColour,
-      printColour: record.printColour,
-      components: record.components,
-      season: record.season,
-      cutInDate: record.cutInDate,
-      bulkQty: record.bulkQty.toString(),
-      inQty: record.inQty.toString(),
-      cutQty: record.cutQty.toString(),
-      scheduleNo: record.scheduleNo,
-      cutNo: record.cutNo,
-      bundleQty: record.bundleQty.toString(),
-      numberRange: record.numberRange,
-      size: record.size,
-    });
-
+    setSubmissionId(record.submissionId);
+    setScheduleNo(record.scheduleNo);
+    setCutInDate(record.cutInDate);
+    setInQty(record.inQty.toString());
+    setCuts(
+      record.cuts.map((c) => ({
+        tempId: crypto.randomUUID(),
+        cutNo: c.cutNo,
+        cutQty: c.cutQty.toString(),
+        expanded: true,
+        bundles: c.bundles.map((b) => ({
+          tempId: crypto.randomUUID(),
+          bundleNo: b.bundleNo,
+          bundleQty: b.bundleQty.toString(),
+          size: b.size,
+          numberRange: b.numberRange,
+        })),
+      }))
+    );
     setEditingId(record.id);
     setErrors({});
     setPageError('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // --- Delete ---
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this receiving record?')) {
-      return;
-    }
-
+    if (!window.confirm('Delete this store-in record and all its cuts/bundles?')) return;
     try {
       await deleteStoreInRecord(id);
+      await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
     } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : 'Failed to delete record.'
-      );
+      setPageError(error instanceof Error ? error.message : 'Failed to delete.');
     }
   };
 
+  // ==========================================
+  // RENDER
+  // ==========================================
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-8 pb-12"
+      className="mx-auto max-w-6xl space-y-8 pb-12"
     >
+      {/* Page Header */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="rounded-lg bg-orange-100 p-2">
           <PackageOpen className="h-6 w-6 text-orange-700" />
         </div>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Store-In (Receiving)</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Store In (Receiving)</h2>
           <p className="text-sm text-slate-500">
-            Only latest approved revisions can move into Stores.
+            Receive goods against approved styles. Each entry can have multiple cuts and bundles.
           </p>
         </div>
       </div>
 
+      {/* Global Bulk Balance Cards */}
+      {bulkBalances.length > 0 && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {bulkBalances.map((bal) => (
+            <div
+              key={bal.submissionId}
+              className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-slate-500">{bal.customerName}</p>
+                  <p className="text-sm font-bold text-slate-900">{bal.styleNo}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">
+                    Remaining bulk
+                  </p>
+                  <p
+                    className={`text-lg font-black ${
+                      bal.remainingBulkQty > 0 ? 'text-blue-700' : 'text-emerald-600'
+                    }`}
+                  >
+                    {bal.remainingBulkQty}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all"
+                  style={{
+                    width: `${Math.min(100, bal.approvedBulkQty > 0 ? ((bal.totalInQty / bal.approvedBulkQty) * 100) : 0)}%`,
+                  }}
+                />
+              </div>
+              <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                <span>Received: {bal.totalInQty}</span>
+                <span>Approved: {bal.approvedBulkQty}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error */}
       {pageError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           {pageError}
         </div>
       )}
 
+      {/* ==========================================
+          FORM
+          ========================================== */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
         <div className="mb-6 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800">
-            {editingId ? 'Edit Store-In Record' : 'New Store-In Entry'}
+            {editingId ? 'Edit Store-In Entry' : 'New Store-In Entry'}
           </h3>
-
           {editingId && (
             <span className="animate-pulse rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">
               EDIT MODE
@@ -305,35 +409,36 @@ export default function StoreInPage() {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} noValidate className="space-y-8">
-          {/* APPROVED REVISION PICKER */}
-          <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-5">
-            <h4 className="border-b border-emerald-200 pb-2 text-sm font-bold uppercase tracking-wider text-emerald-800">
-              Approved Latest Revision
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* --- Row 1: Style selection + schedule + date --- */}
+          <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-5 space-y-4">
+            <h4 className="border-b border-blue-200 pb-2 text-sm font-bold uppercase tracking-wider text-blue-800">
+              Style & Schedule
             </h4>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {/* Style picker */}
               <div className="space-y-1 lg:col-span-2">
                 <label className="block text-xs font-medium text-slate-600">
-                  Approved Revision <span className="text-red-500">*</span>
+                  Approved Style <span className="text-red-500">*</span>
                 </label>
                 <select
-                  name="submissionId"
-                  value={formData.submissionId}
-                  onChange={handleInputChange}
+                  value={submissionId}
+                  onChange={(e) => handleStyleChange(e.target.value)}
                   disabled={!!editingId}
                   className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-white ${
                     errors.submissionId
                       ? 'border-red-400 bg-red-50'
-                      : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
+                      : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
                   } ${editingId ? 'cursor-not-allowed bg-slate-100' : ''}`}
                 >
                   <option value="" disabled>
-                    Select approved latest revision...
+                    Select an approved style...
                   </option>
                   {eligibleStoreInItems.map((item) => (
                     <option key={item.submissionId} value={item.submissionId}>
-                      {item.styleNo} | {item.customerName} | Rev {item.revisionNo}
+                      {item.styleNo} | {item.customerName} | Bulk: {item.approvedBulkQty} | Remaining:{' '}
+                      {item.remainingBulkQty}
                     </option>
                   ))}
                 </select>
@@ -345,468 +450,558 @@ export default function StoreInPage() {
                 )}
               </div>
 
+              {/* Schedule No */}
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-600">Customer</label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Schedule No <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
-                  readOnly
-                  value={formData.customerName}
-                  className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600"
+                  value={scheduleNo}
+                  onChange={(e) => setScheduleNo(e.target.value)}
+                  placeholder="e.g. SCH-001"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                    errors.scheduleNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
+                  }`}
                 />
+                {errors.scheduleNo && (
+                  <p className="text-[11px] text-red-600">{errors.scheduleNo}</p>
+                )}
               </div>
 
+              {/* Cut In Date */}
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-600">Revision</label>
-                <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700">
-                  <GitBranch className="h-4 w-4 text-indigo-600" />
-                  <span>Rev {formData.revisionNo}</span>
-                </div>
+                <label className="block text-xs font-medium text-slate-600">
+                  Cut In Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={cutInDate}
+                  onChange={(e) => setCutInDate(e.target.value)}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                    errors.cutInDate ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
+                  }`}
+                />
+                {errors.cutInDate && (
+                  <p className="text-[11px] text-red-600">{errors.cutInDate}</p>
+                )}
               </div>
             </div>
 
-            {selectedEligibleItem && (
-              <div className="flex flex-wrap gap-3">
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-medium text-emerald-700">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Approved
-                </span>
-                <span className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-700">
-                  Level: {selectedEligibleItem.level}
-                </span>
-                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
-                  Approved Bulk Qty: {selectedEligibleItem.approvedBulkQty}
-                </span>
+            {/* Read-only info from selected style */}
+            {selectedItem && (
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mt-2">
+                <ReadOnlyField label="Customer" value={selectedItem.customerName} />
+                <ReadOnlyField label="Body Colour" value={selectedItem.bodyColour} />
+                <ReadOnlyField label="Print Colour" value={selectedItem.printColour} />
+                <ReadOnlyField label="Season" value={selectedItem.season} />
               </div>
             )}
           </div>
 
-          {/* AUTO-FILL SPECS */}
-          <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5">
-            <h4 className="border-b border-slate-200 pb-2 text-sm font-bold uppercase tracking-wider text-slate-700">
-              Garment Spec (Auto-Filled)
+          {/* --- Row 2: IN QTY + live balance --- */}
+          <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-5 space-y-4">
+            <h4 className="border-b border-orange-200 pb-2 text-sm font-bold uppercase tracking-wider text-orange-800">
+              Quantities
             </h4>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-500">Style No</label>
+                <label className="block text-xs font-medium text-slate-600">
+                  IN Qty <span className="text-red-500">*</span>
+                </label>
                 <input
-                  type="text"
-                  value={formData.styleNo}
-                  readOnly
-                  className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600"
+                  type="number"
+                  value={inQty}
+                  onChange={(e) => setInQty(e.target.value)}
+                  placeholder="e.g. 500"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm font-bold outline-none ${
+                    errors.inQty ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
+                  }`}
                 />
+                {errors.inQty && (
+                  <p className="text-[11px] text-red-600">{errors.inQty}</p>
+                )}
               </div>
 
-              {[
-                { label: 'Body Colour', name: 'bodyColour' },
-                { label: 'Print Colour', name: 'printColour' },
-                { label: 'Components', name: 'components' },
-                { label: 'Season', name: 'season' },
-              ].map((field) => (
-                <div key={field.name} className="space-y-1">
-                  <label className="block text-xs font-medium text-slate-500">
-                    {field.label}
-                  </label>
-                  <input
-                    type="text"
-                    value={(formData as Record<string, string | number>)[field.name] as string}
-                    readOnly
-                    className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600"
-                  />
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-500">Approved Bulk</label>
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                  {selectedItem?.approvedBulkQty ?? '-'}
                 </div>
-              ))}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-500">Remaining Bulk</label>
+                <div
+                  className={`rounded-lg border px-3 py-2 text-sm font-black ${
+                    remainingBulk > 0
+                      ? 'border-blue-200 bg-blue-50 text-blue-700'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  }`}
+                >
+                  {selectedItem ? remainingBulk : '-'}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-500">Uncut Balance</label>
+                <div
+                  className={`rounded-lg border px-3 py-2 text-sm font-bold ${
+                    uncutBalance > 0
+                      ? 'border-amber-200 bg-amber-50 text-amber-700'
+                      : 'border-slate-200 bg-white text-slate-500'
+                  }`}
+                >
+                  {inQtyNum > 0 ? uncutBalance : '-'}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* MANUAL ENTRY */}
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Cut In Date <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="date"
-                name="cutInDate"
-                value={formData.cutInDate}
-                onChange={handleInputChange}
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.cutInDate
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
-                }`}
-              />
-              {errors.cutInDate && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.cutInDate}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Schedule No <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                name="scheduleNo"
-                value={formData.scheduleNo}
-                onChange={handleInputChange}
-                placeholder="e.g. SCH-001"
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.scheduleNo
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
-                }`}
-              />
-              {errors.scheduleNo && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.scheduleNo}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Cut No <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                name="cutNo"
-                value={formData.cutNo}
-                onChange={handleInputChange}
-                placeholder="e.g. C-889"
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.cutNo
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
-                }`}
-              />
-              {errors.cutNo && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.cutNo}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Size <span className="text-red-500">*</span>
-              </label>
-              <select
-                name="size"
-                value={formData.size}
-                onChange={handleInputChange}
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm bg-white ${
-                  errors.size
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
-                }`}
+          {/* --- Row 3: Cuts + Bundles builder --- */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold uppercase tracking-wider text-slate-700">
+                Cuts & Bundles
+              </h4>
+              <button
+                type="button"
+                onClick={addCut}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
               >
-                <option value="" disabled>
-                  Select Size...
-                </option>
-                {SIZES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              {errors.size && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.size}
-                </p>
-              )}
+                <Plus className="h-3.5 w-3.5" /> Add Cut
+              </button>
             </div>
 
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Bundle Qty <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                name="bundleQty"
-                value={formData.bundleQty}
-                onChange={handleInputChange}
-                placeholder="e.g. 50"
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.bundleQty
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
-                }`}
-              />
-              {errors.bundleQty && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.bundleQty}
-                </p>
-              )}
-            </div>
+            {errors.cuts && (
+              <p className="text-[11px] text-red-600">
+                <AlertCircle className="mr-1 inline h-3 w-3" />
+                {errors.cuts}
+              </p>
+            )}
 
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">
-                Number Range <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                name="numberRange"
-                value={formData.numberRange}
-                onChange={handleInputChange}
-                placeholder="e.g. 001 - 500"
-                className={`w-full rounded-lg border px-3 py-2 outline-none sm:text-sm ${
-                  errors.numberRange
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
-                }`}
-              />
-              {errors.numberRange && (
-                <p className="text-[11px] text-red-600">
-                  <AlertCircle className="mr-1 inline h-3 w-3" />
-                  {errors.numberRange}
-                </p>
-              )}
-            </div>
+            <AnimatePresence>
+              {cuts.map((cut, ci) => {
+                const cutQtyNum = parseInt(cut.cutQty) || 0;
+                const totalBundleQty = cut.bundles.reduce(
+                  (s, b) => s + (parseInt(b.bundleQty) || 0),
+                  0
+                );
+                const bundleBalance = Math.max(0, cutQtyNum - totalBundleQty);
+
+                return (
+                  <motion.div
+                    key={cut.tempId}
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="rounded-lg border border-slate-200 bg-white overflow-hidden"
+                  >
+                    {/* Cut header */}
+                    <div className="flex items-center gap-3 bg-slate-50 px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleCutExpanded(cut.tempId)}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
+                        {cut.expanded ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                      </button>
+
+                      <Layers className="h-4 w-4 text-slate-400" />
+
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="space-y-0.5">
+                          <label className="block text-[10px] font-medium text-slate-500">Cut No</label>
+                          <input
+                            type="text"
+                            value={cut.cutNo}
+                            onChange={(e) => updateCutField(cut.tempId, 'cutNo', e.target.value)}
+                            placeholder="C01"
+                            className={`w-24 rounded border px-2 py-1 text-sm font-medium outline-none ${
+                              errors[`cut_${ci}_cutNo`]
+                                ? 'border-red-400 bg-red-50'
+                                : 'border-slate-300 focus:ring-1 focus:ring-blue-400'
+                            }`}
+                          />
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <label className="block text-[10px] font-medium text-slate-500">Cut Qty</label>
+                          <input
+                            type="number"
+                            value={cut.cutQty}
+                            onChange={(e) => updateCutField(cut.tempId, 'cutQty', e.target.value)}
+                            placeholder="250"
+                            className={`w-24 rounded border px-2 py-1 text-sm font-bold outline-none ${
+                              errors[`cut_${ci}_cutQty`]
+                                ? 'border-red-400 bg-red-50'
+                                : 'border-slate-300 focus:ring-1 focus:ring-blue-400'
+                            }`}
+                          />
+                        </div>
+
+                        <div className="text-xs text-slate-500">
+                          Bundles: <span className="font-bold text-slate-700">{cut.bundles.length}</span>
+                          {cutQtyNum > 0 && (
+                            <span className="ml-2">
+                              Unbundled:{' '}
+                              <span
+                                className={`font-bold ${
+                                  bundleBalance > 0 ? 'text-amber-600' : 'text-emerald-600'
+                                }`}
+                              >
+                                {bundleBalance}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {cuts.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeCut(cut.tempId)}
+                          className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Bundle rows (collapsible) */}
+                    {cut.expanded && (
+                      <div className="px-4 py-3 space-y-2">
+                        {errors[`cut_${ci}_bundles`] && (
+                          <p className="text-[11px] text-red-600">
+                            <AlertCircle className="mr-1 inline h-3 w-3" />
+                            {errors[`cut_${ci}_bundles`]}
+                          </p>
+                        )}
+
+                        {/* Bundle header */}
+                        <div className="grid grid-cols-12 gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-400 px-1">
+                          <div className="col-span-2">Bundle No</div>
+                          <div className="col-span-2">Bundle Qty</div>
+                          <div className="col-span-2">Size</div>
+                          <div className="col-span-3">Number Range</div>
+                          <div className="col-span-3"></div>
+                        </div>
+
+                        {cut.bundles.map((bundle, bi) => (
+                          <div
+                            key={bundle.tempId}
+                            className="grid grid-cols-12 gap-2 items-center"
+                          >
+                            <div className="col-span-2">
+                              <input
+                                type="text"
+                                value={bundle.bundleNo}
+                                onChange={(e) =>
+                                  updateBundleField(cut.tempId, bundle.tempId, 'bundleNo', e.target.value)
+                                }
+                                placeholder="B001"
+                                className={`w-full rounded border px-2 py-1.5 text-xs outline-none ${
+                                  errors[`cut_${ci}_b_${bi}_no`]
+                                    ? 'border-red-400 bg-red-50'
+                                    : 'border-slate-200 focus:ring-1 focus:ring-blue-400'
+                                }`}
+                              />
+                            </div>
+
+                            <div className="col-span-2">
+                              <input
+                                type="number"
+                                value={bundle.bundleQty}
+                                onChange={(e) =>
+                                  updateBundleField(cut.tempId, bundle.tempId, 'bundleQty', e.target.value)
+                                }
+                                placeholder="125"
+                                className={`w-full rounded border px-2 py-1.5 text-xs font-bold outline-none ${
+                                  errors[`cut_${ci}_b_${bi}_qty`]
+                                    ? 'border-red-400 bg-red-50'
+                                    : 'border-slate-200 focus:ring-1 focus:ring-blue-400'
+                                }`}
+                              />
+                            </div>
+
+                            <div className="col-span-2">
+                              <select
+                                value={bundle.size}
+                                onChange={(e) =>
+                                  updateBundleField(cut.tempId, bundle.tempId, 'size', e.target.value)
+                                }
+                                className={`w-full rounded border px-2 py-1.5 text-xs outline-none ${
+                                  errors[`cut_${ci}_b_${bi}_size`]
+                                    ? 'border-red-400 bg-red-50'
+                                    : 'border-slate-200 focus:ring-1 focus:ring-blue-400'
+                                }`}
+                              >
+                                <option value="">Size...</option>
+                                {SIZES.map((s) => (
+                                  <option key={s} value={s}>
+                                    {s}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="col-span-3">
+                              <input
+                                type="text"
+                                value={bundle.numberRange}
+                                onChange={(e) =>
+                                  updateBundleField(cut.tempId, bundle.tempId, 'numberRange', e.target.value)
+                                }
+                                placeholder="001-125"
+                                className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            </div>
+
+                            <div className="col-span-3 flex items-center gap-1">
+                              {cut.bundles.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeBundle(cut.tempId, bundle.tempId)}
+                                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+
+                        <button
+                          type="button"
+                          onClick={() => addBundle(cut.tempId)}
+                          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
+                        >
+                          <Plus className="h-3 w-3" /> Add Bundle
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
 
-          {/* QUANTITY WATERFALL */}
-          <div className="rounded-xl border border-orange-200 bg-orange-50/80 p-6">
-            <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-5">
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold uppercase text-slate-500">
-                  Approved Bulk Qty
-                </label>
-                <input
-                  type="text"
-                  value={formData.bulkQty}
-                  readOnly
-                  className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-3 text-sm font-semibold text-slate-500"
-                />
-              </div>
+          {/* --- Submit buttons --- */}
+          <div className="flex items-center gap-3 border-t border-slate-200 pt-6">
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {isSaving ? 'Saving...' : editingId ? 'Update Entry' : 'Save Store-In Entry'}
+            </button>
 
-              <div className="space-y-1">
-                <label className="block text-sm font-bold text-orange-900">
-                  IN Qty (Received) <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    name="inQty"
-                    value={formData.inQty}
-                    onChange={handleInputChange}
-                    placeholder="0"
-                    className={`w-full rounded-lg border px-3 py-3 font-semibold outline-none sm:text-sm ${
-                      errors.inQty
-                        ? 'border-red-400 bg-white focus:ring-red-500'
-                        : 'border-orange-300 focus:ring-2 focus:ring-orange-600'
-                    }`}
-                  />
-                  {errors.inQty && (
-                    <span className="absolute -bottom-5 left-0 rounded bg-white px-1 text-[10px] text-red-600 shadow-sm">
-                      {errors.inQty}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-1 border-r border-orange-200 pr-4">
-                <label className="block text-[11px] font-bold uppercase text-orange-700">
-                  Factory Balance
-                </label>
-                <div className="w-full rounded-lg border border-orange-200 bg-orange-100 px-3 py-3 text-sm font-bold text-orange-800">
-                  {balanceBulkQty}
-                </div>
-              </div>
-
-              <div className="space-y-1 pl-2">
-                <label className="block text-sm font-bold text-orange-900">
-                  Cut Qty (Processed) <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    name="cutQty"
-                    value={formData.cutQty}
-                    onChange={handleInputChange}
-                    placeholder="0"
-                    className={`w-full rounded-lg border px-3 py-3 font-semibold outline-none sm:text-sm ${
-                      errors.cutQty
-                        ? 'border-red-400 bg-white focus:ring-red-500'
-                        : 'border-orange-300 focus:ring-2 focus:ring-orange-600'
-                    }`}
-                  />
-                  {errors.cutQty && (
-                    <span className="absolute -bottom-5 left-0 rounded bg-white px-1 text-[10px] text-red-600 shadow-sm">
-                      {errors.cutQty}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-sm font-bold uppercase text-emerald-700">
-                  Shelf Available
-                </label>
-                <div className="flex items-center justify-between rounded-lg border-2 border-emerald-400 bg-emerald-50 px-3 py-3 text-lg font-black text-emerald-700 shadow-inner">
-                  <span>{availableQty}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end space-x-3 border-t border-slate-100 pt-4">
             {editingId && (
               <button
                 type="button"
                 onClick={resetForm}
-                className="rounded-lg border px-4 py-2 font-medium text-slate-700 hover:bg-slate-50"
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
               >
-                Cancel
+                Cancel Edit
               </button>
             )}
-
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="flex items-center rounded-lg bg-orange-600 px-6 py-2 font-medium text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {editingId ? (
-                <Save className="mr-2 h-4 w-4" />
-              ) : (
-                <Plus className="mr-2 h-4 w-4" />
-              )}
-              {isSaving
-                ? editingId
-                  ? 'Updating...'
-                  : 'Saving...'
-                : editingId
-                ? 'Update Record'
-                : 'Save Store-In Data'}
-            </button>
           </div>
         </form>
       </div>
 
-      {/* SUMMARY TABLE */}
-      {storeInRecords.length > 0 && (
-        <div className="mt-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
-            <h3 className="text-lg font-semibold text-slate-800">Recent Store-In Records</h3>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="min-w-max w-full whitespace-nowrap text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-6 py-3 font-semibold">Style / Spec</th>
-                  <th className="px-6 py-3 font-semibold">Revision / Customer</th>
-                  <th className="px-6 py-3 font-semibold">Schedule & Details</th>
-                  <th className="px-6 py-3 font-semibold">Bulk & Factory</th>
-                  <th className="px-6 py-3 font-semibold">Store Inventory</th>
-                  <th className="px-6 py-3 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-100">
-                <AnimatePresence>
-                  {storeInRecords.map((record) => (
-                    <motion.tr
-                      key={record.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="transition-colors hover:bg-slate-50"
-                    >
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-slate-900">{record.styleNo}</p>
-                        <p className="mt-0.5 text-[11px] text-slate-500">
-                          {record.bodyColour} / {record.season}
-                        </p>
-                        <p className="max-w-40 truncate text-[11px] text-slate-500">
-                          {record.components}
-                        </p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <div className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                          <GitBranch className="h-3 w-3" />
-                          Rev {record.revisionNo}
-                        </div>
-                        <p className="mt-2 text-xs text-slate-500">{record.customerName}</p>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <p className="text-sm font-medium text-slate-800">
-                          Sch: {record.scheduleNo} | Cut: {record.cutNo}
-                        </p>
-                        <p className="mt-0.5 text-xs text-slate-600">
-                          <span className="font-bold">{record.size}</span> (Bundle: {record.bundleQty})
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-slate-400">
-                          Rng: {record.numberRange} | In: {record.cutInDate}
-                        </p>
-                      </td>
-
-                      <td className="bg-slate-50/50 px-6 py-4">
-                        <div className="space-y-1">
-                          <div className="flex w-36 justify-between text-xs">
-                            <span className="text-slate-500">Approved Bulk:</span>
-                            <span className="font-medium text-slate-800">{record.bulkQty}</span>
-                          </div>
-                          <div className="flex w-36 justify-between text-xs">
-                            <span className="text-slate-500">Received (IN):</span>
-                            <span className="font-medium text-orange-600">-{record.inQty}</span>
-                          </div>
-                          <div className="flex w-36 justify-between border-t border-slate-200 pt-1 text-[11px]">
-                            <span className="font-bold text-slate-600">FACTORY OWES:</span>
-                            <span className="font-bold text-slate-800">{record.balanceBulkQty}</span>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="bg-orange-50/30 px-6 py-4">
-                        <div className="space-y-1">
-                          <div className="flex w-32 justify-between text-xs">
-                            <span className="text-slate-500">IN Qty:</span>
-                            <span className="font-medium">{record.inQty}</span>
-                          </div>
-                          <div className="flex w-32 justify-between text-xs">
-                            <span className="text-slate-500">CUT Qty:</span>
-                            <span className="font-medium text-red-600">-{record.cutQty}</span>
-                          </div>
-                          <div className="flex w-32 justify-between border-t border-orange-200 pt-1 text-sm">
-                            <span className="font-bold text-emerald-700">ON SHELF:</span>
-                            <span className="font-black text-emerald-600">{record.availableQty}</span>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="space-x-2 px-6 py-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(record)}
-                          className="rounded p-1.5 text-blue-600 hover:bg-blue-50"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(record.id)}
-                          className="rounded p-1.5 text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </AnimatePresence>
-              </tbody>
-            </table>
-          </div>
+      {/* ==========================================
+          RECORDS TABLE
+          ========================================== */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <h3 className="text-lg font-semibold text-slate-800">Store-In Records</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {storeInRecords.length} record{storeInRecords.length !== 1 ? 's' : ''}
+          </p>
         </div>
-      )}
+
+        {storeInRecords.length === 0 ? (
+          <div className="py-16 text-center text-slate-400">
+            <PackageOpen className="mx-auto mb-3 h-12 w-12 opacity-20" />
+            <p>No store-in records yet.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {storeInRecords.map((record) => {
+              const isExpanded = expandedRecordId === record.id;
+              return (
+                <div key={record.id}>
+                  {/* Record summary row */}
+                  <div
+                    className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50/50 cursor-pointer transition-colors"
+                    onClick={() => setExpandedRecordId(isExpanded ? null : record.id)}
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-900">{record.styleNo}</p>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                          <GitBranch className="h-2.5 w-2.5" />
+                          Rev {record.revisionNo}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {record.customerName}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Sch: {record.scheduleNo} | Date: {record.cutInDate} | {record.bodyColour} / {record.season}
+                      </p>
+                    </div>
+
+                    <div className="text-right space-y-0.5 shrink-0">
+                      <div className="text-xs text-slate-500">
+                        IN: <span className="font-bold text-orange-600">{record.inQty}</span>
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Cuts: <span className="font-bold text-slate-700">{record.cuts.length}</span>
+                      </div>
+                      <div className="text-xs">
+                        Balance: <span className="font-bold text-blue-700">{record.balanceBulkQty}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleEdit(record)}
+                        className="rounded p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                        title="Edit"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(record.id)}
+                        className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded: cuts and bundles tree */}
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden"
+                      >
+                        {/* Qty summary */}
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-5 mb-4">
+                          <MiniStat label="Approved Bulk" value={record.bulkQty} />
+                          <MiniStat label="IN Qty" value={record.inQty} color="orange" />
+                          <MiniStat label="Bulk Balance" value={record.balanceBulkQty} color="blue" />
+                          <MiniStat label="Total Cut Qty" value={record.totalCutQty} />
+                          <MiniStat label="Available (Shelf)" value={record.availableQty} color="green" />
+                        </div>
+
+                        {/* Cuts tree */}
+                        {record.cuts.map((cut) => (
+                          <div key={cut.id} className="mb-3 last:mb-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Layers className="h-3.5 w-3.5 text-slate-400" />
+                              <span className="text-sm font-bold text-slate-700">
+                                {cut.cutNo}
+                              </span>
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                                Qty: {cut.cutQty}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {cut.bundles.length} bundle{cut.bundles.length !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+
+                            <div className="ml-6 border-l-2 border-slate-200 pl-4">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-slate-400">
+                                    <th className="py-1 text-left font-medium">Bundle</th>
+                                    <th className="py-1 text-left font-medium">Qty</th>
+                                    <th className="py-1 text-left font-medium">Size</th>
+                                    <th className="py-1 text-left font-medium">Range</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {cut.bundles.map((b) => (
+                                    <tr key={b.id} className="text-slate-700">
+                                      <td className="py-0.5 font-medium">{b.bundleNo}</td>
+                                      <td className="py-0.5 font-bold">{b.bundleQty}</td>
+                                      <td className="py-0.5">{b.size}</td>
+                                      <td className="py-0.5 text-slate-500">{b.numberRange}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </motion.div>
+  );
+}
+
+// ==========================================
+// HELPER COMPONENTS
+// ==========================================
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-0.5">
+      <label className="block text-[10px] font-medium uppercase tracking-wide text-slate-400">
+        {label}
+      </label>
+      <p className="text-sm font-medium text-slate-700">{value || '-'}</p>
+    </div>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color?: 'orange' | 'blue' | 'green';
+}) {
+  const colorClass =
+    color === 'orange'
+      ? 'text-orange-700'
+      : color === 'blue'
+        ? 'text-blue-700'
+        : color === 'green'
+          ? 'text-emerald-700'
+          : 'text-slate-700';
+
+  return (
+    <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`text-lg font-black ${colorClass}`}>{value}</p>
+    </div>
   );
 }
