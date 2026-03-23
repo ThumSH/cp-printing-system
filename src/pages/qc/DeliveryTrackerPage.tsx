@@ -1,7 +1,8 @@
 // src/pages/qc/DeliveryTrackerPage.tsx
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Printer, RefreshCw } from 'lucide-react';
+import { LayoutDashboard, Printer, RefreshCw, Save, CheckCircle2 } from 'lucide-react';
+import { API, getAuthHeaders } from '../../api/client';
 
 const SIZES_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'];
 
@@ -13,15 +14,15 @@ interface TrackerRow {
   totalQty: number; sizePdTotal: number; fdTotal: number; exceeded: number;
 }
 interface TrackerSummary {
-  styleNo: string; fpoNo: string; customerName: string; orderQty: number;
+  storeInRecordId: string; styleNo: string; fpoNo: string; customerName: string; orderQty: number;
   receivedQty: number; deliveredQty: number; balanceToRec: number;
   pdTotal: number; pdPercentage: string; allSizes: string[];
   rows: TrackerRow[]; sizeTotals: SizeData[];
   grandTotalQty: number; grandPdTotal: number; grandFdTotal: number;
 }
 
-const API_BASE = 'http://localhost:5000/api/deliverytracker';
-const getHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
+const API_BASE = API.DELIVERY_TRACKER;
+const getHeaders = getAuthHeaders;
 
 export default function DeliveryTrackerPage() {
   const [summaries, setSummaries] = useState<TrackerSummary[]>([]);
@@ -29,6 +30,8 @@ export default function DeliveryTrackerPage() {
   const [error, setError] = useState('');
   const [selectedStyle, setSelectedStyle] = useState('');
   const [selectedSchedule, setSelectedSchedule] = useState('');
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
   const fetchReport = async () => {
     setLoading(true); setError('');
@@ -42,6 +45,41 @@ export default function DeliveryTrackerPage() {
   };
 
   useEffect(() => { fetchReport(); }, []);
+
+  const handleSave = async (summary: TrackerSummary) => {
+    setSavingId(summary.storeInRecordId);
+    try {
+      const payload = {
+        storeInRecordId: summary.storeInRecordId,
+        styleNo: summary.styleNo,
+        customerName: summary.customerName,
+        fpoNo: summary.fpoNo,
+        orderQty: summary.orderQty,
+        deliveryQty: summary.deliveredQty,
+        balanceQty: summary.balanceToRec,
+        deliveryStatus: summary.balanceToRec <= 0 ? 'Delivered' : 'In Transit',
+        rows: summary.rows.map((r, i) => ({
+          id: `row_${i}`,
+          adviceNoteId: r.inAd,
+          inDate: r.inDate,
+          deliveryDate: r.deliveryDate,
+          style: r.styleNo,
+          colour: r.colour,
+          inAd: r.inAd,
+          ad: r.ad,
+          schedule: r.scheduleNo,
+          fpoQty: r.fpoQty,
+          allowedPd: r.allowedPd,
+          cutNo: r.cutNo,
+          sizeData: Object.fromEntries(r.sizeBreakdown.map((s) => [s.size, { qty: s.qty, pd: s.pd, fd: s.fd }])),
+        })),
+      };
+      const res = await fetch(`${API_BASE}/save`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await res.text());
+      setSavedIds((prev) => new Set(prev).add(summary.storeInRecordId));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to save.'); }
+    finally { setSavingId(null); }
+  };
 
   // Build unique style and schedule options from loaded data
   const styleOptions = [...new Set(summaries.map((s) => s.styleNo))];
@@ -118,9 +156,21 @@ export default function DeliveryTrackerPage() {
               <span className="text-xs text-slate-300">{summary.customerName}</span>
               <span className="rounded bg-slate-700 px-2 py-0.5 text-xs font-medium">FPO: {summary.fpoNo}</span>
             </div>
-            <button onClick={() => printTracker(summary)} className="inline-flex items-center gap-1 rounded bg-slate-700 px-3 py-1 text-xs font-medium text-white hover:bg-slate-600 transition-colors">
-              <Printer className="h-3 w-3" /> Print
-            </button>
+            <div className="flex items-center gap-2">
+              {savedIds.has(summary.storeInRecordId) ? (
+                <span className="inline-flex items-center gap-1 rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white">
+                  <CheckCircle2 className="h-3 w-3" /> Saved
+                </span>
+              ) : (
+                <button onClick={() => handleSave(summary)} disabled={savingId === summary.storeInRecordId}
+                  className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 transition-colors disabled:opacity-50">
+                  <Save className="h-3 w-3" /> {savingId === summary.storeInRecordId ? 'Saving...' : 'Save'}
+                </button>
+              )}
+              <button onClick={() => printTracker(summary)} className="inline-flex items-center gap-1 rounded bg-slate-700 px-3 py-1 text-xs font-medium text-white hover:bg-slate-600 transition-colors">
+                <Printer className="h-3 w-3" /> Print
+              </button>
+            </div>
           </div>
 
           <div className="flex">

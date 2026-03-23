@@ -1,11 +1,14 @@
 // src/pages/qc/CPIPage.tsx
 import { useState, useEffect, useMemo } from 'react';
+import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
+import { PaginationControls } from '../../components/PaginatedTable';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ClipboardList,
   Save,
   Edit2,
   Trash2,
+  Lock,
   AlertCircle,
   Plus,
   ChevronDown,
@@ -56,11 +59,17 @@ export default function CPIPage() {
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
+  const cpiPagination = usePaginatedSearch({ data: cpiReports, searchFields: ["styleNo" as keyof CPIReport, "customer" as keyof CPIReport, "scheduleNo" as keyof CPIReport], pageSize: 25 });
+  const [cpiLocks, setCpiLocks] = useState<Record<string, { isLocked: boolean }>>({});
 
   useEffect(() => {
     const load = async () => {
       try {
         await Promise.all([fetchReports(), fetchEligibleCpiItems()]);
+        const lockRes = await fetch('http://localhost:5000/api/qc/reports/locks', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        if (lockRes.ok) setCpiLocks(await lockRes.json());
       } catch (e) {
         setPageError(e instanceof Error ? e.message : 'Failed to load QC data.');
       }
@@ -665,9 +674,9 @@ export default function CPIPage() {
           SAVED REPORTS TABLE
           ========================================== */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+        <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 space-y-3">
           <h3 className="text-lg font-semibold text-slate-800">CPI Reports</h3>
-          <p className="text-xs text-slate-500 mt-0.5">{cpiReports.length} report(s)</p>
+          <PaginationControls search={cpiPagination.search} onSearchChange={cpiPagination.setSearch} currentPage={cpiPagination.currentPage} totalPages={cpiPagination.totalPages} totalFiltered={cpiPagination.totalFiltered} totalAll={cpiPagination.totalAll} onPageChange={cpiPagination.goToPage} hasNext={cpiPagination.hasNext} hasPrev={cpiPagination.hasPrev} placeholder="Search by style, customer, schedule..." />
         </div>
 
         {cpiReports.length === 0 ? (
@@ -675,9 +684,11 @@ export default function CPIPage() {
             <ClipboardList className="mx-auto mb-3 h-12 w-12 opacity-20" />
             <p>No CPI reports yet.</p>
           </div>
+        ) : cpiPagination.paginated.length === 0 ? (
+          <div className="py-12 text-center text-slate-400">No reports match your search.</div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {cpiReports.map((report) => {
+            {cpiPagination.paginated.map((report) => {
               const isExpanded = expandedReportId === report.id;
               return (
                 <div key={report.id}>
@@ -710,12 +721,21 @@ export default function CPIPage() {
                       <button onClick={() => printReport(report)} className="rounded p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Print">
                         <Printer className="h-4 w-4" />
                       </button>
-                      <button onClick={() => handleEdit(report)} className="rounded p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors" title="Edit">
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => handleDelete(report.id)} className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Delete">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {cpiLocks[report.id]?.isLocked ? (
+                        <div className="flex items-center gap-1 px-1" title="Production records exist — cannot edit or delete this report.">
+                          <Lock className="h-4 w-4 text-slate-300" />
+                          <span className="text-[10px] text-slate-400">Locked</span>
+                        </div>
+                      ) : (
+                        <>
+                          <button onClick={() => handleEdit(report)} className="rounded p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors" title="Edit">
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => handleDelete(report.id)} className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Delete">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 

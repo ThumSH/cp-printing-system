@@ -7,6 +7,8 @@ import {
 import {
   useAdviceNoteStore, AdviceNoteRecord, AdviceNoteRow, EligibleGatepassItem,
 } from '../../store/adviceNoteStore';
+import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
+import { PaginationControls } from '../../components/PaginatedTable';
 
 function generateAdNo(existingNotes: AdviceNoteRecord[]): string {
   if (existingNotes.length === 0) return 'AD-0001';
@@ -33,6 +35,7 @@ export default function AdviceNotePage() {
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const notesPagination = usePaginatedSearch({ data: adviceNotes, searchFields: ['styleNo' as any, 'customerName' as any, 'scheduleNo' as any, 'adNo' as any], pageSize: 25 });
 
   useEffect(() => {
     const load = async () => { try { await Promise.all([fetchAdviceNotes(), fetchEligibleDispatchItems()]); } catch (e) { setPageError(e instanceof Error ? e.message : 'Failed to load.'); } };
@@ -211,9 +214,9 @@ export default function AdviceNotePage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="border-b border-slate-200 bg-slate-50 px-6 py-4"><h3 className="text-lg font-semibold text-slate-800">Advice Notes</h3><p className="text-xs text-slate-500 mt-0.5">{adviceNotes.length} note(s)</p></div>
-        {adviceNotes.length === 0 ? (<div className="py-16 text-center text-slate-400"><FileText className="mx-auto mb-3 h-12 w-12 opacity-20" /><p>No advice notes yet.</p></div>) : (
-          <div className="divide-y divide-slate-100">{adviceNotes.map((note) => {
+        <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 space-y-3"><h3 className="text-lg font-semibold text-slate-800">Advice Notes</h3><PaginationControls search={notesPagination.search} onSearchChange={notesPagination.setSearch} currentPage={notesPagination.currentPage} totalPages={notesPagination.totalPages} totalFiltered={notesPagination.totalFiltered} totalAll={notesPagination.totalAll} onPageChange={notesPagination.goToPage} hasNext={notesPagination.hasNext} hasPrev={notesPagination.hasPrev} placeholder="Search by style, customer, schedule, AD..." /></div>
+        {adviceNotes.length === 0 ? (<div className="py-16 text-center text-slate-400"><FileText className="mx-auto mb-3 h-12 w-12 opacity-20" /><p>No advice notes yet.</p></div>) : notesPagination.paginated.length === 0 ? (<div className="py-12 text-center text-slate-400">No notes match your search.</div>) : (
+          <div className="divide-y divide-slate-100">{notesPagination.paginated.map((note) => {
             const isExp = expandedNoteId === note.id; const nRows = Object.values(note.rows || {});
             return (<div key={note.id}>
               <div className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50/50 cursor-pointer transition-colors" onClick={() => setExpandedNoteId(isExp ? null : note.id)}>

@@ -1,5 +1,7 @@
 // src/pages/inventory/StoreProductionPage.tsx
 import { useState, useEffect, useMemo } from 'react';
+import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
+import { PaginationControls } from '../../components/PaginatedTable';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Factory,
@@ -10,6 +12,7 @@ import {
   Save,
   GitBranch,
   CheckCircle2,
+  Lock,
 } from 'lucide-react';
 import {
   useInventoryStore,
@@ -62,12 +65,18 @@ export default function StoreProductionPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [prodLocks, setProdLocks] = useState<Record<string, { isLocked: boolean }>>({});
+  const prodPagination = usePaginatedSearch({ data: productionRecords, searchFields: ["styleNo" as any, "customerName" as any, "cutNo" as any, "lineNo" as any], pageSize: 25 });
 
   // --- Load data ---
   useEffect(() => {
     const load = async () => {
       try {
         await Promise.all([fetchProductionRecords(), fetchEligibleProductionItems(), fetchBulkBalances()]);
+        const lockRes = await fetch('http://localhost:5000/api/inventory/production/locks', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        if (lockRes.ok) setProdLocks(await lockRes.json());
       } catch (e) {
         setPageError(e instanceof Error ? e.message : 'Failed to load production data.');
       }
@@ -482,9 +491,9 @@ export default function StoreProductionPage() {
           ========================================== */}
       {productionRecords.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 space-y-3">
             <h3 className="text-lg font-semibold text-slate-800">Production Records</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{productionRecords.length} record(s)</p>
+            <PaginationControls search={prodPagination.search} onSearchChange={prodPagination.setSearch} currentPage={prodPagination.currentPage} totalPages={prodPagination.totalPages} totalFiltered={prodPagination.totalFiltered} totalAll={prodPagination.totalAll} onPageChange={prodPagination.goToPage} hasNext={prodPagination.hasNext} hasPrev={prodPagination.hasPrev} placeholder="Search by style, customer, cut, line..." />
           </div>
 
           <div className="overflow-x-auto">
@@ -501,7 +510,7 @@ export default function StoreProductionPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {productionRecords.map((rec) => (
+                {prodPagination.paginated.map((rec) => (
                   <tr key={rec.id} className="hover:bg-slate-50/50">
                     <td className="px-4 py-2">
                       <p className="font-bold text-slate-800">{rec.styleNo}</p>
@@ -513,10 +522,17 @@ export default function StoreProductionPage() {
                     <td className="px-4 py-2">{rec.lineNo}</td>
                     <td className="px-4 py-2 text-slate-500">{rec.issueDate}</td>
                     <td className="px-4 py-2 text-right">
-                      <button onClick={() => handleDelete(rec.id)}
-                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {prodLocks[rec.id]?.isLocked ? (
+                        <div className="flex items-center justify-end gap-1" title="Gatepass advice notes dispatched — cannot delete.">
+                          <Lock className="h-4 w-4 text-slate-300" />
+                          <span className="text-[10px] text-slate-400">Locked</span>
+                        </div>
+                      ) : (
+                        <button onClick={() => handleDelete(rec.id)}
+                          className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

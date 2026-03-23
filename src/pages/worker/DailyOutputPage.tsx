@@ -1,6 +1,8 @@
 // src/pages/worker/DailyOutputPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
+import { PaginationControls } from '../../components/PaginatedTable';
 import { Factory, Save, Trash2, AlertCircle, Plus, ChevronDown, ChevronRight } from 'lucide-react';
 
 const API_BASE = 'http://localhost:5000/api/worker';
@@ -45,6 +47,7 @@ export default function DailyOutputPage() {
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const workerPagination = usePaginatedSearch({ data: records, searchFields: ['styleNo' as any, 'customerName' as any, 'tableNo' as any, 'component' as any], pageSize: 25 });
 
   const fetchData = async () => {
     try {
@@ -307,9 +310,12 @@ export default function DailyOutputPage() {
       {/* Existing records */}
       {records.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4"><h3 className="text-lg font-semibold text-slate-800">Daily Output Records</h3><p className="text-xs text-slate-500 mt-0.5">{records.length} record(s)</p></div>
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 space-y-3">
+            <h3 className="text-lg font-semibold text-slate-800">Daily Output Records</h3>
+            <PaginationControls search={workerPagination.search} onSearchChange={workerPagination.setSearch} currentPage={workerPagination.currentPage} totalPages={workerPagination.totalPages} totalFiltered={workerPagination.totalFiltered} totalAll={workerPagination.totalAll} onPageChange={workerPagination.goToPage} hasNext={workerPagination.hasNext} hasPrev={workerPagination.hasPrev} placeholder="Search by style, customer, table, component..." />
+          </div>
           <div className="divide-y divide-slate-100">
-            {records.map((rec) => {
+            {workerPagination.paginated.map((rec) => {
               const isExp = expandedId === rec.id;
               return (
                 <div key={rec.id}>

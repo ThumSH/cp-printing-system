@@ -1,21 +1,13 @@
+// src/services/services.ts
 import { User, Role } from '../types';
+import { API, getAuthHeaders } from '../api/client';
 
-const API_BASE = 'http://localhost:5000/api';
-
-function getAuthHeaders() {
-  const token = localStorage.getItem('token');
-
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  };
-}
+const API_BASE = `${API.BASE}/api`;
 
 export async function getUsers(): Promise<User[]> {
   const res = await fetch(`${API_BASE}/users`, {
     headers: getAuthHeaders(),
   });
-
   if (!res.ok) throw new Error('Failed to fetch users');
   return res.json();
 }
@@ -31,12 +23,10 @@ export async function createUser(data: {
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
-
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Failed to create user');
   }
-
   return res.json();
 }
 
@@ -49,12 +39,10 @@ export async function updateUser(
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
-
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Failed to update user');
   }
-
   return res.json();
 }
 
@@ -63,7 +51,6 @@ export async function deleteUser(id: string): Promise<void> {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });
-
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Failed to delete user');
@@ -76,7 +63,6 @@ export async function resetPassword(id: string, newPassword: string): Promise<vo
     headers: getAuthHeaders(),
     body: JSON.stringify({ newPassword }),
   });
-
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Failed to reset password');

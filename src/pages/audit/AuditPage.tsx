@@ -1,6 +1,8 @@
 // src/pages/audit/AuditPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
+import { PaginationControls } from '../../components/PaginatedTable';
 import { FileText, Save, Trash2, AlertCircle, Plus, ChevronDown, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
 
 const API_BASE = 'http://localhost:5000/api/audit';
@@ -46,6 +48,7 @@ export default function AuditPage() {
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const auditPagination = usePaginatedSearch({ data: auditRecords, searchFields: ['styleNo' as any, 'customerName' as any, 'cutNo' as any, 'scheduleNo' as any], pageSize: 25 });
 
   const fetchData = async () => {
     try {
@@ -61,7 +64,19 @@ export default function AuditPage() {
   useEffect(() => { fetchData(); }, []);
 
   const selectedItem = useMemo(() => eligibleItems.find((i) => i.id === selectedStoreInId) || null, [eligibleItems, selectedStoreInId]);
-  const availableCuts = selectedItem?.cuts ?? [];
+
+  // Filter out cuts that have already been audited for this store-in
+  const availableCuts = useMemo(() => {
+    if (!selectedItem) return [];
+    const auditedCutNos = new Set(
+      auditRecords
+        .filter((r) => r.storeInRecordId === selectedStoreInId)
+        .map((r) => r.cutNo)
+    );
+    // Also exclude cuts already in the staging table
+    const stagedCutNos = new Set(stagingRows.filter((r) => r.storeInRecordId === selectedStoreInId).map((r) => r.cutNo));
+    return selectedItem.cuts.filter((c) => !auditedCutNos.has(c.cutNo) && !stagedCutNos.has(c.cutNo));
+  }, [selectedItem, auditRecords, stagingRows, selectedStoreInId]);
   const selectedCut = useMemo(() => availableCuts.find((c) => c.cutNo === selectedCutNo) || null, [availableCuts, selectedCutNo]);
   const bundles = selectedCut?.bundles ?? [];
 
@@ -107,7 +122,7 @@ export default function AuditPage() {
       selectedBundles: selectedBundles.map((b) => ({ bundleNo: b.bundleNo, size: b.size, qty: b.bundleQty })),
       releaseQty,
       auditQty,
-      status: 'Pending',
+      status: 'Pass',
     };
 
     setStagingRows((prev) => [...prev, newRow]);
@@ -277,7 +292,6 @@ export default function AuditPage() {
                       <td className="px-3 py-2 text-center">
                         <select value={row.status} onChange={(e) => updateStagingStatus(row.tempId, e.target.value)}
                           className={`rounded border px-2 py-1 text-xs font-bold outline-none ${row.status === 'Pass' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : row.status === 'Fail' ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-300 text-slate-600'}`}>
-                          <option value="Pending">Pending</option>
                           <option value="Pass">Pass</option>
                           <option value="Fail">Fail</option>
                         </select>
@@ -309,9 +323,12 @@ export default function AuditPage() {
       {/* Existing records */}
       {auditRecords.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4"><h3 className="text-lg font-semibold text-slate-800">Audit Records</h3><p className="text-xs text-slate-500 mt-0.5">{auditRecords.length} record(s)</p></div>
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 space-y-3">
+            <h3 className="text-lg font-semibold text-slate-800">Audit Records</h3>
+            <PaginationControls search={auditPagination.search} onSearchChange={auditPagination.setSearch} currentPage={auditPagination.currentPage} totalPages={auditPagination.totalPages} totalFiltered={auditPagination.totalFiltered} totalAll={auditPagination.totalAll} onPageChange={auditPagination.goToPage} hasNext={auditPagination.hasNext} hasPrev={auditPagination.hasPrev} placeholder="Search by style, customer, cut, schedule..." />
+          </div>
           <div className="divide-y divide-slate-100">
-            {auditRecords.map((rec) => {
+            {auditPagination.paginated.map((rec) => {
               const isExp = expandedId === rec.id;
               return (
                 <div key={rec.id}>

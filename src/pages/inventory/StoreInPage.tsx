@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Layers,
   X,
+  Lock,
 } from 'lucide-react';
 import {
   useInventoryStore,
@@ -22,6 +23,8 @@ import {
   CreateCutInput,
   CreateBundleInput,
 } from '../../store/inventoryStore';
+import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
+import { PaginationControls } from '../../components/PaginatedTable';
 
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL'];
 
@@ -91,12 +94,25 @@ export default function StoreInPage() {
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
+  const [locks, setLocks] = useState<Record<string, { isLocked: boolean }>>({});
+
+  // --- Pagination + Search ---
+  const storeInPagination = usePaginatedSearch({
+    data: storeInRecords,
+    searchFields: ['styleNo', 'customerName', 'scheduleNo'] as (keyof StoreInRecord)[],
+    pageSize: 25,
+  });
 
   // --- Load data ---
   useEffect(() => {
     const load = async () => {
       try {
         await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
+        // Fetch lock statuses
+        const lockRes = await fetch('http://localhost:5000/api/inventory/store-in/locks', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        if (lockRes.ok) setLocks(await lockRes.json());
       } catch (error) {
         setPageError(error instanceof Error ? error.message : 'Failed to load inventory data.');
       }
@@ -819,11 +835,20 @@ export default function StoreInPage() {
           RECORDS TABLE
           ========================================== */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+        <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 space-y-3">
           <h3 className="text-lg font-semibold text-slate-800">Store-In Records</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {storeInRecords.length} record{storeInRecords.length !== 1 ? 's' : ''}
-          </p>
+          <PaginationControls
+            search={storeInPagination.search}
+            onSearchChange={storeInPagination.setSearch}
+            currentPage={storeInPagination.currentPage}
+            totalPages={storeInPagination.totalPages}
+            totalFiltered={storeInPagination.totalFiltered}
+            totalAll={storeInPagination.totalAll}
+            onPageChange={storeInPagination.goToPage}
+            hasNext={storeInPagination.hasNext}
+            hasPrev={storeInPagination.hasPrev}
+            placeholder="Search by style, customer, schedule..."
+          />
         </div>
 
         {storeInRecords.length === 0 ? (
@@ -831,9 +856,11 @@ export default function StoreInPage() {
             <PackageOpen className="mx-auto mb-3 h-12 w-12 opacity-20" />
             <p>No store-in records yet.</p>
           </div>
+        ) : storeInPagination.paginated.length === 0 ? (
+          <div className="py-12 text-center text-slate-400">No records match your search.</div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {storeInRecords.map((record) => {
+            {storeInPagination.paginated.map((record) => {
               const isExpanded = expandedRecordId === record.id;
               return (
                 <div key={record.id}>
@@ -877,20 +904,29 @@ export default function StoreInPage() {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleEdit(record)}
-                        className="rounded p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                        title="Edit"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(record.id)}
-                        className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {locks[record.id]?.isLocked ? (
+                        <div className="flex items-center gap-1" title="This record has downstream data (QC/Production/Gatepass) and cannot be modified.">
+                          <Lock className="h-4 w-4 text-slate-300" />
+                          <span className="text-[10px] text-slate-400">Locked</span>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleEdit(record)}
+                            className="rounded p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                            title="Edit"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(record.id)}
+                            className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
