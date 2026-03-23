@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useAuthStore } from './store/authStore';
 import MainLayout from './layouts/MainLayout';
 import Login from './pages/Login';
@@ -17,6 +18,8 @@ import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
 import UserManagementPage from './pages/admin/UserManagement';
 import DailyOutputPage from './pages/worker/DailyOutputPage';
 import DowntimeReportPage from './pages/worker/DowntimeReportPage';
+import ActivityLogPage from './pages/admin/ActivityLogPage';
+import SplashScreen from './components/SplashScreen';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -59,6 +62,12 @@ const RoleRoute = ({
 };
 
 function App() {
+   const [showSplash, setShowSplash] = useState(true);
+   
+   if (showSplash) {
+    return <SplashScreen onComplete={() => setShowSplash(false)} />;
+  }
+
   return (
     <BrowserRouter>
       <Routes>
@@ -116,7 +125,13 @@ function App() {
                   <ApproveSubmission />
                 </RoleRoute>
               }
-            />       
+            /> 
+
+            <Route path="activity-log" element={
+  <RoleRoute allowedRoles={['Admin']}>
+    <ActivityLogPage />
+  </RoleRoute>
+} />      
 
           <Route
             path="users"

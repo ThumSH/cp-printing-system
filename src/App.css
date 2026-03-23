@@ -22,3 +22,30 @@
     overflow: hidden; /* Prevents web-browser-like scrolling on the desktop window */
   }
 }
+
+.scrollbar-thin::-webkit-scrollbar { width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+ 
+.overflow-y-auto::-webkit-scrollbar { width: 6px; }
+.overflow-y-auto::-webkit-scrollbar-track { background: transparent; }
+.overflow-y-auto::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 6px; }
+.overflow-y-auto::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+ 
+/* Focus ring */
+*:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; border-radius: 4px; }
+ 
+/* Smooth transitions */
+button, a, input, select, textarea {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+ 
+/* Print */
+@media print {
+  aside, header, .no-print { display: none !important; }
+  main { margin: 0 !important; padding: 0 !important; }
+  .overflow-y-auto { overflow: visible !important; }
+}
