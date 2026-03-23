@@ -1,32 +1,40 @@
 // src/components/MiniChart.tsx
-// Lightweight SVG chart components — no external library needed
+// Pure SVG chart library — zero dependencies
 
+// ==========================================
+// BAR CHART
+// ==========================================
 interface BarChartProps {
   data: { label: string; value: number; color?: string }[];
   height?: number;
   showLabels?: boolean;
+  showValues?: boolean;
+  horizontal?: boolean;
 }
 
-export function MiniBarChart({ data, height = 120, showLabels = true }: BarChartProps) {
+export function MiniBarChart({ data, height = 120, showLabels = true, showValues = true }: BarChartProps) {
   const max = Math.max(...data.map((d) => d.value), 1);
-  const barWidth = Math.min(32, Math.floor((280 - (data.length - 1) * 6) / data.length));
-  const totalWidth = data.length * barWidth + (data.length - 1) * 6;
+  const gap = 8;
+  const barW = Math.min(36, Math.floor((300 - (data.length - 1) * gap) / data.length));
+  const totalW = data.length * barW + (data.length - 1) * gap;
 
   return (
-    <svg width="100%" viewBox={`0 0 ${totalWidth + 20} ${height + (showLabels ? 28 : 8)}`} className="overflow-visible">
+    <svg width="100%" viewBox={`0 0 ${totalW + 20} ${height + (showLabels ? 30 : 10)}`} className="overflow-visible">
       {data.map((d, i) => {
-        const barH = Math.max(2, (d.value / max) * (height - 16));
-        const x = 10 + i * (barWidth + 6);
+        const barH = Math.max(2, (d.value / max) * (height - 20));
+        const x = 10 + i * (barW + gap);
         const y = height - barH;
         return (
           <g key={i}>
-            <rect x={x} y={y} width={barWidth} height={barH} rx={3} fill={d.color || '#3b82f6'} opacity={0.85}>
-              <animate attributeName="height" from="0" to={barH} dur="0.5s" fill="freeze" />
-              <animate attributeName="y" from={height} to={y} dur="0.5s" fill="freeze" />
+            <rect x={x} y={y} width={barW} height={barH} rx={4} fill={d.color || '#3b82f6'} opacity={0.85}>
+              <animate attributeName="height" from="0" to={barH} dur="0.6s" fill="freeze" />
+              <animate attributeName="y" from={height} to={y} dur="0.6s" fill="freeze" />
             </rect>
-            <text x={x + barWidth / 2} y={y - 4} textAnchor="middle" className="text-[10px] font-bold" fill="#64748b">{d.value || ''}</text>
+            {showValues && d.value > 0 && (
+              <text x={x + barW / 2} y={y - 6} textAnchor="middle" className="text-[10px] font-bold" fill="#475569">{d.value}</text>
+            )}
             {showLabels && (
-              <text x={x + barWidth / 2} y={height + 14} textAnchor="middle" className="text-[9px]" fill="#94a3b8">{d.label}</text>
+              <text x={x + barW / 2} y={height + 16} textAnchor="middle" className="text-[9px] font-medium" fill="#94a3b8">{d.label}</text>
             )}
           </g>
         );
@@ -35,12 +43,131 @@ export function MiniBarChart({ data, height = 120, showLabels = true }: BarChart
   );
 }
 
-interface DonutProps {
-  value: number;
-  total: number;
+// ==========================================
+// HORIZONTAL BAR CHART
+// ==========================================
+interface HBarProps {
+  data: { label: string; value: number; color?: string; max?: number }[];
+  height?: number;
+}
+
+export function HorizontalBarChart({ data, height = 28 }: HBarProps) {
+  const globalMax = Math.max(...data.map((d) => d.max || d.value), 1);
+  return (
+    <div className="space-y-3">
+      {data.map((d, i) => {
+        const pct = Math.min(100, (d.value / globalMax) * 100);
+        return (
+          <div key={i} className="space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="font-medium text-slate-600">{d.label}</span>
+              <span className="font-bold text-slate-700">{d.value.toLocaleString()}</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-700 ease-out"
+                style={{ width: `${pct}%`, backgroundColor: d.color || '#3b82f6' }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ==========================================
+// PIE / DONUT CHART
+// ==========================================
+interface PieSlice { label: string; value: number; color: string; }
+
+interface PieChartProps {
+  data: PieSlice[];
   size?: number;
-  color?: string;
-  label?: string;
+  donut?: boolean;
+  centerLabel?: string;
+  centerValue?: string;
+  showLegend?: boolean;
+}
+
+export function PieChart({ data, size = 140, donut = true, centerLabel, centerValue, showLegend = true }: PieChartProps) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  if (total === 0) return <p className="text-xs text-slate-400 text-center py-4">No data</p>;
+
+  const r = (size - 8) / 2;
+  const innerR = donut ? r * 0.55 : 0;
+  const cx = size / 2;
+  const cy = size / 2;
+
+  let cumulative = 0;
+  const slices = data.filter((d) => d.value > 0).map((d) => {
+    const startAngle = (cumulative / total) * 360;
+    cumulative += d.value;
+    const endAngle = (cumulative / total) * 360;
+    const pct = Math.round((d.value / total) * 100);
+    return { ...d, startAngle, endAngle, pct };
+  });
+
+  const polarToCartesian = (angle: number, radius: number) => {
+    const rad = ((angle - 90) * Math.PI) / 180;
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  };
+
+  const arcPath = (startAngle: number, endAngle: number, outerR: number, innerRadius: number) => {
+    const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+    const outerStart = polarToCartesian(startAngle, outerR);
+    const outerEnd = polarToCartesian(endAngle, outerR);
+    const innerStart = polarToCartesian(endAngle, innerRadius);
+    const innerEnd = polarToCartesian(startAngle, innerRadius);
+
+    if (endAngle - startAngle >= 359.99) {
+      return `M ${cx} ${cy - outerR} A ${outerR} ${outerR} 0 1 1 ${cx - 0.01} ${cy - outerR} Z` +
+        (innerRadius > 0 ? ` M ${cx} ${cy - innerRadius} A ${innerRadius} ${innerRadius} 0 1 0 ${cx - 0.01} ${cy - innerRadius} Z` : '');
+    }
+
+    let path = `M ${outerStart.x} ${outerStart.y} A ${outerR} ${outerR} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y}`;
+    if (innerRadius > 0) {
+      path += ` L ${innerStart.x} ${innerStart.y} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerEnd.x} ${innerEnd.y} Z`;
+    } else {
+      path += ` L ${cx} ${cy} Z`;
+    }
+    return path;
+  };
+
+  return (
+    <div className={`flex ${showLegend ? 'items-center gap-5' : 'justify-center'}`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {slices.map((s, i) => (
+          <path key={i} d={arcPath(s.startAngle, s.endAngle, r, innerR)} fill={s.color} opacity={0.85} className="transition-all duration-500">
+            <animate attributeName="opacity" from="0" to="0.85" dur="0.5s" fill="freeze" />
+          </path>
+        ))}
+        {donut && centerValue && (
+          <>
+            <text x={cx} y={cy - 4} textAnchor="middle" dominantBaseline="central" className="text-lg font-black" fill="#1e293b">{centerValue}</text>
+            {centerLabel && <text x={cx} y={cy + 14} textAnchor="middle" className="text-[9px] font-medium" fill="#94a3b8">{centerLabel}</text>}
+          </>
+        )}
+      </svg>
+      {showLegend && (
+        <div className="space-y-1.5 min-w-0">
+          {slices.map((s, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+              <span className="text-xs text-slate-600 truncate">{s.label}</span>
+              <span className="text-xs font-bold text-slate-800 ml-auto">{s.value}</span>
+              <span className="text-[10px] text-slate-400">({s.pct}%)</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// MINI DONUT (for single metric)
+// ==========================================
+interface DonutProps {
+  value: number; total: number; size?: number; color?: string; label?: string;
 }
 
 export function MiniDonut({ value, total, size = 80, color = '#3b82f6', label }: DonutProps) {
@@ -58,47 +185,18 @@ export function MiniDonut({ value, total, size = 80, color = '#3b82f6', label }:
           transform={`rotate(-90 ${size / 2} ${size / 2})`} style={{ transition: 'stroke-dashoffset 0.8s ease' }} />
         <text x={size / 2} y={size / 2 - 2} textAnchor="middle" dominantBaseline="central"
           className="text-sm font-black" fill="#1e293b">{Math.round(pct * 100)}%</text>
-        <text x={size / 2} y={size / 2 + 12} textAnchor="middle" className="text-[8px]" fill="#94a3b8">
-          {value}/{total}
-        </text>
+        <text x={size / 2} y={size / 2 + 12} textAnchor="middle" className="text-[8px]" fill="#94a3b8">{value}/{total}</text>
       </svg>
       {label && <span className="text-[10px] font-medium text-slate-500">{label}</span>}
     </div>
   );
 }
 
-interface SparklineProps {
-  data: number[];
-  width?: number;
-  height?: number;
-  color?: string;
-}
-
-export function Sparkline({ data, width = 120, height = 32, color = '#3b82f6' }: SparklineProps) {
-  if (data.length < 2) return null;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-  const range = max - min || 1;
-  const step = width / (data.length - 1);
-
-  const points = data.map((v, i) => `${i * step},${height - 4 - ((v - min) / range) * (height - 8)}`).join(' ');
-  const areaPoints = `0,${height} ${points} ${width},${height}`;
-
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-      <polygon points={areaPoints} fill={color} opacity={0.08} />
-      <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={(data.length - 1) * step} cy={height - 4 - ((data[data.length - 1] - min) / range) * (height - 8)} r={2.5} fill={color} />
-    </svg>
-  );
-}
-
+// ==========================================
+// PROGRESS BAR
+// ==========================================
 interface ProgressBarProps {
-  value: number;
-  max: number;
-  color?: string;
-  label?: string;
-  showPct?: boolean;
+  value: number; max: number; color?: string; label?: string; showPct?: boolean;
 }
 
 export function ProgressBar({ value, max, color = '#3b82f6', label, showPct = true }: ProgressBarProps) {
@@ -114,6 +212,23 @@ export function ProgressBar({ value, max, color = '#3b82f6', label, showPct = tr
       <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
         <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
+    </div>
+  );
+}
+
+// ==========================================
+// STAT NUMBER with trend
+// ==========================================
+interface StatNumberProps {
+  value: string | number; label: string; sub?: string; trend?: 'up' | 'down' | 'neutral';
+}
+
+export function StatNumber({ value, label, sub }: StatNumberProps) {
+  return (
+    <div>
+      <p className="text-2xl font-black text-slate-900">{value}</p>
+      <p className="text-xs text-slate-500 font-medium">{label}</p>
+      {sub && <p className="text-[10px] text-slate-400 mt-0.5">{sub}</p>}
     </div>
   );
 }
