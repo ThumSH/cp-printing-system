@@ -20,6 +20,7 @@ import DailyOutputPage from './pages/worker/DailyOutputPage';
 import DowntimeReportPage from './pages/worker/DowntimeReportPage';
 import ActivityLogPage from './pages/admin/ActivityLogPage';
 import SplashScreen from './components/SplashScreen';
+import OperatorSelect from './pages/OperatorSelect';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -63,9 +64,14 @@ const RoleRoute = ({
 
 function App() {
    const [showSplash, setShowSplash] = useState(true);
+   const { needsOperatorSelect } = useAuthStore();
    
    if (showSplash) {
     return <SplashScreen onComplete={() => setShowSplash(false)} />;
+  }
+
+  if (needsOperatorSelect) {
+    return <OperatorSelect />;
   }
 
   return (

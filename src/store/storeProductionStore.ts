@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { API, getAuthHeaders } from '../api/client';
 
 export interface StoreProductionRecord {
   id: string; issueDate: string; styleNo: string; components: string;
@@ -13,8 +14,8 @@ interface StoreProductionStore {
   deleteRecord: (id: string) => Promise<void>;
 }
 
-const API_URL = 'http://localhost:5000/api/inventory/production';
-const getHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` });
+const API_URL = `${API.INVENTORY}/production`;
+const getHeaders = getAuthHeaders;
 
 export const useStoreProductionStore = create<StoreProductionStore>((set) => ({
   productionRecords: [],

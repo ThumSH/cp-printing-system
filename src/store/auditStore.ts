@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { API, getAuthHeaders } from '../api/client';
 
 export type AuditStatus = 'Pending' | 'Pass' | 'Fail';
 
@@ -86,12 +87,9 @@ interface AuditStore {
   deleteAuditRecord: (id: string) => Promise<void>;
 }
 
-const API_BASE = 'http://localhost:5000/api/audit';
-
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
-});
+const API_BASE = API.AUDIT;
+ 
+const getHeaders = getAuthHeaders;
 
 const sortAuditRecords = (records: AuditRecord[]) => {
   return [...records].sort((a, b) => {

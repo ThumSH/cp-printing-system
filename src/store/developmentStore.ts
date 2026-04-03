@@ -1,5 +1,6 @@
 // src/store/developmentStore.ts
 import { create } from 'zustand';
+import { API, getAuthHeaders } from '../api/client';
 
 export interface DevelopmentJob {
   id: string;
@@ -43,12 +44,9 @@ interface DevelopmentStore {
   deleteSubmission: (id: string) => Promise<void>;
 }
 
-const API_URL = 'http://localhost:5000/api/development';
-
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
-});
+const API_URL = `${API.BASE}/api/development`;
+ 
+const getHeaders = getAuthHeaders;
 
 const getSubmissionKey = (sub: Pick<SubmissionForm, 'styleNo' | 'customerName'>) =>
   `${sub.styleNo.trim().toLowerCase()}__${sub.customerName.trim().toLowerCase()}`;

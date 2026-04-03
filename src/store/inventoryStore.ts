@@ -1,5 +1,6 @@
 // src/store/inventoryStore.ts
 import { create } from 'zustand';
+import { API, getAuthHeaders } from '../api/client';
 
 // ==========================================
 // TYPES — matches backend DTOs
@@ -166,12 +167,9 @@ interface InventoryStore {
   deleteProductionRecord: (id: string) => Promise<void>;
 }
 
-const API_BASE = 'http://localhost:5000/api/inventory';
-
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
-});
+const API_BASE = API.INVENTORY;
+ 
+const getHeaders = getAuthHeaders;
 
 const sortByDateAndRevision = (records: StoreInRecord[]) => {
   return [...records].sort((a, b) => {

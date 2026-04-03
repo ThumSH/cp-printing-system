@@ -1,5 +1,6 @@
 // src/store/qcStore.ts
 import { create } from 'zustand';
+import { API, getAuthHeaders } from '../api/client';
 
 // ==========================================
 // DEFECT TYPES (fixed, F1-F13 + Other)
@@ -146,12 +147,9 @@ interface QCStore {
   deleteCPIReport: (id: string) => Promise<void>;
 }
 
-const API_BASE = 'http://localhost:5000/api/qc';
-
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
-});
+const API_BASE = API.QC;
+ 
+const getHeaders = getAuthHeaders;
 
 const sortReports = (reports: CPIReport[]) => {
   return [...reports].sort((a, b) => {

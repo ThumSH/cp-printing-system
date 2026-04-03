@@ -65,20 +65,43 @@ export default function AuditPage() {
 
   const selectedItem = useMemo(() => eligibleItems.find((i) => i.id === selectedStoreInId) || null, [eligibleItems, selectedStoreInId]);
 
-  // Filter out cuts that have already been audited for this store-in
+  // Get bundle IDs that are already audited (from saved records)
+  const auditedBundleNos = useMemo(() => {
+    const audited = new Map<string, Set<string>>(); // storeInId+cutNo -> set of bundleNos
+    auditRecords.forEach((r) => {
+      const key = `${r.storeInRecordId}|${r.cutNo}`;
+      if (!audited.has(key)) audited.set(key, new Set());
+      r.bundles?.forEach((b) => audited.get(key)!.add(b.bundleNo));
+    });
+    // Also include staged bundles
+    stagingRows.forEach((r) => {
+      const key = `${r.storeInRecordId}|${r.cutNo}`;
+      if (!audited.has(key)) audited.set(key, new Set());
+      r.selectedBundles?.forEach((b) => audited.get(key)!.add(b.bundleNo));
+    });
+    return audited;
+  }, [auditRecords, stagingRows]);
+
+  // Show cuts that still have unaudited bundles (don't hide the whole cut)
   const availableCuts = useMemo(() => {
     if (!selectedItem) return [];
-    const auditedCutNos = new Set(
-      auditRecords
-        .filter((r) => r.storeInRecordId === selectedStoreInId)
-        .map((r) => r.cutNo)
-    );
-    // Also exclude cuts already in the staging table
-    const stagedCutNos = new Set(stagingRows.filter((r) => r.storeInRecordId === selectedStoreInId).map((r) => r.cutNo));
-    return selectedItem.cuts.filter((c) => !auditedCutNos.has(c.cutNo) && !stagedCutNos.has(c.cutNo));
-  }, [selectedItem, auditRecords, stagingRows, selectedStoreInId]);
+    return selectedItem.cuts.filter((c) => {
+      const key = `${selectedStoreInId}|${c.cutNo}`;
+      const auditedSet = auditedBundleNos.get(key) || new Set();
+      // Show this cut if it has any unaudited bundles
+      return c.bundles.some((b) => !auditedSet.has(b.bundleNo));
+    });
+  }, [selectedItem, auditedBundleNos, selectedStoreInId]);
+
   const selectedCut = useMemo(() => availableCuts.find((c) => c.cutNo === selectedCutNo) || null, [availableCuts, selectedCutNo]);
-  const bundles = selectedCut?.bundles ?? [];
+
+  // Only show unaudited bundles for the selected cut
+  const bundles = useMemo(() => {
+    if (!selectedCut) return [];
+    const key = `${selectedStoreInId}|${selectedCut.cutNo}`;
+    const auditedSet = auditedBundleNos.get(key) || new Set();
+    return selectedCut.bundles.filter((b) => !auditedSet.has(b.bundleNo));
+  }, [selectedCut, auditedBundleNos, selectedStoreInId]);
 
   // Unique styles for the dropdown
   const styleOptions = useMemo(() => {
@@ -93,10 +116,18 @@ export default function AuditPage() {
     return eligibleItems.filter((i) => i.styleNo === selectedItem.styleNo);
   }, [eligibleItems, selectedItem]);
 
-  // Selected bundles total
+  // Selected bundles total — AQL always 32 (fixed at 91-150 range)
   const selectedBundles = bundles.filter((b) => selectedBundleIds.has(b.id));
   const releaseQty = selectedBundles.reduce((s, b) => s + b.bundleQty, 0);
-  const auditQty = getAqlSampleSize(releaseQty);
+  const auditQty = 32; // Always 32 — AQL 0.65, range 91-150
+  const isInRange = releaseQty >= 91 && releaseQty <= 150;
+  const isTooLow = releaseQty > 0 && releaseQty < 91;
+  const isTooHigh = releaseQty > 150;
+
+  // Calculate remaining qty after current selection (to check if leftovers can form valid groups)
+  const remainingBundles = bundles.filter((b) => !selectedBundleIds.has(b.id));
+  const remainingQty = remainingBundles.reduce((s, b) => s + b.bundleQty, 0);
+  const allSelected = remainingBundles.length === 0;
 
   const toggleBundle = (id: string) => {
     setSelectedBundleIds((prev) => {
@@ -108,6 +139,21 @@ export default function AuditPage() {
 
   const handleAddToTable = () => {
     if (selectedBundles.length === 0) { setErrors({ bundles: 'Select at least one bundle' }); return; }
+
+    if (releaseQty < 91) {
+      // Allow if these are the LAST remaining bundles (total of all unaudited < 91)
+      const totalUnaudited = bundles.reduce((s, b) => s + b.bundleQty, 0);
+      if (totalUnaudited > 150 || !allSelected) {
+        setErrors({ bundles: `Release Qty must be between 91-150. Currently: ${releaseQty}. Select more bundles.` });
+        return;
+      }
+      // If all remaining bundles total < 91, allow it (last group)
+    }
+
+    if (releaseQty > 150) {
+      setErrors({ bundles: `Release Qty must be between 91-150. Currently: ${releaseQty}. Deselect some bundles.` });
+      return;
+    }
 
     const sizes = [...new Set(selectedBundles.map((b) => b.size))].join(', ');
     const newRow: StagingRow = {
@@ -211,7 +257,13 @@ export default function AuditPage() {
               <select value={selectedCutNo} onChange={(e) => { setSelectedCutNo(e.target.value); setSelectedBundleIds(new Set()); }}
                 className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-purple-500">
                 <option value="">Select cut...</option>
-                {availableCuts.map((c) => (<option key={c.cutNo} value={c.cutNo}>{c.cutNo} — Qty: {c.cutQty} — {c.bundles.length} bundles</option>))}
+                {availableCuts.map((c) => {
+                  const key = `${selectedStoreInId}|${c.cutNo}`;
+                  const auditedSet = auditedBundleNos.get(key) || new Set();
+                  const remaining = c.bundles.filter((b) => !auditedSet.has(b.bundleNo)).length;
+                  const totalBundles = c.bundles.length;
+                  return (<option key={c.cutNo} value={c.cutNo}>{c.cutNo} — {remaining} of {totalBundles} bundles remaining</option>);
+                })}
               </select>
             </div>
           </div>
@@ -244,15 +296,34 @@ export default function AuditPage() {
               </tbody>
             </table>
 
-            {/* AQL display */}
-            <div className="flex items-center gap-6 rounded-lg border border-purple-200 bg-purple-50 px-5 py-3">
-              <div><span className="text-xs text-slate-500">Selected bundles:</span> <span className="font-bold text-purple-800">{selectedBundles.length}</span></div>
-              <div><span className="text-xs text-slate-500">Release Qty (lot size):</span> <span className="text-lg font-black text-purple-800">{releaseQty}</span></div>
-              <div><span className="text-xs text-slate-500">AQL 0.65 Sample Size:</span> <span className="text-lg font-black text-indigo-700">{auditQty}</span></div>
-              <button type="button" onClick={handleAddToTable} disabled={selectedBundles.length === 0}
-                className="ml-auto inline-flex items-center gap-1 rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:opacity-40 transition-colors">
-                <Plus className="h-4 w-4" /> Add to Audit Table
-              </button>
+            {/* AQL display + range validation */}
+            <div className={`flex flex-col gap-2 rounded-lg border px-5 py-3 ${isInRange || allSelected ? 'border-emerald-200 bg-emerald-50' : isTooHigh ? 'border-red-200 bg-red-50' : 'border-purple-200 bg-purple-50'}`}>
+              <div className="flex items-center gap-6">
+                <div><span className="text-xs text-slate-500">Selected:</span> <span className="font-bold text-purple-800">{selectedBundles.length}</span></div>
+                <div><span className="text-xs text-slate-500">Release Qty:</span> <span className={`text-lg font-black ${isInRange || allSelected ? 'text-emerald-700' : isTooHigh ? 'text-red-700' : 'text-amber-700'}`}>{releaseQty}</span></div>
+                <div><span className="text-xs text-slate-500">Required range:</span> <span className="text-sm font-bold text-slate-700">91 — 150</span></div>
+                <div><span className="text-xs text-slate-500">AQL 0.65 Sample:</span> <span className="text-lg font-black text-indigo-700">{auditQty}</span></div>
+                <button type="button" onClick={handleAddToTable} disabled={selectedBundles.length === 0 || isTooHigh}
+                  className="ml-auto inline-flex items-center gap-1 rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:opacity-40 transition-colors">
+                  <Plus className="h-4 w-4" /> Add to Audit Table
+                </button>
+              </div>
+              {/* Status messages */}
+              {isTooLow && !allSelected && (
+                <p className="text-xs text-amber-700 font-medium">⚠ Release Qty is below 91. Select more bundles to reach 91-150 range.</p>
+              )}
+              {isTooLow && allSelected && (
+                <p className="text-xs text-emerald-700 font-medium">✓ Last group — all remaining bundles selected ({releaseQty} pcs). Allowed.</p>
+              )}
+              {isTooHigh && (
+                <p className="text-xs text-red-700 font-medium">✗ Release Qty exceeds 150. Deselect some bundles.</p>
+              )}
+              {isInRange && (
+                <p className="text-xs text-emerald-700 font-medium">✓ Within 91-150 range. Ready to add.</p>
+              )}
+              {remainingBundles.length > 0 && (
+                <p className="text-xs text-slate-500">Remaining after this selection: {remainingBundles.length} bundle(s), {remainingQty} pcs</p>
+              )}
             </div>
             {errors.bundles && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.bundles}</p>}
           </div>

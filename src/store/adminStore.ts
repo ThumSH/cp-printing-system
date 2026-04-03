@@ -1,5 +1,7 @@
 // src/store/adminStore.ts
 import { create } from 'zustand';
+import { API, getAuthHeaders } from '../api/client';
+
 
 export type ApprovalStatus = 'Pending' | 'Approved' | 'Rejected';
 
@@ -25,12 +27,9 @@ interface AdminStore {
   deleteApproval: (id: string) => Promise<void>;
 }
 
-const API_URL = 'http://localhost:5000/api/admin';
+const API_URL = API.ADMIN;
 
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
-});
+const getHeaders = getAuthHeaders;
 
 const sortApprovals = (approvals: ApprovalRecord[]) => {
   return [...approvals].sort((a, b) => {

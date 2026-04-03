@@ -1,5 +1,6 @@
 // src/store/adviceNoteStore.ts
 import { create } from 'zustand';
+import { API, getAuthHeaders } from '../api/client';
 
 // ==========================================
 // TYPES
@@ -90,12 +91,9 @@ interface AdviceNoteStore {
   deleteAdviceNote: (id: string) => Promise<void>;
 }
 
-const API_BASE = 'http://localhost:5000/api/gatepass';
-
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
-});
+const API_BASE = API.GATEPASS;
+ 
+const getHeaders = getAuthHeaders;
 
 const sortAdviceNotes = (notes: AdviceNoteRecord[]) => {
   return [...notes].sort((a, b) => {
