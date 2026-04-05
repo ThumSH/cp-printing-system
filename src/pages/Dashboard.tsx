@@ -1,15 +1,16 @@
 // src/pages/Dashboard.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
-  LayoutDashboard, Package, CheckSquare, Truck, FileText, Factory,
-  Clock, AlertTriangle, TrendingUp, Users, Code, ClipboardCheck,
-  PackageOpen, ArrowRight, Loader2, RefreshCw, Activity, ChevronRight,
+  Package, CheckSquare, Truck, FileText, Factory,
+  Clock, AlertTriangle, TrendingUp, Code, ClipboardCheck,
+  PackageOpen, ArrowRight, Loader2, RefreshCw, ChevronRight,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { API, getAuthHeaders } from '../api/client';
 import { MiniBarChart, PieChart, MiniDonut, ProgressBar, HorizontalBarChart } from '../components/MiniChart';
+import { StoreInRecord } from '../store/inventoryStore';
 
 // ==========================================
 // TYPES
@@ -35,11 +36,24 @@ interface StyleOverview {
   workerEntries: number; totalWorkerOutput: number;
 }
 
+interface StoreInStyleSummary {
+  key: string;
+  styleNo: string;
+  customerName: string;
+  bulkQty: number;
+  totalInQty: number;
+  totalCutQty: number;
+  totalBundles: number;
+  recordCount: number;
+  scheduleCount: number;
+  latestDate: string;
+}
+
 // ==========================================
 // REUSABLE COMPONENTS
 // ==========================================
-function Card({ children, className = '', title, icon: Icon, action }: {
-  children: React.ReactNode; className?: string; title?: string; icon?: any; action?: React.ReactNode;
+function Card({ children, className = '', title, icon: Icon, action, noPadding = false }: {
+  children: React.ReactNode; className?: string; title?: string; icon?: any; action?: React.ReactNode; noPadding?: boolean;
 }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
@@ -53,7 +67,7 @@ function Card({ children, className = '', title, icon: Icon, action }: {
           {action}
         </div>
       )}
-      <div className="p-5">{children}</div>
+      <div className={noPadding ? '' : 'p-5'}>{children}</div>
     </motion.div>
   );
 }
@@ -116,6 +130,50 @@ const STAGE_COLORS: Record<string, { bg: string; text: string }> = {
   'Approved': { bg: 'bg-slate-100', text: 'text-slate-600' },
 };
 
+const normalizeDay = (value?: string) => (value || '').slice(0, 10);
+
+const buildStoreInStyleSummaries = (records: StoreInRecord[]): StoreInStyleSummary[] => {
+  const map = new Map<
+    string,
+    Omit<StoreInStyleSummary, 'scheduleCount'> & { scheduleSet: Set<string> }
+  >();
+
+  records.forEach((r) => {
+    const key = `${r.styleNo}|||${r.customerName}`;
+    const bundleCount = (r.cuts || []).reduce((sum, c) => sum + (c.bundles?.length || 0), 0);
+    const day = normalizeDay(r.cutInDate);
+    const existing = map.get(key);
+
+    if (!existing) {
+      map.set(key, {
+        key,
+        styleNo: r.styleNo,
+        customerName: r.customerName,
+        bulkQty: r.bulkQty || 0,
+        totalInQty: r.inQty || 0,
+        totalCutQty: r.totalCutQty || 0,
+        totalBundles: bundleCount,
+        recordCount: 1,
+        latestDate: day,
+        scheduleSet: new Set([r.scheduleNo].filter(Boolean)),
+      });
+      return;
+    }
+
+    existing.bulkQty = Math.max(existing.bulkQty, r.bulkQty || 0);
+    existing.totalInQty += r.inQty || 0;
+    existing.totalCutQty += r.totalCutQty || 0;
+    existing.totalBundles += bundleCount;
+    existing.recordCount += 1;
+    if (day > existing.latestDate) existing.latestDate = day;
+    if (r.scheduleNo) existing.scheduleSet.add(r.scheduleNo);
+  });
+
+  return Array.from(map.values())
+    .map(({ scheduleSet, ...rest }) => ({ ...rest, scheduleCount: scheduleSet.size }))
+    .sort((a, b) => b.latestDate.localeCompare(a.latestDate));
+};
+
 // ==========================================
 // MAIN DASHBOARD
 // ==========================================
@@ -123,19 +181,30 @@ export default function Dashboard() {
   const { user } = useAuthStore();
   const [data, setData] = useState<DashboardData | null>(null);
   const [styles, setStyles] = useState<StyleOverview[]>([]);
+  const [storeInRecords, setStoreInRecords] = useState<StoreInRecord[]>([]);
+  const [storeSummarySearch, setStoreSummarySearch] = useState('');
+  const [storeSummaryDateFrom, setStoreSummaryDateFrom] = useState('');
+  const [storeSummaryDateTo, setStoreSummaryDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = async () => {
     setLoading(true); setError('');
     try {
-      const [dRes, sRes] = await Promise.all([
+      const [dRes, sRes, storeInRes] = await Promise.all([
         fetch(`${API.BASE}/api/dashboard`, { headers: getAuthHeaders() }),
         fetch(`${API.BASE}/api/dashboard/styles`, { headers: getAuthHeaders() }),
+        fetch(`${API.INVENTORY}/store-in`, { headers: getAuthHeaders() }),
       ]);
       if (!dRes.ok) throw new Error(await dRes.text());
       setData(await dRes.json());
       if (sRes.ok) setStyles(await sRes.json());
+      if (storeInRes.ok) {
+        const records: StoreInRecord[] = await storeInRes.json();
+        setStoreInRecords(records);
+      } else {
+        setStoreInRecords([]);
+      }
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load.'); }
     finally { setLoading(false); }
   };
@@ -145,6 +214,44 @@ export default function Dashboard() {
   const role = user?.role || '';
   const isAdmin = role === 'Admin';
   const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 17 ? 'Good afternoon' : 'Good evening';
+  const storeSummaryQuery = storeSummarySearch.trim().toLowerCase();
+  const hasStoreSummaryFilters = !!(storeSummaryQuery || storeSummaryDateFrom || storeSummaryDateTo);
+
+  const filteredStoreInRecords = useMemo(() => {
+    let records = [...storeInRecords];
+    if (storeSummaryQuery) {
+      records = records.filter((r) =>
+        r.styleNo.toLowerCase().includes(storeSummaryQuery) ||
+        r.customerName.toLowerCase().includes(storeSummaryQuery) ||
+        r.scheduleNo.toLowerCase().includes(storeSummaryQuery)
+      );
+    }
+    if (storeSummaryDateFrom) records = records.filter((r) => normalizeDay(r.cutInDate) >= storeSummaryDateFrom);
+    if (storeSummaryDateTo) records = records.filter((r) => normalizeDay(r.cutInDate) <= storeSummaryDateTo);
+    return records;
+  }, [storeInRecords, storeSummaryQuery, storeSummaryDateFrom, storeSummaryDateTo]);
+
+  const allStoreStyleSummaries = useMemo(
+    () => buildStoreInStyleSummaries(storeInRecords),
+    [storeInRecords]
+  );
+  const filteredStoreStyleSummaries = useMemo(
+    () => buildStoreInStyleSummaries(filteredStoreInRecords),
+    [filteredStoreInRecords]
+  );
+  const displayStoreStyleSummaries = useMemo(
+    () => hasStoreSummaryFilters ? filteredStoreStyleSummaries : allStoreStyleSummaries.slice(0, 9),
+    [hasStoreSummaryFilters, filteredStoreStyleSummaries, allStoreStyleSummaries]
+  );
+  const storeSummaryChartData = useMemo(
+    () => displayStoreStyleSummaries.map((s) => ({
+      label: `${s.styleNo} - ${s.customerName}`,
+      value: s.totalInQty,
+      max: Math.max(1, s.bulkQty, s.totalInQty),
+      color: '#0ea5e9',
+    })),
+    [displayStoreStyleSummaries]
+  );
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center py-32 gap-3">
@@ -166,6 +273,108 @@ export default function Dashboard() {
   // Computed values for charts
   const stageCount = styles.reduce((acc, s) => { acc[s.stage] = (acc[s.stage] || 0) + 1; return acc; }, {} as Record<string, number>);
   const totalWorkerToday = data.worker.todaySeating + data.worker.todayPrinting + data.worker.todayCuring + data.worker.todayChecking + data.worker.todayPacking + data.worker.todayDispatch;
+
+  const clearStoreSummaryFilters = () => {
+    setStoreSummarySearch('');
+    setStoreSummaryDateFrom('');
+    setStoreSummaryDateTo('');
+  };
+
+  const storeInSummaryPanel = (
+    <Card
+      title={`Store-In Style Summary ${hasStoreSummaryFilters ? '(Filtered)' : '(Recent 9 Styles)'}`}
+      icon={PackageOpen}
+      action={<span className="text-xs font-semibold text-slate-500">{displayStoreStyleSummaries.length} styles</span>}
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-5">
+          <input
+            type="text"
+            value={storeSummarySearch}
+            onChange={(e) => setStoreSummarySearch(e.target.value)}
+            placeholder="Search style, customer, or schedule..."
+            className="lg:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <input
+            type="date"
+            value={storeSummaryDateFrom}
+            onChange={(e) => setStoreSummaryDateFrom(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <input
+            type="date"
+            value={storeSummaryDateTo}
+            onChange={(e) => setStoreSummaryDateTo(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={clearStoreSummaryFilters}
+            className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              hasStoreSummaryFilters
+                ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                : 'border-slate-200 bg-slate-50 text-slate-400'
+            }`}
+          >
+            Clear
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <p>
+            {hasStoreSummaryFilters
+              ? `Showing ${displayStoreStyleSummaries.length} of ${allStoreStyleSummaries.length} styles`
+              : `Showing ${Math.min(9, allStoreStyleSummaries.length)} most recent styles (of ${allStoreStyleSummaries.length})`}
+          </p>
+          <p>{filteredStoreInRecords.length} store-in records in view</p>
+        </div>
+
+        {displayStoreStyleSummaries.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-sm text-slate-500">
+            No styles match these filters.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+            <div className="xl:col-span-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">In Qty vs Bulk Qty</p>
+              <HorizontalBarChart data={storeSummaryChartData} />
+            </div>
+            <div className="xl:col-span-3 overflow-x-auto rounded-lg border border-slate-100">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold text-slate-500">
+                    <th className="px-3 py-2 text-left">Style</th>
+                    <th className="px-3 py-2 text-left">Customer</th>
+                    <th className="px-3 py-2 text-right">Bulk Qty</th>
+                    <th className="px-3 py-2 text-right">In Qty</th>
+                    <th className="px-3 py-2 text-right">Cut Qty</th>
+                    <th className="px-3 py-2 text-right">Bundles</th>
+                    <th className="px-3 py-2 text-right">Schedules</th>
+                    <th className="px-3 py-2 text-right">Entries</th>
+                    <th className="px-3 py-2 text-left">Latest</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {displayStoreStyleSummaries.map((row) => (
+                    <tr key={row.key} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-2 font-bold text-slate-800">{row.styleNo}</td>
+                      <td className="px-3 py-2 text-slate-600">{row.customerName}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-slate-700">{row.bulkQty.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-blue-700">{row.totalInQty.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-purple-700">{row.totalCutQty.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-emerald-700">{row.totalBundles.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-slate-600">{row.scheduleCount}</td>
+                      <td className="px-3 py-2 text-right text-slate-600">{row.recordCount}</td>
+                      <td className="px-3 py-2 text-slate-500">{row.latestDate || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
 
   return (
     <div className="space-y-6">
@@ -412,6 +621,7 @@ export default function Dashboard() {
               <HorizontalBarChart data={styles.map(s => ({ label: `${s.styleNo} — ${s.customerName}`, value: s.totalReceived, max: s.bulkQty, color: '#3b82f6' }))} />
             </Card>
           )}
+          {storeInRecords.length > 0 && storeInSummaryPanel}
         </div>
 
         {/* ==========================================
@@ -553,6 +763,7 @@ export default function Dashboard() {
             <HorizontalBarChart data={styles.map(s => ({ label: `${s.styleNo} — ${s.customerName}`, value: s.totalReceived, max: s.bulkQty, color: '#3b82f6' }))} />
           </Card>
         )}
+        {storeInRecords.length > 0 && storeInSummaryPanel}
       </>)}
 
       {/* ==========================================
@@ -642,3 +853,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

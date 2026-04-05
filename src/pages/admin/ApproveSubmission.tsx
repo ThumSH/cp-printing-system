@@ -49,11 +49,24 @@ export default function ApproveSubmission() {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [storeInSubmissionIds, setStoreInSubmissionIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const loadPageData = async () => {
       try {
         await Promise.all([fetchData(), fetchApprovals()]);
+        // Fetch store-in records to determine which approvals are locked
+        try {
+          const storeInRes = await fetch(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/inventory/store-in`,
+            { headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' } }
+          );
+          if (storeInRes.ok) {
+            const storeInData = await storeInRes.json();
+            const ids = new Set<string>(storeInData.map((r: any) => r.submissionId));
+            setStoreInSubmissionIds(ids);
+          }
+        } catch { /* non-critical */ }
       } catch (error) {
         console.error('Failed to load approval page data:', error);
         setErrors({
@@ -120,6 +133,11 @@ export default function ApproveSubmission() {
 
   const isLockedOldRevision = selectedSubmission
     ? !selectedSubmission.isLatestRevision
+    : false;
+
+  // Lock if store-in records exist for this submission (approved and already in use)
+  const isLockedByStoreIn = selectedSubmission
+    ? storeInSubmissionIds.has(selectedSubmission.id) && selectedSubmission.currentStatus === 'Approved'
     : false;
 
   useEffect(() => {
@@ -464,6 +482,18 @@ export default function ApproveSubmission() {
                       </p>
                     </div>
                   )}
+
+                  {isLockedByStoreIn && (
+                    <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <Lock className="h-4 w-4" />
+                        Locked — Store-In records exist
+                      </div>
+                      <p className="mt-1">
+                        This approval has Store-In records created against it. The style settings (Board Set, Approval Card, RA Date, Bulk Qty) are now locked and cannot be changed. To modify, first delete all store-in records for this style.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -560,7 +590,7 @@ export default function ApproveSubmission() {
                         name="status"
                         value={formData.status}
                         onChange={handleInputChange}
-                        disabled={isLockedOldRevision}
+                        disabled={isLockedOldRevision || isLockedByStoreIn}
                         className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                       >
                         <option value="Pending">Pending</option>
@@ -584,7 +614,7 @@ export default function ApproveSubmission() {
                             onChange={handleInputChange}
                             error={errors.boardSet}
                             placeholder="e.g. BS-102"
-                            disabled={isLockedOldRevision}
+                            disabled={isLockedOldRevision || isLockedByStoreIn}
                           />
 
                           <Field
@@ -594,7 +624,7 @@ export default function ApproveSubmission() {
                             onChange={handleInputChange}
                             error={errors.approvalCard}
                             placeholder="e.g. AC-993"
-                            disabled={isLockedOldRevision}
+                            disabled={isLockedOldRevision || isLockedByStoreIn}
                           />
 
                           <Field
@@ -604,7 +634,7 @@ export default function ApproveSubmission() {
                             onChange={handleInputChange}
                             error={errors.raMeetingDate}
                             type="date"
-                            disabled={isLockedOldRevision}
+                            disabled={isLockedOldRevision || isLockedByStoreIn}
                           />
 
                           <Field
@@ -615,7 +645,7 @@ export default function ApproveSubmission() {
                             error={errors.bulkOrderQty}
                             type="number"
                             placeholder="e.g. 5000"
-                            disabled={isLockedOldRevision}
+                            disabled={isLockedOldRevision || isLockedByStoreIn}
                           />
                         </motion.div>
                       )}
@@ -624,7 +654,7 @@ export default function ApproveSubmission() {
                     <div className="flex flex-wrap gap-3">
                       <button
                         type="submit"
-                        disabled={isSaving || isLockedOldRevision}
+                        disabled={isSaving || isLockedOldRevision || isLockedByStoreIn}
                         className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {isSaving ? 'Saving...' : 'Save Decision'}

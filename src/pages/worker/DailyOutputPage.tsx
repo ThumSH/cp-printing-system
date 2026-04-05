@@ -23,7 +23,7 @@ const DEFAULT_TIME_SLOTS = [
 ];
 
 interface TimeSlot { timeFrom: string; timeTo: string; seating: number; printing: number; curing: number; checking: number; packing: number; dispatch: number; }
-interface EligibleStyle { id: string; submissionId: string; styleNo: string; customerName: string; scheduleNo: string; components: string; bodyColour: string; orderQty: number; }
+interface EligibleStyle { id: string; storeInRecordId: string; submissionId: string; styleNo: string; customerName: string; scheduleNo: string; components: string; bodyColour: string; cutNo: string; lineNo: string; issueDate: string; orderQty: number; }
 interface StagingRow { tempId: string; storeInRecordId: string; date: string; styleNo: string; component: string; tableNo: string; orderQty: number; target: number; dailyTarget: number; timeSlots: TimeSlot[]; totalSeating: number; totalPrinting: number; totalCuring: number; totalChecking: number; totalPacking: number; totalDispatch: number; }
 interface DailyOutputRecord { id: string; storeInRecordId: string; date: string; styleNo: string; customerName: string; component: string; orderQty: number; tableNo: string; target: number; dailyTarget: number; timeSlots: TimeSlot[]; totalSeating: number; totalPrinting: number; totalCuring: number; totalChecking: number; totalPacking: number; totalDispatch: number; workerName: string; }
 
@@ -64,6 +64,8 @@ export default function DailyOutputPage() {
 
   const selectedItem = useMemo(() => eligibleStyles.find((i) => i.id === selectedStoreInId) || null, [eligibleStyles, selectedStoreInId]);
   const componentsList = useMemo(() => selectedItem?.components ? selectedItem.components.split(',').map((c) => c.trim()).filter(Boolean) : [], [selectedItem]);
+  // Use storeInRecordId from the selected production record for linking
+  const effectiveStoreInId = selectedItem?.storeInRecordId || '';
 
   // Time slot totals
   const totals = useMemo(() => ({
@@ -95,7 +97,7 @@ export default function DailyOutputPage() {
 
     const newRow: StagingRow = {
       tempId: crypto.randomUUID(),
-      storeInRecordId: selectedStoreInId,
+      storeInRecordId: effectiveStoreInId,
       date,
       styleNo: selectedItem?.styleNo ?? '',
       component: selectedComponent,
@@ -176,12 +178,15 @@ export default function DailyOutputPage() {
               <select value={selectedStoreInId} onChange={(e) => { setSelectedStoreInId(e.target.value); setSelectedComponent(''); }}
                 className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none ${errors.style ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-teal-500'}`}>
                 <option value="">Select style...</option>
-                {eligibleStyles.map((s) => (<option key={s.id} value={s.id}>{s.styleNo} | {s.customerName} | {s.scheduleNo}</option>))}
+                {eligibleStyles.map((s) => (<option key={s.id} value={s.id}>{s.styleNo} | {s.customerName} | {s.cutNo} | Line: {s.lineNo} | Issued: {s.orderQty}</option>))}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">Order Qty</label>
-              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">{selectedItem?.orderQty ?? '-'}</div>
+              <label className="block text-xs font-medium text-slate-600">Issue Qty (from Production)</label>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-orange-700">{selectedItem?.orderQty ?? '-'}</div>
+              {selectedItem && (
+                <p className="text-[10px] text-slate-500">Cut: {selectedItem.cutNo} | Line: {selectedItem.lineNo}</p>
+              )}
             </div>
             <div className="space-y-1">
               <label className="block text-xs font-medium text-slate-600">Component *</label>

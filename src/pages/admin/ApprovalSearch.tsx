@@ -36,11 +36,24 @@ export default function ApprovalSearch() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+  const [storeInSubmissionIds, setStoreInSubmissionIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const loadPageData = async () => {
       try {
         await Promise.all([fetchApprovals(), fetchData()]);
+        // Fetch store-in records to check which approvals are locked
+        try {
+          const storeInRes = await fetch(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/inventory/store-in`,
+            { headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' } }
+          );
+          if (storeInRes.ok) {
+            const storeInData = await storeInRes.json();
+            const ids = new Set<string>(storeInData.map((r: any) => r.submissionId));
+            setStoreInSubmissionIds(ids);
+          }
+        } catch { /* non-critical */ }
       } catch (error) {
         setErrors({
           status:
@@ -96,6 +109,11 @@ export default function ApprovalSearch() {
     ? !activeSubmission.isLatestRevision
     : false;
 
+  // Lock if store-in records exist for this submission
+  const isLockedByStoreIn = activeRecord
+    ? storeInSubmissionIds.has(activeRecord.submissionId) && activeRecord.status === 'Approved'
+    : false;
+
   useEffect(() => {
     if (activeRecord) {
       setFormData({
@@ -147,6 +165,10 @@ export default function ApprovalSearch() {
       newErrors.status = 'Older revisions are locked and cannot be modified.';
     }
 
+    if (isLockedByStoreIn) {
+      newErrors.status = 'This style has Store-In records and cannot be modified. Delete all store-in records first.';
+    }
+
     if (formData.status === 'Approved') {
       if (!formData.boardSet.trim()) newErrors.boardSet = 'Board Set required';
       if (!formData.approvalCard.trim()) newErrors.approvalCard = 'Approval Card required';
@@ -163,7 +185,7 @@ export default function ApprovalSearch() {
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!activeRecord || !validateForm() || isLockedOldRevision) return;
+    if (!activeRecord || !validateForm() || isLockedOldRevision || isLockedByStoreIn) return;
 
     setIsSaving(true);
 
@@ -351,6 +373,18 @@ export default function ApprovalSearch() {
             </div>
           )}
 
+          {isLockedByStoreIn && (
+            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
+              <div className="flex items-center gap-2 font-semibold">
+                <Lock className="h-4 w-4" />
+                Locked — Store-In records exist
+              </div>
+              <p className="mt-1">
+                This approved style has Store-In records created against it. The approval decision and production data cannot be changed. To modify, first delete all store-in records for this style.
+              </p>
+            </div>
+          )}
+
           {errors.status && (
             <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
               {errors.status}
@@ -366,7 +400,7 @@ export default function ApprovalSearch() {
                 name="status"
                 value={formData.status}
                 onChange={handleInputChange}
-                disabled={isLockedOldRevision || isSaving}
+                disabled={isLockedOldRevision || isLockedByStoreIn || isSaving}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-600 disabled:bg-slate-100"
               >
                 <option value="Pending">Pending</option>
@@ -383,7 +417,7 @@ export default function ApprovalSearch() {
                   value={formData.boardSet}
                   onChange={handleInputChange}
                   error={errors.boardSet}
-                  disabled={isLockedOldRevision || isSaving}
+                  disabled={isLockedOldRevision || isLockedByStoreIn || isSaving}
                 />
                 <InputField
                   label="Approval Card"
@@ -391,7 +425,7 @@ export default function ApprovalSearch() {
                   value={formData.approvalCard}
                   onChange={handleInputChange}
                   error={errors.approvalCard}
-                  disabled={isLockedOldRevision || isSaving}
+                  disabled={isLockedOldRevision || isLockedByStoreIn || isSaving}
                 />
                 <InputField
                   label="RA Meeting Date"
@@ -400,7 +434,7 @@ export default function ApprovalSearch() {
                   value={formData.raMeetingDate}
                   onChange={handleInputChange}
                   error={errors.raMeetingDate}
-                  disabled={isLockedOldRevision || isSaving}
+                  disabled={isLockedOldRevision || isLockedByStoreIn || isSaving}
                 />
                 <InputField
                   label="Bulk Order QTY"
@@ -409,14 +443,14 @@ export default function ApprovalSearch() {
                   value={formData.bulkOrderQty}
                   onChange={handleInputChange}
                   error={errors.bulkOrderQty}
-                  disabled={isLockedOldRevision || isSaving}
+                  disabled={isLockedOldRevision || isLockedByStoreIn || isSaving}
                 />
               </div>
             )}
 
             <button
               type="submit"
-              disabled={isLockedOldRevision || isSaving}
+              disabled={isLockedOldRevision || isLockedByStoreIn || isSaving}
               className="inline-flex items-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Save className="mr-2 h-4 w-4" />
@@ -514,50 +548,60 @@ export default function ApprovalSearch() {
                       </td>
 
                       <td className="px-6 py-4 text-right">
-                        <div className="inline-flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveRecord(record);
-                              setErrors({});
-                            }}
-                            disabled={!record.isLatestRevision}
-                            className={`rounded p-1.5 transition-colors ${
-                              record.isLatestRevision
-                                ? 'text-indigo-600 hover:bg-indigo-50'
-                                : 'cursor-not-allowed text-slate-300'
-                            }`}
-                            title={
-                              record.isLatestRevision
-                                ? 'Edit Decision'
-                                : 'Older revision locked'
-                            }
-                          >
-                            {record.isLatestRevision ? (
-                              <Edit2 className="h-4 w-4" />
-                            ) : (
-                              <Lock className="h-4 w-4" />
-                            )}
-                          </button>
+                        {(() => {
+                          const hasStoreIn = storeInSubmissionIds.has(record.submissionId) && record.status === 'Approved';
+                          const isEditable = record.isLatestRevision && !hasStoreIn;
+                          return (
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveRecord(record);
+                                  setErrors({});
+                                }}
+                                disabled={!isEditable}
+                                className={`rounded p-1.5 transition-colors ${
+                                  isEditable
+                                    ? 'text-indigo-600 hover:bg-indigo-50'
+                                    : 'cursor-not-allowed text-slate-300'
+                                }`}
+                                title={
+                                  hasStoreIn
+                                    ? 'Locked — Store-In records exist'
+                                    : record.isLatestRevision
+                                      ? 'Edit Decision'
+                                      : 'Older revision locked'
+                                }
+                              >
+                                {isEditable ? (
+                                  <Edit2 className="h-4 w-4" />
+                                ) : (
+                                  <Lock className="h-4 w-4" />
+                                )}
+                              </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(record)}
-                            disabled={!record.isLatestRevision || isDeletingId === record.id}
-                            className={`rounded p-1.5 transition-colors ${
-                              record.isLatestRevision
-                                ? 'text-red-600 hover:bg-red-50'
-                                : 'cursor-not-allowed text-slate-300'
-                            }`}
-                            title={
-                              record.isLatestRevision
-                                ? 'Delete Decision completely'
-                                : 'Older revision locked'
-                            }
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(record)}
+                                disabled={!isEditable || isDeletingId === record.id}
+                                className={`rounded p-1.5 transition-colors ${
+                                  isEditable
+                                    ? 'text-red-600 hover:bg-red-50'
+                                    : 'cursor-not-allowed text-slate-300'
+                                }`}
+                                title={
+                                  hasStoreIn
+                                    ? 'Locked — Store-In records exist'
+                                    : record.isLatestRevision
+                                      ? 'Delete Decision completely'
+                                      : 'Older revision locked'
+                                }
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </td>
                     </motion.tr>
                   ))}

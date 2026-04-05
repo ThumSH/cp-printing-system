@@ -50,26 +50,32 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Stores',
     items: [
       { name: 'Store In', href: '/inventory/in', icon: PackageOpen, roles: ['Admin', 'Stores'] },
+      { name: 'Store In Search', href: '/inventory/search', icon: Search, roles: ['Admin', 'Stores'] },
       { name: 'Production', href: '/inventory/production', icon: Factory, roles: ['Admin', 'Stores'] },
+      { name: 'Production Search', href: '/inventory/production/search', icon: Search, roles: ['Admin', 'Stores'] },
     ],
   },
   {
     label: 'Quality',
     items: [
       { name: 'CPI Inspection', href: '/qc/cpi', icon: ClipboardList, roles: ['Admin', 'QC'] },
+      { name: 'CPI Search', href: '/qc/cpi/search', icon: Search, roles: ['Admin', 'QC'] },
       { name: 'Delivery Tracker', href: '/qc/delivery-tracker', icon: LayoutDashboard, roles: ['Admin', 'QC'] },
+      { name: 'Tracker Search', href: '/qc/delivery-tracker/search', icon: Search, roles: ['Admin', 'QC'] },
     ],
   },
   {
     label: 'Dispatch',
     items: [
       { name: 'Advice Note', href: '/gatepass/advicenote', icon: Truck, roles: ['Admin', 'Gatepass'] },
+      { name: 'Advice Note Search', href: '/gatepass/search', icon: Search, roles: ['Admin', 'Gatepass'] },
     ],
   },
   {
     label: 'Audit',
     items: [
       { name: 'Audit Reports', href: '/audit', icon: FileText, roles: ['Admin', 'Audit'] },
+      { name: 'Audit Search', href: '/audit/search', icon: Search, roles: ['Admin', 'Audit'] },
     ],
   },
   {

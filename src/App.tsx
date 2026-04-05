@@ -10,10 +10,16 @@ import SubmissionSearch from './pages/development/SubmissionSearch';
 import ApproveSubmission from './pages/admin/ApproveSubmission';
 import ApprovalSearch from './pages/admin/ApprovalSearch';
 import StoreInPage from './pages/inventory/StoreInPage';
+import StoreInSearchPage from './pages/inventory/StoreInSearchPage';
+import ProductionSearchPage from './pages/inventory/ProductionSearchPage';
 import CPIPage from './pages/qc/CPIPage';
+import CPISearchPage from './pages/qc/CPISearchPage';
+import DeliveryTrackerSearchPage from './pages/qc/DeliveryTrackerSearchPage';
 import StoreProductionPage from './pages/inventory/StoreProductionPage';
 import AdviceNotePage from './pages/gatepass/AdviceNotePage';
+import AdviceNoteSearchPage from './pages/gatepass/Advicenotesearchpage';
 import AuditPage from './pages/audit/AuditPage';
+import AuditSearchPage from './pages/audit/Auditsearchpage';
 import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
 import UserManagementPage from './pages/admin/UserManagement';
 import DailyOutputPage from './pages/worker/DailyOutputPage';
@@ -183,6 +189,22 @@ function App() {
                 </RoleRoute>
               }
             />
+            <Route
+              path="search"
+              element={
+                <RoleRoute allowedRoles={['Stores', 'Admin']}>
+                  <StoreInSearchPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="production/search"
+              element={
+                <RoleRoute allowedRoles={['Stores', 'Admin']}>
+                  <ProductionSearchPage />
+                </RoleRoute>
+              }
+            />
           </Route>
 
           <Route path="qc">
@@ -210,6 +232,22 @@ function App() {
                 </RoleRoute>
               }
             />
+            <Route
+              path="cpi/search"
+              element={
+                <RoleRoute allowedRoles={['QC', 'Admin']}>
+                  <CPISearchPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="delivery-tracker/search"
+              element={
+                <RoleRoute allowedRoles={['QC', 'Admin']}>
+                  <DeliveryTrackerSearchPage />
+                </RoleRoute>
+              }
+            />
           </Route>
 
           <Route
@@ -217,6 +255,15 @@ function App() {
             element={
               <RoleRoute allowedRoles={['Audit', 'Admin']}>
                 <AuditPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="audit/search"
+            element={
+              <RoleRoute allowedRoles={['Audit', 'Admin']}>
+                <AuditSearchPage />
               </RoleRoute>
             }
           />
@@ -235,6 +282,14 @@ function App() {
               element={
                 <RoleRoute allowedRoles={['Gatepass', 'Admin']}>
                   <AdviceNotePage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="search"
+              element={
+                <RoleRoute allowedRoles={['Gatepass', 'Admin']}>
+                  <AdviceNoteSearchPage />
                 </RoleRoute>
               }
             />
