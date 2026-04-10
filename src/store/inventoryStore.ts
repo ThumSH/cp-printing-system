@@ -102,6 +102,8 @@ export interface ProductionCutInfo {
   cutRecordId: string;
   cutNo: string;
   cutQty: number;
+  /** The component (Part) locked in by the CPI inspection for this cut. */
+  part: string;
   alreadyIssued: number;
   availableQty: number;
 }

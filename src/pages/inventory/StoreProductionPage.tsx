@@ -119,7 +119,6 @@ export default function StoreProductionPage() {
   const issueQtyNum = parseInt(issueQty) || 0;
   const cutBalance = selectedCut ? Math.max(0, selectedCut.availableQty - issueQtyNum) : 0;
 
-  // --- Components list from the style ---
   const componentsList = useMemo(() => {
     if (!selectedItem?.components) return [];
     return selectedItem.components.split(',').map((c) => c.trim()).filter(Boolean);
@@ -257,6 +256,7 @@ export default function StoreProductionPage() {
                 onChange={(e) => {
                   setSelectedStoreInId(e.target.value);
                   setSelectedCutNo('');
+                  setSelectedComponent('');
                   setStagingRows([]);
                 }}
                 className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
@@ -307,15 +307,24 @@ export default function StoreProductionPage() {
                 </label>
                 <select
                   value={selectedCutNo}
-                  onChange={(e) => setSelectedCutNo(e.target.value)}
+                  onChange={(e) => {
+                    const selectedCutNo = e.target.value;
+
+                    // Find the specific cut object to auto-populate the component
+                    const selectedCut = selectedItem?.cuts.find(c => c.cutNo === selectedCutNo);
+
+                    // ✅ FIX: Auto-populate the component using the specific 'part' locked by CPI
+                    setSelectedCutNo(selectedCutNo);
+                    setSelectedComponent(selectedCut?.part || '');
+                  }}
                   className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
                     errors.cutNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
                   }`}
                 >
                   <option value="">Select cut...</option>
                   {adjustedCuts.filter((c) => c.availableQty > 0).map((cut) => (
-                    <option key={cut.cutNo} value={cut.cutNo}>
-                      {cut.cutNo} — Qty: {cut.cutQty} — Available: {cut.availableQty}
+                    <option key={cut.cutRecordId} value={cut.cutNo}>
+                      {cut.cutNo} (Avail: {cut.availableQty})
                     </option>
                   ))}
                 </select>
@@ -323,21 +332,18 @@ export default function StoreProductionPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-600">
-                  Component <span className="text-red-500">*</span>
+                <label className="mb-1 block text-sm font-semibold text-slate-700">
+                  Component
                 </label>
-                <select
+                <input
+                  type="text"
                   value={selectedComponent}
-                  onChange={(e) => setSelectedComponent(e.target.value)}
-                  className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
-                    errors.component ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'
-                  }`}
-                >
-                  <option value="">Select...</option>
-                  {componentsList.map((comp) => (
-                    <option key={comp} value={comp}>{comp}</option>
-                  ))}
-                </select>
+                  readOnly
+                  disabled
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 p-2 text-sm text-slate-500 cursor-not-allowed"
+                  placeholder="Auto-filled from CPI"
+                  title="Locked by CPI Inspection"
+                />
                 {errors.component && <p className="text-[11px] text-red-600">{errors.component}</p>}
               </div>
 

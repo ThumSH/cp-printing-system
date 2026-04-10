@@ -10,6 +10,7 @@ import {
   useInventoryStore,
   StoreInRecord,
 } from '../../store/inventoryStore';
+import { API, getAuthHeaders } from '../../api/client';
 
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL'];
 
@@ -58,6 +59,12 @@ interface StagedEntry {
   }[];
 }
 
+interface StyleScheduleOption {
+  styleNo: string;
+  customerName: string;
+  scheduleNo: string;
+}
+
 const makeBundleRow = (bundleIndex: number): BundleFormRow => ({
   tempId: crypto.randomUUID(),
   bundleNo: `B${String(bundleIndex).padStart(3, '0')}`,
@@ -103,6 +110,7 @@ export default function StoreInPage() {
   const [isSavingToDb, setIsSavingToDb] = useState(false);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, { isLocked: boolean }>>({});
+  const [systemStyleSchedules, setSystemStyleSchedules] = useState<StyleScheduleOption[]>([]);
 
   // --- Search & filter ---
   const [searchText, setSearchText] = useState('');
@@ -142,11 +150,19 @@ export default function StoreInPage() {
   useEffect(() => {
     const load = async () => {
       try {
+        const styleResPromise = fetch(`${API.BASE}/api/dashboard/styles`, { headers: getAuthHeaders() });
         await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
+        const styleRes = await styleResPromise;
         const lockRes = await fetch('http://localhost:5000/api/inventory/store-in/locks', {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         });
         if (lockRes.ok) setLocks(await lockRes.json());
+        if (styleRes.ok) {
+          const styleRows: StyleScheduleOption[] = await styleRes.json();
+          setSystemStyleSchedules(styleRows);
+        } else {
+          setSystemStyleSchedules([]);
+        }
       } catch (error) {
         setPageError(error instanceof Error ? error.message : 'Failed to load inventory data.');
       }
@@ -158,6 +174,36 @@ export default function StoreInPage() {
   const selectedItem = useMemo(() => {
     return eligibleStoreInItems.find((item) => item.submissionId === submissionId) || null;
   }, [eligibleStoreInItems, submissionId]);
+
+  // Existing schedule numbers for this style — used as datalist suggestions only.
+  // The user is always free to type a brand-new one.
+  const existingScheduleOptions = useMemo(() => {
+    if (!selectedItem) return [];
+
+    const inSystem = systemStyleSchedules
+      .filter((row) =>
+        row.styleNo === selectedItem.styleNo &&
+        row.customerName === selectedItem.customerName &&
+        !!row.scheduleNo
+      )
+      .map((row) => row.scheduleNo.trim());
+
+    const inRecords = storeInRecords
+      .filter((row) =>
+        row.styleNo === selectedItem.styleNo &&
+        row.customerName === selectedItem.customerName &&
+        !!row.scheduleNo
+      )
+      .map((row) => row.scheduleNo.trim());
+
+    // Also include any schedules already staged for this style so the user
+    // can see them but won't accidentally duplicate
+    const inStaged = stagedEntries
+      .filter((e) => e.submissionId === submissionId && !!e.scheduleNo)
+      .map((e) => e.scheduleNo.trim());
+
+    return Array.from(new Set([...inSystem, ...inRecords, ...inStaged])).filter(Boolean).sort();
+  }, [selectedItem, systemStyleSchedules, storeInRecords, stagedEntries, submissionId]);
 
   // --- Computed quantities ---
   const inQtyNum = parseInt(inQty) || 0;
@@ -173,7 +219,9 @@ export default function StoreInPage() {
   // --- Handle style selection ---
   const handleStyleChange = (newSubmissionId: string) => {
     setSubmissionId(newSubmissionId);
+    setScheduleNo('');
     if (errors.submissionId) setErrors((prev) => ({ ...prev, submissionId: '' }));
+    if (errors.scheduleNo) setErrors((prev) => ({ ...prev, scheduleNo: '' }));
     if (pageError) setPageError('');
   };
 
@@ -447,6 +495,9 @@ export default function StoreInPage() {
     }
   };
 
+  // Unique datalist id per render to avoid cross-instance conflicts
+  const scheduleDatalistId = `schedule-suggestions-${submissionId || 'none'}`;
+
   // ==========================================
   // RENDER
   // ==========================================
@@ -532,11 +583,58 @@ export default function StoreInPage() {
                 {errors.submissionId && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.submissionId}</p>}
               </div>
 
+              {/* ── SCHEDULE NO — free-text input with datalist suggestions ── */}
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-600">Schedule No <span className="text-red-500">*</span></label>
-                <input type="text" value={scheduleNo} onChange={(e) => { setScheduleNo(e.target.value); if (errors.scheduleNo) setErrors((p) => ({ ...p, scheduleNo: '' })); }} placeholder="e.g. SCH-001"
-                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${errors.scheduleNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'}`} />
-                {errors.scheduleNo && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.scheduleNo}</p>}
+                <label className="block text-xs font-medium text-slate-600">
+                  Schedule No <span className="text-red-500">*</span>
+                </label>
+                {/*
+                  A plain <input> lets the user type any new schedule number freely.
+                  The <datalist> provides autocomplete suggestions from schedules that
+                  already exist for this style — but does NOT restrict input to them.
+                  This was the bug: the old <select> had no way to enter a brand-new
+                  schedule number when none existed yet.
+                */}
+                <input
+                  type="text"
+                  list={scheduleDatalistId}
+                  value={scheduleNo}
+                  onChange={(e) => {
+                    setScheduleNo(e.target.value);
+                    if (errors.scheduleNo) setErrors((p) => ({ ...p, scheduleNo: '' }));
+                  }}
+                  disabled={!selectedItem}
+                  placeholder={selectedItem ? 'Type or pick a schedule…' : 'Select style first…'}
+                  autoComplete="off"
+                  className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
+                    errors.scheduleNo
+                      ? 'border-red-400 bg-red-50'
+                      : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
+                  } ${!selectedItem ? 'cursor-not-allowed bg-slate-100 text-slate-400' : ''}`}
+                />
+                {/* Datalist: suggestions only — user is not limited to these */}
+                <datalist id={scheduleDatalistId}>
+                  {existingScheduleOptions.map((sched) => (
+                    <option key={sched} value={sched} />
+                  ))}
+                </datalist>
+
+                {/* Contextual hints */}
+                {selectedItem && existingScheduleOptions.length > 0 && !scheduleNo && (
+                  <p className="text-[10px] text-slate-400">
+                    {existingScheduleOptions.length} existing schedule{existingScheduleOptions.length > 1 ? 's' : ''} — type to search or enter a new one.
+                  </p>
+                )}
+                {selectedItem && existingScheduleOptions.length === 0 && !scheduleNo && (
+                  <p className="text-[10px] text-blue-600">
+                    No schedules yet for this style — type a new schedule number to create one.
+                  </p>
+                )}
+                {errors.scheduleNo && (
+                  <p className="text-[11px] text-red-600">
+                    <AlertCircle className="mr-1 inline h-3 w-3" />{errors.scheduleNo}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
