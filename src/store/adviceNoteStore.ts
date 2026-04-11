@@ -12,6 +12,8 @@ export interface AdviceNoteRow {
   bundleNo: string;
   size: string;
   cutForm: string;
+  /** The component (Part) chosen by QC for this cut. Stored per row. */
+  component: string;
   totalPcs: number;
   pd: number;
   fd: number;
@@ -28,6 +30,8 @@ export interface GatepassBundleInfo {
 export interface GatepassCutInfo {
   cutNo: string;
   cutQty: number;
+  /** The component (Part) locked in by QC for this cut. */
+  part: string;
   bundles: GatepassBundleInfo[];
 }
 

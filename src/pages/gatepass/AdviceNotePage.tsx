@@ -44,7 +44,6 @@ export default function AdviceNotePage() {
 
   const selectedItem = useMemo(() => eligibleDispatchItems.find((i) => i.storeInRecordId === selectedStoreInId) || null, [eligibleDispatchItems, selectedStoreInId]);
   const availableCuts = useMemo(() => selectedItem ? selectedItem.cuts.filter((c) => !addedCutNos.includes(c.cutNo)) : [], [selectedItem, addedCutNos]);
-  const componentsList = useMemo(() => selectedItem?.components ? selectedItem.components.split(',').map((c) => c.trim()).filter(Boolean) : [], [selectedItem]);
   const currentAdNo = editingId ? adviceNotes.find((n) => n.id === editingId)?.adNo || '' : generateAdNo(adviceNotes);
   const totalPcs = bundleRows.reduce((s, r) => s + r.totalPcs, 0);
   const totalPd = bundleRows.reduce((s, r) => s + r.pd, 0);
@@ -56,7 +55,7 @@ export default function AdviceNotePage() {
     if (!selectedComponent) { setErrors((p) => ({ ...p, component: 'Select a component' })); return; }
     const cut = selectedItem?.cuts.find((c) => c.cutNo === selectedCutNo);
     if (!cut) return;
-    const newRows: AdviceNoteRow[] = cut.bundles.map((b) => ({ productionRecordId: selectedItem?.productionRecordId || '', colour: selectedItem?.bodyColour || '', bundleNo: b.bundleNo, size: b.size, cutForm: selectedCutNo, totalPcs: b.bundleQty, pd: 0, fd: 0, goodQty: b.bundleQty }));
+    const newRows: AdviceNoteRow[] = cut.bundles.map((b) => ({ productionRecordId: selectedItem?.productionRecordId || '', colour: selectedItem?.bodyColour || '', bundleNo: b.bundleNo, size: b.size, cutForm: selectedCutNo, component: selectedComponent, totalPcs: b.bundleQty, pd: 0, fd: 0, goodQty: b.bundleQty }));
     setBundleRows((prev) => [...prev, ...newRows]);
     setAddedCutNos((prev) => [...prev, selectedCutNo]);
     setSelectedCutNo(''); setSelectedComponent(''); setErrors({}); setPageError('');
@@ -170,13 +169,29 @@ export default function AdviceNotePage() {
             <div className="border-b border-slate-300 bg-orange-50/30 px-5 py-4">
               <div className="flex items-end gap-3 flex-wrap">
                 <div className="space-y-1 flex-1 min-w-[180px]"><label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">Cut No <span className="text-red-500">*</span></label>
-                  <select value={selectedCutNo} onChange={(e) => setSelectedCutNo(e.target.value)} className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none ${errors.cutNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'}`}>
+                  <select value={selectedCutNo} onChange={(e) => {
+                    const cutNo = e.target.value;
+                    setSelectedCutNo(cutNo);
+                    // Auto-fill the component from the cut's Part (locked by QC in CPI)
+                    const matchedCut = selectedItem?.cuts.find((c) => c.cutNo === cutNo);
+                    setSelectedComponent(matchedCut?.part || '');
+                  }} className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none ${errors.cutNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'}`}>
                     <option value="">Select cut...</option>{availableCuts.map((c) => (<option key={c.cutNo} value={c.cutNo}>{c.cutNo} — Qty: {c.cutQty} — {c.bundles.length} bundle(s)</option>))}
                   </select></div>
-                <div className="space-y-1 flex-1 min-w-[180px]"><label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">Component <span className="text-red-500">*</span></label>
-                  <select value={selectedComponent} onChange={(e) => setSelectedComponent(e.target.value)} className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none ${errors.component ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'}`}>
-                    <option value="">Select...</option>{componentsList.map((comp) => (<option key={comp} value={comp}>{comp}</option>))}
-                  </select></div>
+                <div className="space-y-1 flex-1 min-w-[180px]"><label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">Component <span className="text-[9px] font-normal text-slate-400">(from QC)</span></label>
+                  <div
+                    className={`w-full rounded border px-3 py-2 text-sm font-bold outline-none ${
+                      selectedComponent
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : errors.component
+                        ? 'border-red-400 bg-red-50 text-red-500'
+                        : 'border-slate-300 bg-slate-50 text-slate-400'
+                    }`}
+                    title="Locked by QC inspection — auto-filled from the selected cut"
+                  >
+                    {selectedComponent || (selectedCutNo ? 'No component set by QC for this cut' : '—')}
+                  </div>
+                </div>
                 <button type="button" onClick={handleAddCut} disabled={!selectedCutNo || !selectedComponent} className="inline-flex items-center gap-1 rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:opacity-40 transition-colors"><Plus className="h-4 w-4" /> Add Cut</button>
               </div>
               {addedCutNos.length > 0 && (<div className="flex gap-2 mt-3 flex-wrap">{addedCutNos.map((cn) => (<span key={cn} className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-800">{cn}<button type="button" onClick={() => handleRemoveCut(cn)} className="hover:text-red-600 transition-colors"><X className="h-3 w-3" /></button></span>))}</div>)}
@@ -186,12 +201,12 @@ export default function AdviceNotePage() {
 
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
-              <thead><tr className="bg-slate-800 text-white"><th className="w-10 border-r border-slate-600 px-2 py-2.5 text-center font-bold">#</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">COLOUR</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">BUN NO.</th><th className="w-20 border-r border-slate-600 px-2 py-2.5 text-center font-bold">SIZE</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">CUT FORM</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">TOTAL PCS</th><th className="w-16 border-r border-slate-600 bg-red-900 px-2 py-2.5 text-center font-bold">P/D</th><th className="w-16 border-r border-slate-600 bg-red-900 px-2 py-2.5 text-center font-bold">F/D</th><th className="w-24 bg-emerald-900 px-2 py-2.5 text-center font-bold">GOOD QTY</th></tr></thead>
+              <thead><tr className="bg-slate-800 text-white"><th className="w-10 border-r border-slate-600 px-2 py-2.5 text-center font-bold">#</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">COLOUR</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">BUN NO.</th><th className="w-20 border-r border-slate-600 px-2 py-2.5 text-center font-bold">SIZE</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">CUT FORM</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">COMPONENT</th><th className="w-24 border-r border-slate-600 px-2 py-2.5 text-center font-bold">TOTAL PCS</th><th className="w-16 border-r border-slate-600 bg-red-900 px-2 py-2.5 text-center font-bold">P/D</th><th className="w-16 border-r border-slate-600 bg-red-900 px-2 py-2.5 text-center font-bold">F/D</th><th className="w-24 bg-emerald-900 px-2 py-2.5 text-center font-bold">GOOD QTY</th></tr></thead>
               <tbody className="divide-y divide-slate-200">
                 {bundleRows.length > 0 ? (<>
-                  {bundleRows.map((row, idx) => (<tr key={idx} className="hover:bg-blue-50/30"><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-500">{String(idx + 1).padStart(2, '0')}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.colour}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-bold">{row.bundleNo}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.size}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.cutForm}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center font-bold">{row.totalPcs}</td><td className="border-r border-slate-200 p-0"><input type="number" value={row.pd || ''} onChange={(e) => updateBundleRow(idx, 'pd', e.target.value)} className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50" placeholder="-" /></td><td className="border-r border-slate-200 p-0"><input type="number" value={row.fd || ''} onChange={(e) => updateBundleRow(idx, 'fd', e.target.value)} className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50" placeholder="-" /></td><td className="bg-emerald-50/30 px-2 py-1.5 text-center font-black text-emerald-700">{row.goodQty}</td></tr>))}
-                  <tr className="border-t-2 border-slate-800 bg-slate-100 font-bold"><td colSpan={5} className="border-r border-slate-300 px-4 py-2 text-right text-xs uppercase tracking-wide text-slate-600">Totals</td><td className="border-r border-slate-300 px-2 py-2 text-center font-black">{totalPcs}</td><td className="border-r border-slate-300 px-2 py-2 text-center font-black text-red-700">{totalPd || '-'}</td><td className="border-r border-slate-300 px-2 py-2 text-center font-black text-red-700">{totalFd || '-'}</td><td className="bg-emerald-50 px-2 py-2 text-center font-black text-emerald-700">{totalGood}</td></tr>
-                </>) : (<tr><td colSpan={9} className="py-12 text-center text-slate-400">Select a style and add cuts to build the dispatch table.</td></tr>)}
+                  {bundleRows.map((row, idx) => (<tr key={idx} className="hover:bg-blue-50/30"><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-500">{String(idx + 1).padStart(2, '0')}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.colour}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-bold">{row.bundleNo}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.size}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.cutForm}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-semibold text-emerald-700">{row.component || '-'}</td><td className="border-r border-slate-200 px-2 py-1.5 text-center font-bold">{row.totalPcs}</td><td className="border-r border-slate-200 p-0"><input type="number" value={row.pd || ''} onChange={(e) => updateBundleRow(idx, 'pd', e.target.value)} className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50" placeholder="-" /></td><td className="border-r border-slate-200 p-0"><input type="number" value={row.fd || ''} onChange={(e) => updateBundleRow(idx, 'fd', e.target.value)} className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50" placeholder="-" /></td><td className="bg-emerald-50/30 px-2 py-1.5 text-center font-black text-emerald-700">{row.goodQty}</td></tr>))}
+                  <tr className="border-t-2 border-slate-800 bg-slate-100 font-bold"><td colSpan={6} className="border-r border-slate-300 px-4 py-2 text-right text-xs uppercase tracking-wide text-slate-600">Totals</td><td className="border-r border-slate-300 px-2 py-2 text-center font-black">{totalPcs}</td><td className="border-r border-slate-300 px-2 py-2 text-center font-black text-red-700">{totalPd || '-'}</td><td className="border-r border-slate-300 px-2 py-2 text-center font-black text-red-700">{totalFd || '-'}</td><td className="bg-emerald-50 px-2 py-2 text-center font-black text-emerald-700">{totalGood}</td></tr>
+                </>) : (<tr><td colSpan={10} className="py-12 text-center text-slate-400">Select a style and add cuts to build the dispatch table.</td></tr>)}
               </tbody>
             </table>
           </div>
