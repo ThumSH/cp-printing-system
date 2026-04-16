@@ -55,6 +55,8 @@ export default function ActivityLogPage() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // Default to 50 records — user can bump higher for deeper analysis
+  const [recordLimit, setRecordLimit] = useState(50);
 
   const fetchData = async () => {
     setLoading(true);
@@ -65,7 +67,7 @@ export default function ActivityLogPage() {
       if (filterUser) params.set('user', filterUser);
       if (filterDateFrom) params.set('from', filterDateFrom);
       if (filterDateTo) params.set('to', filterDateTo);
-      params.set('limit', '500');
+      params.set('limit', String(recordLimit));
 
       const [sRes, lRes] = await Promise.all([
         fetch(`${API.BASE}/api/activitylog/summary`, { headers: getAuthHeaders() }),
@@ -77,7 +79,7 @@ export default function ActivityLogPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, [filterAction, filterEntity, filterUser, filterDateFrom, filterDateTo]);
+  useEffect(() => { fetchData(); }, [filterAction, filterEntity, filterUser, filterDateFrom, filterDateTo, recordLimit]);
 
   const clearFilters = () => { setFilterAction(''); setFilterEntity(''); setFilterUser(''); setFilterDateFrom(''); setFilterDateTo(''); setSearchQuery(''); };
   const hasFilters = filterAction || filterEntity || filterUser || filterDateFrom || filterDateTo;
@@ -162,7 +164,18 @@ export default function ActivityLogPage() {
             <p className="text-sm text-slate-500">Monitor all user actions, logins, and system changes.</p>
           </div>
         </div>
-        <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+        <select
+            value={recordLimit}
+            onChange={(e) => setRecordLimit(Number(e.target.value))}
+            title="How many records to load. Use filters to narrow down further."
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value={50}>Recent 50</option>
+            <option value={100}>Recent 100</option>
+            <option value={200}>Recent 200</option>
+            <option value={500}>Recent 500 (max)</option>
+          </select>
+          <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
           <RefreshCw className="h-3.5 w-3.5" /> Refresh
         </button>
       </motion.div>

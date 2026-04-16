@@ -115,7 +115,10 @@ const SECTIONS: { key: keyof LockedFields; label: string; color: string; bgColor
 export default function DailyOutputPage() {
   const [eligibleStyles, setEligibleStyles] = useState<EligibleStyle[]>([]);
   const [records, setRecords] = useState<DailyOutputRecord[]>([]);
-  const [selectedStoreInId, setSelectedStoreInId] = useState('');
+  // Cascading selection: pick Style -> then Cut -> then Line (which resolves to a production record)
+  const [pickedStyleKey, setPickedStyleKey] = useState('');   // format: "styleNo|||customerName"
+  const [pickedCutNo, setPickedCutNo] = useState('');
+  const [selectedStoreInId, setSelectedStoreInId] = useState(''); // still the final production record id
   const [selectedComponent, setSelectedComponent] = useState('');
   const [tableNo, setTableNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -155,6 +158,50 @@ export default function DailyOutputPage() {
   );
 
   const effectiveStoreInId = selectedItem?.storeInRecordId || '';
+
+  // --- Cascading dropdown data ---
+  // Step 1: distinct styles (one entry per styleNo+customer) with total remaining qty
+  const distinctStyles = useMemo(() => {
+    const map = new Map<string, { key: string; styleNo: string; customerName: string; totalRemaining: number; prodCount: number }>();
+    eligibleStyles.forEach((s) => {
+      const key = `${s.styleNo}|||${s.customerName}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalRemaining += s.orderQty;
+        existing.prodCount += 1;
+      } else {
+        map.set(key, { key, styleNo: s.styleNo, customerName: s.customerName, totalRemaining: s.orderQty, prodCount: 1 });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.styleNo.localeCompare(b.styleNo));
+  }, [eligibleStyles]);
+
+  // Step 2: distinct cuts for the picked style
+  const cutsForStyle = useMemo(() => {
+    if (!pickedStyleKey) return [];
+    const [styleNo, customerName] = pickedStyleKey.split('|||');
+    const rows = eligibleStyles.filter((s) => s.styleNo === styleNo && s.customerName === customerName);
+    const map = new Map<string, { cutNo: string; totalRemaining: number; lineCount: number }>();
+    rows.forEach((s) => {
+      const existing = map.get(s.cutNo);
+      if (existing) {
+        existing.totalRemaining += s.orderQty;
+        existing.lineCount += 1;
+      } else {
+        map.set(s.cutNo, { cutNo: s.cutNo, totalRemaining: s.orderQty, lineCount: 1 });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.cutNo.localeCompare(b.cutNo));
+  }, [eligibleStyles, pickedStyleKey]);
+
+  // Step 3: lines (production records) for the picked style + cut — each entry is ONE production record
+  const linesForCut = useMemo(() => {
+    if (!pickedStyleKey || !pickedCutNo) return [];
+    const [styleNo, customerName] = pickedStyleKey.split('|||');
+    return eligibleStyles
+      .filter((s) => s.styleNo === styleNo && s.customerName === customerName && s.cutNo === pickedCutNo)
+      .sort((a, b) => (a.lineNo || '').localeCompare(b.lineNo || ''));
+  }, [eligibleStyles, pickedStyleKey, pickedCutNo]);
 
   const activeRecord = useMemo(() => {
     if (!selectedItem || !tableNo) return null;
@@ -331,6 +378,8 @@ export default function DailyOutputPage() {
   };
 
   const handleReset = () => {
+    setPickedStyleKey('');
+    setPickedCutNo('');
     setSelectedStoreInId('');
     setSelectedComponent('');
     setTableNo('');
@@ -377,25 +426,66 @@ export default function DailyOutputPage() {
             {activeRecordId && <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">EDITING EXISTING RECORD</span>}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">Style No *</label>
+              <label className="block text-xs font-medium text-slate-600">Style *</label>
               <select
-                value={selectedStoreInId}
-                onChange={(e) => { 
-                  const selectedId = e.target.value;
-                  setSelectedStoreInId(selectedId); 
-                  
-                  // Auto-fill component instantly on dropdown change
-                  const matchedItem = eligibleStyles.find((s) => s.id === selectedId);
-                  setSelectedComponent(matchedItem?.component || '');
+                value={pickedStyleKey}
+                onChange={(e) => {
+                  setPickedStyleKey(e.target.value);
+                  setPickedCutNo('');            // reset downstream
+                  setSelectedStoreInId('');
+                  setSelectedComponent('');
                 }}
                 className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none ${errors.style ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-teal-500'}`}
               >
                 <option value="">Select style...</option>
-                {eligibleStyles.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.styleNo} | {s.customerName} | Cut {s.cutNo} | Line: {s.lineNo} | Issued: {s.orderQty}
+                {distinctStyles.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.styleNo} — {s.customerName} ({s.prodCount} cut{s.prodCount !== 1 ? 's' : ''}, remaining {s.totalRemaining})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-600">Cut No *</label>
+              <select
+                value={pickedCutNo}
+                disabled={!pickedStyleKey}
+                onChange={(e) => {
+                  setPickedCutNo(e.target.value);
+                  setSelectedStoreInId('');
+                  setSelectedComponent('');
+                }}
+                className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:cursor-not-allowed ${errors.style ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-teal-500'}`}
+              >
+                <option value="">{pickedStyleKey ? 'Select cut...' : 'Pick a style first'}</option>
+                {cutsForStyle.map((c) => (
+                  <option key={c.cutNo} value={c.cutNo}>
+                    Cut {c.cutNo} — {c.lineCount} line{c.lineCount !== 1 ? 's' : ''} (remaining {c.totalRemaining})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-600">Line *</label>
+              <select
+                value={selectedStoreInId}
+                disabled={!pickedCutNo}
+                onChange={(e) => {
+                  const selectedId = e.target.value;
+                  setSelectedStoreInId(selectedId);
+                  const matchedItem = eligibleStyles.find((s) => s.id === selectedId);
+                  setSelectedComponent(matchedItem?.component || '');
+                }}
+                className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:cursor-not-allowed ${errors.style ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-teal-500'}`}
+              >
+                <option value="">{pickedCutNo ? 'Select line...' : 'Pick a cut first'}</option>
+                {linesForCut.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    Line {l.lineNo || '-'} — Issued {l.orderQty}
                   </option>
                 ))}
               </select>

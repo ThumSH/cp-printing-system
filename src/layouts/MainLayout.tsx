@@ -33,7 +33,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Development',
     items: [
       { name: 'Jobs', href: '/development', icon: Code, roles: ['Admin', 'Developer'] },
-      { name: 'Submit to QC', href: '/development/submit', icon: Send, roles: ['Admin', 'Developer'] },
+      { name: 'Submit to Admin', href: '/development/submit', icon: Send, roles: ['Admin', 'Developer'] },
       { name: 'Search', href: '/development/search', icon: Search, roles: ['Admin', 'Developer'] },
     ],
   },

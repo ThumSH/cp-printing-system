@@ -207,6 +207,36 @@ export default function StoreInPage() {
 
   // --- Computed quantities ---
   const inQtyNum = parseInt(inQty) || 0;
+  // --- Next cut number for this style+schedule (continuing from existing DB + staged cuts) ---
+  const existingCutCount = useMemo(() => {
+    if (!submissionId || !scheduleNo.trim()) return 0;
+    const sched = scheduleNo.trim().toLowerCase();
+
+    // Count cuts already saved in DB for THIS submission+schedule
+    const dbCuts = storeInRecords
+      .filter((r) => r.submissionId === submissionId
+                  && r.scheduleNo.toLowerCase() === sched
+                  && r.id !== editingId)
+      .reduce((sum, r) => sum + (r.cuts?.length || 0), 0);
+
+    // Count cuts from staged entries (not yet saved to DB)
+    const stagedCuts = stagedEntries
+      .filter((e) => e.submissionId === submissionId
+                  && e.scheduleNo.toLowerCase() === sched)
+      .reduce((sum, e) => sum + (e.cuts?.length || 0), 0);
+
+    return dbCuts + stagedCuts;
+  }, [submissionId, scheduleNo, storeInRecords, stagedEntries, editingId]);
+
+  // --- Auto-renumber the cuts in the form whenever the starting offset changes ---
+  useEffect(() => {
+    setCuts((prev) => prev.map((cut, idx) => ({
+      ...cut,
+      cutNo: `Cut ${existingCutCount + idx + 1}`,
+    })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingCutCount]);
+
   const totalCutQty = cuts.reduce((sum, c) => sum + (parseInt(c.cutQty) || 0), 0);
   const uncutBalance = Math.max(0, inQtyNum - totalCutQty);
 
@@ -227,14 +257,14 @@ export default function StoreInPage() {
 
   // --- Cut management (auto-numbered) ---
   const addCut = () => {
-    const nextCutNum = cuts.length + 1;
+    const nextCutNum = existingCutCount + cuts.length + 1;
     setCuts((prev) => [...prev, makeCutRow(nextCutNum)]);
   };
 
   const removeCut = (tempId: string) => {
     setCuts((prev) => {
       const filtered = prev.filter((c) => c.tempId !== tempId);
-      return filtered.map((c, idx) => ({ ...c, cutNo: `Cut ${idx + 1}` }));
+      return filtered.map((c, idx) => ({ ...c, cutNo: `Cut ${existingCutCount + idx + 1}` }));
     });
   };
 
@@ -295,9 +325,7 @@ export default function StoreInPage() {
     if (!scheduleNo.trim()) newErrors.scheduleNo = 'Schedule No is required';
     if (!cutInDate) newErrors.cutInDate = 'Cut In Date is required';
 
-    if (scheduleNo.trim() && submissionId && isScheduleDuplicate(scheduleNo, submissionId)) {
-      newErrors.scheduleNo = `Schedule No '${scheduleNo.trim()}' already exists for this style`;
-    }
+    // Note: duplicate schedule is now ALLOWED — cuts auto-number continuing from existing ones
 
     if (inQtyNum <= 0) {
       newErrors.inQty = 'IN Qty must be greater than 0';
@@ -318,8 +346,13 @@ export default function StoreInPage() {
       if (cut.bundles.length === 0) newErrors[`cut_${ci}_bundles`] = 'At least one bundle required';
 
       const totalBundleQty = cut.bundles.reduce((s, b) => s + (parseInt(b.bundleQty) || 0), 0);
-      if (totalBundleQty > cq && cq > 0)
-        newErrors[`cut_${ci}_bundles`] = `Bundle total (${totalBundleQty}) exceeds cut qty (${cq})`;
+      if (cq > 0 && totalBundleQty !== cq) {
+        if (totalBundleQty > cq) {
+          newErrors[`cut_${ci}_bundles`] = `Bundle total (${totalBundleQty}) exceeds cut qty (${cq})`;
+        } else {
+          newErrors[`cut_${ci}_bundles`] = `Bundle total (${totalBundleQty}) must equal cut qty (${cq}). Unbundled: ${cq - totalBundleQty}`;
+        }
+      }
 
       const bundleNos = cut.bundles.map((b) => b.bundleNo.trim().toLowerCase());
       if (bundleNos.length !== new Set(bundleNos).size)

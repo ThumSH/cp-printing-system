@@ -26,25 +26,52 @@ const getHeaders = getAuthHeaders;
 
 export default function DeliveryTrackerPage() {
   const [summaries, setSummaries] = useState<TrackerSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);  // don't auto-load
   const [error, setError] = useState('');
   const [selectedStyle, setSelectedStyle] = useState('');
   const [selectedSchedule, setSelectedSchedule] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  // Lightweight list of (styleNo, scheduleNo) combos for the dropdowns (loaded once)
+  const [filterOptions, setFilterOptions] = useState<{ styleNo: string; scheduleNo: string }[]>([]);
+  // Has the user triggered a load (either by picking filters or clicking 'Show Recent 10')?
+  const [hasLoaded, setHasLoaded] = useState(false);
 
-  const fetchReport = async () => {
+  // Fetch filtered report based on current selections (or recent 10 if no filter)
+  const fetchReport = async (opts?: { styleNo?: string; scheduleNo?: string; recentOnly?: boolean }) => {
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API_BASE}/report`, { headers: getHeaders() });
+      const params = new URLSearchParams();
+      if (opts?.styleNo) params.set('styleNo', opts.styleNo);
+      if (opts?.scheduleNo) params.set('scheduleNo', opts.scheduleNo);
+      if (opts?.recentOnly) params.set('limit', '10');
+      const url = params.toString() ? `${API_BASE}/report?${params}` : `${API_BASE}/report`;
+      const res = await fetch(url, { headers: getHeaders() });
       if (!res.ok) throw new Error(await res.text() || 'Failed to fetch');
       const data: TrackerSummary[] = await res.json();
       setSummaries(data);
+      setHasLoaded(true);
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load.'); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchReport(); }, []);
+  // Load lightweight dropdown options ONCE on mount (no heavy report data)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/filters`, { headers: getHeaders() });
+        if (res.ok) setFilterOptions(await res.json());
+      } catch { /* silent */ }
+    })();
+  }, []);
+
+  // Auto-load when BOTH style and schedule are picked
+  useEffect(() => {
+    if (selectedStyle && selectedSchedule) {
+      fetchReport({ styleNo: selectedStyle, scheduleNo: selectedSchedule });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStyle, selectedSchedule]);
 
   const handleSave = async (summary: TrackerSummary) => {
     setSavingId(summary.storeInRecordId);
@@ -81,19 +108,17 @@ export default function DeliveryTrackerPage() {
     finally { setSavingId(null); }
   };
 
-  // Build unique style and schedule options from loaded data
-  const styleOptions = [...new Set(summaries.map((s) => s.styleNo))];
-  const scheduleOptions = summaries
-    .filter((s) => !selectedStyle || s.styleNo === selectedStyle)
-    .map((s) => s.fpoNo)
-    .filter((v, i, a) => a.indexOf(v) === i);
+  // Build dropdown options from the lightweight /filters endpoint — NOT from the heavy report
+  const styleOptions = [...new Set(filterOptions.map((f) => f.styleNo))].filter(Boolean).sort();
+  const scheduleOptions = filterOptions
+    .filter((f) => !selectedStyle || f.styleNo === selectedStyle)
+    .map((f) => f.scheduleNo)
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort();
 
-  // Filtered summaries
-  const filteredSummaries = summaries.filter((s) => {
-    if (selectedStyle && s.styleNo !== selectedStyle) return false;
-    if (selectedSchedule && s.fpoNo !== selectedSchedule) return false;
-    return true;
-  });
+  // Backend already filters — summaries is ready to render as-is
+  const filteredSummaries = summaries;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 pb-12">
@@ -102,13 +127,16 @@ export default function DeliveryTrackerPage() {
           <div className="rounded-lg bg-indigo-100 p-2"><LayoutDashboard className="h-6 w-6 text-indigo-700" /></div>
           <div><h2 className="text-2xl font-bold text-slate-900">Delivery Tracker</h2><p className="text-sm text-slate-500">Auto-generated from Store In + Gatepass data. Select a style and schedule to view.</p></div>
         </div>
-        <button onClick={fetchReport} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+        <button onClick={() => {
+          if (selectedStyle && selectedSchedule) fetchReport({ styleNo: selectedStyle, scheduleNo: selectedSchedule });
+          else if (hasLoaded) fetchReport({ recentOnly: true });
+        }} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
           <RefreshCw className="h-4 w-4" /> Refresh
         </button>
       </div>
 
       {/* Filter dropdowns */}
-      {!loading && summaries.length > 0 && (
+      {filterOptions.length > 0 && (
         <div className="flex items-end gap-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4">
           <div className="space-y-1 flex-1 max-w-xs">
             <label className="block text-[10px] font-bold uppercase tracking-wide text-indigo-800">Style No</label>
@@ -127,24 +155,39 @@ export default function DeliveryTrackerPage() {
             </select>
           </div>
           {(selectedStyle || selectedSchedule) && (
-            <button onClick={() => { setSelectedStyle(''); setSelectedSchedule(''); }}
+            <button onClick={() => { setSelectedStyle(''); setSelectedSchedule(''); setSummaries([]); setHasLoaded(false); }}
               className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors">Clear</button>
           )}
+          <button
+            onClick={() => { setSelectedStyle(''); setSelectedSchedule(''); fetchReport({ recentOnly: true }); }}
+            disabled={loading}
+            className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 transition-colors disabled:opacity-50"
+          >
+            Show Recent 10
+          </button>
         </div>
       )}
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>}
       {loading && <div className="py-12 text-center text-slate-400">Loading report...</div>}
 
-      {!loading && summaries.length === 0 && (
+      {!loading && !hasLoaded && (
+        <div className="py-16 text-center">
+          <LayoutDashboard className="mx-auto mb-3 h-12 w-12 text-slate-300" />
+          <p className="text-sm font-medium text-slate-500">Select a Style and Schedule above, or click "Show Recent 10"</p>
+          <p className="mt-1 text-xs text-slate-400">Nothing is loaded yet to keep the page fast.</p>
+        </div>
+      )}
+
+      {!loading && hasLoaded && summaries.length === 0 && !selectedStyle && !selectedSchedule && (
         <div className="py-16 text-center text-slate-400">
           <LayoutDashboard className="mx-auto mb-3 h-12 w-12 opacity-20" />
           <p>No delivery data yet. Create advice notes in Gatepass first.</p>
         </div>
       )}
 
-      {!loading && summaries.length > 0 && filteredSummaries.length === 0 && (selectedStyle || selectedSchedule) && (
-        <div className="py-12 text-center text-slate-400">No data matches the selected filters.</div>
+      {!loading && hasLoaded && summaries.length === 0 && (selectedStyle || selectedSchedule) && (
+        <div className="py-12 text-center text-slate-400">No delivery data for this Style + Schedule.</div>
       )}
 
       {filteredSummaries.map((summary, si) => (
