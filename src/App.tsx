@@ -24,6 +24,7 @@ import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
 import UserManagementPage from './pages/admin/UserManagement';
 import DailyOutputPage from './pages/worker/DailyOutputPage';
 import DowntimeReportPage from './pages/worker/DowntimeReportPage';
+import WorkerHistoryPage from './pages/worker/WorkerHistoryPage';
 import ActivityLogPage from './pages/admin/ActivityLogPage';
 import SplashScreen from './components/SplashScreen';
 import OperatorSelect from './pages/OperatorSelect';
@@ -299,6 +300,13 @@ function App() {
           <Route path="worker/downtime" element={
   <RoleRoute allowedRoles={['Worker', 'Admin']}>
     <DowntimeReportPage />
+  </RoleRoute>
+} />
+
+
+          <Route path="worker/history" element={
+  <RoleRoute allowedRoles={['Worker', 'Admin']}>
+    <WorkerHistoryPage />
   </RoleRoute>
 } />
 

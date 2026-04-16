@@ -250,8 +250,28 @@ export default function DailyOutputPage() {
     dispatch: timeSlots.reduce((s, t) => s + (Number(t.dispatch) || 0), 0),
   }), [timeSlots]);
 
-  const totalCompleted = totals.dispatch;
-  const remaining = issueQty - totalCompleted;
+  // Every column counts independently — sum all 6 stages across all time slots.
+  const totalCompleted = totals.seating + totals.printing + totals.curing + totals.checking + totals.packing + totals.dispatch;
+
+  // Sum across OTHER saved records for this same production (not the one being edited).
+  // Covers 'afternoon worker picks up from morning' — sees 100 already done elsewhere.
+  const persistedElsewhere = useMemo(() => {
+    if (!selectedItem) return 0;
+    return records
+      .filter((r) =>
+        r.productionRecordId === selectedItem.productionRecordId &&
+        r.id !== activeRecordId
+      )
+      .reduce((sum, r) =>
+        sum + (r.totalSeating || 0) + (r.totalPrinting || 0) + (r.totalCuring || 0)
+            + (r.totalChecking || 0) + (r.totalPacking || 0) + (r.totalDispatch || 0),
+        0);
+  }, [records, selectedItem, activeRecordId]);
+
+  const allocatedTotal = persistedElsewhere + totalCompleted;
+  const realRemaining = issueQty - allocatedTotal;
+  const isOverLimit = realRemaining < 0;
+  const remaining = realRemaining;
 
   const updateSlot = (index: number, field: keyof TimeSlot, value: string) => {
     setTimeSlots((prev) => prev.map((slot, i) => {
@@ -559,6 +579,20 @@ export default function DailyOutputPage() {
           </div>
         )}
 
+        {/* Over-limit warning banner */}
+        {isOverLimit && (
+          <div className="rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-red-700">Issue Qty Exceeded</p>
+              <p className="text-xs text-red-600">
+                You've allocated <span className="font-bold">{allocatedTotal}</span> pieces but the Issue Qty is only <span className="font-bold">{issueQty}</span>.
+                Reduce by <span className="font-bold">{Math.abs(realRemaining)}</span> to save.
+              </p>
+            </div>
+          </div>
+        )}
+
         {selectedItem && (
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="w-full text-sm border-collapse">
@@ -604,8 +638,15 @@ export default function DailyOutputPage() {
                         <button
                           type="button"
                           onClick={() => requestSubmitRow(idx)}
-                          disabled={!hasNewData || isSaving}
-                          className={`inline-flex items-center justify-center w-20 gap-1 rounded-md px-2 py-1.5 text-[10px] font-bold text-white transition-colors ${hasNewData ? 'bg-teal-600 hover:bg-teal-700' : 'bg-slate-300 cursor-not-allowed'}`}
+                          disabled={!hasNewData || isSaving || isOverLimit}
+                          className={`inline-flex items-center justify-center w-20 gap-1 rounded-md px-2 py-1.5 text-[10px] font-bold text-white transition-colors ${
+                            isOverLimit
+                              ? 'bg-red-300 cursor-not-allowed'
+                              : hasNewData
+                                ? 'bg-teal-600 hover:bg-teal-700'
+                                : 'bg-slate-300 cursor-not-allowed'
+                          }`}
+                          title={isOverLimit ? `Exceeds by ${Math.abs(realRemaining)}` : ''}
                         >
                           {hasNewData ? <><Save className="h-3 w-3" /> Save</> : <><CheckCircle2 className="h-3 w-3" /> Saved</>}
                         </button>
@@ -627,6 +668,7 @@ export default function DailyOutputPage() {
               </tbody>
             </table>
           </div>
+
         )}
       </div>
 
@@ -721,7 +763,7 @@ export default function DailyOutputPage() {
 
               <div className="flex gap-2">
                 <button onClick={() => setConfirmModal(null)} disabled={isSaving} className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
-                <button onClick={confirmSubmitRow} disabled={isSaving} className="flex-1 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                <button onClick={confirmSubmitRow} disabled={isSaving || isOverLimit} className="flex-1 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2">
                   {isSaving ? 'Saving...' : (<><Save className="h-4 w-4" /> Save to DB</>)}
                 </button>
               </div>

@@ -2,11 +2,9 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  LayoutDashboard, Users, Package, LogOut, Activity, Truck, FileText,
+import { LayoutDashboard, Users, Package, LogOut, Activity, Truck, FileText,
   Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList, Factory,
-  Settings, ChevronDown, Clock, Menu, X,
-} from 'lucide-react';
+  Settings, ChevronDown, Clock, Menu, X, History } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
 
@@ -33,7 +31,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Development',
     items: [
       { name: 'Jobs', href: '/development', icon: Code, roles: ['Admin', 'Developer'] },
-      { name: 'Submit to Admin', href: '/development/submit', icon: Send, roles: ['Admin', 'Developer'] },
+      { name: 'Submit to QC', href: '/development/submit', icon: Send, roles: ['Admin', 'Developer'] },
       { name: 'Search', href: '/development/search', icon: Search, roles: ['Admin', 'Developer'] },
     ],
   },
@@ -83,6 +81,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { name: 'Daily Output', href: '/worker', icon: Factory, roles: ['Admin', 'Worker'] },
       { name: 'Downtime', href: '/worker/downtime', icon: Clock, roles: ['Admin', 'Worker'] },
+      { name: 'History', href: '/worker/history', icon: History, roles: ['Admin', 'Worker'] },
     ],
   },
 ];
