@@ -965,8 +965,15 @@ export default function StoreInPage() {
                     </div>
                     <div className="text-right space-y-0.5 shrink-0">
                       <div className="text-xs text-slate-500">IN: <span className="font-bold text-orange-600">{record.inQty}</span></div>
-                      <div className="text-xs text-slate-500">Cuts: <span className="font-bold text-slate-700">{record.cuts.length}</span></div>
+                      <div className="text-xs text-slate-500">Cuts: <span className="font-bold text-slate-700">{record.cuts.length}</span> | Cut Qty: <span className="font-bold">{record.totalCutQty}</span></div>
                       <div className="text-xs">Balance: <span className="font-bold text-blue-700">{record.balanceBulkQty}</span></div>
+                      {record.uncutBalance > 0 && (
+                        <div className="mt-0.5">
+                          <span className="rounded-full bg-amber-100 border border-amber-300 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                            Uncut: {record.uncutBalance} — Edit to add cuts
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                       {locks[record.id]?.isLocked ? (
