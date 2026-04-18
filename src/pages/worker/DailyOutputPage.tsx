@@ -1,5 +1,7 @@
 // src/pages/worker/DailyOutputPage.tsx
 import { useState, useEffect, useMemo } from 'react';
+import { useAutoDraft } from '../../hooks/useAutoDraft';
+import DraftRestoredToast from '../../components/DraftRestoredToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
@@ -130,6 +132,28 @@ export default function DailyOutputPage() {
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
 
   const [confirmModal, setConfirmModal] = useState<{ rowIndex: number; slot: TimeSlot } | null>(null);
+
+  // --- Auto-draft: save form to localStorage, restore on reload ---
+  const workerDraftState = useMemo(() => ({
+    pickedStyleKey, pickedCutNo, selectedStoreInId,
+    selectedComponent, tableNo, date, workerName, timeSlots,
+  }), [pickedStyleKey, pickedCutNo, selectedStoreInId,
+       selectedComponent, tableNo, date, workerName, timeSlots]);
+
+  const { draftRestored, clearDraft, dismissDraftNotice } = useAutoDraft(
+    'worker-daily-output',
+    workerDraftState,
+    (saved) => {
+      if (saved.pickedStyleKey) setPickedStyleKey(saved.pickedStyleKey);
+      if (saved.pickedCutNo) setPickedCutNo(saved.pickedCutNo);
+      if (saved.selectedStoreInId) setSelectedStoreInId(saved.selectedStoreInId);
+      if (saved.selectedComponent) setSelectedComponent(saved.selectedComponent);
+      if (saved.tableNo) setTableNo(saved.tableNo);
+      if (saved.date) setDate(saved.date);
+      if (saved.workerName) setWorkerName(saved.workerName);
+      if (saved.timeSlots) setTimeSlots(saved.timeSlots);
+    }
+  );
 
   const workerPagination = usePaginatedSearch({
     data: records,
@@ -407,6 +431,7 @@ export default function DailyOutputPage() {
     setActiveRecordId(null);
     setErrors({});
     setPageError('');
+    clearDraft();
   };
 
   const handleDelete = async (id: string) => {
@@ -421,6 +446,12 @@ export default function DailyOutputPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-7xl space-y-6 pb-12">
+      <DraftRestoredToast
+        visible={draftRestored}
+        onDismiss={dismissDraftNotice}
+        onDiscard={() => { clearDraft(); handleReset(); }}
+      />
+
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="rounded-lg bg-teal-100 p-2">
           <Factory className="h-6 w-6 text-teal-700" />

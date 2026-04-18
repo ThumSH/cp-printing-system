@@ -1,5 +1,7 @@
 // src/pages/qc/CPIPage.tsx
 import { useState, useEffect, useMemo } from 'react';
+import { useAutoDraft } from '../../hooks/useAutoDraft';
+import DraftRestoredToast from '../../components/DraftRestoredToast';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -59,6 +61,29 @@ export default function CPIPage() {
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
+  // --- Auto-draft: save form to localStorage, restore on reload ---
+  const cpiDraftState = useMemo(() => ({
+    date, selectedStoreInId, selectedCutNo, cutInspections,
+    inspectionStatus, appRej, checkedBy, summaryDate, cpiAuditor,
+  }), [date, selectedStoreInId, selectedCutNo, cutInspections,
+       inspectionStatus, appRej, checkedBy, summaryDate, cpiAuditor]);
+
+  const { draftRestored, clearDraft, dismissDraftNotice } = useAutoDraft(
+    'cpi-form',
+    cpiDraftState,
+    (saved) => {
+      if (saved.date) setDate(saved.date);
+      if (saved.selectedStoreInId) setSelectedStoreInId(saved.selectedStoreInId);
+      if (saved.selectedCutNo) setSelectedCutNo(saved.selectedCutNo);
+      if (saved.cutInspections) setCutInspections(saved.cutInspections);
+      if (saved.inspectionStatus) setInspectionStatus(saved.inspectionStatus);
+      if (saved.appRej) setAppRej(saved.appRej);
+      if (saved.checkedBy) setCheckedBy(saved.checkedBy);
+      if (saved.summaryDate) setSummaryDate(saved.summaryDate);
+      if (saved.cpiAuditor) setCpiAuditor(saved.cpiAuditor);
+    }
+  );
+
   const cpiPagination = usePaginatedSearch({ data: cpiReports, searchFields: ["styleNo" as keyof CPIReport, "customer" as keyof CPIReport, "scheduleNo" as keyof CPIReport], pageSize: 25 });
   const [cpiLocks, setCpiLocks] = useState<Record<string, { isLocked: boolean }>>({});
 
@@ -209,6 +234,7 @@ export default function CPIPage() {
     setEditingId(null);
     setErrors({});
     setPageError('');
+    clearDraft();
   };
 
   // --- Submit ---
@@ -305,6 +331,12 @@ export default function CPIPage() {
       animate={{ opacity: 1, y: 0 }}
       className="mx-auto max-w-[1600px] space-y-6 pb-12"
     >
+      <DraftRestoredToast
+        visible={draftRestored}
+        onDismiss={dismissDraftNotice}
+        onDiscard={() => { clearDraft(); resetForm(); }}
+      />
+
       {/* Page Header */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="rounded-lg bg-indigo-100 p-2">

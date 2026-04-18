@@ -3,8 +3,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Save, Trash2, AlertCircle, Plus, ChevronDown, ChevronRight, CheckCircle2, XCircle, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
+import { API } from '../../api/client';
 
-const API_BASE = 'http://localhost:5000/api/worker';
+const API_BASE = API.WORKER;
 const getHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 const DOWNTIME_TYPES = [

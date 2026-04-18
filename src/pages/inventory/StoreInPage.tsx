@@ -1,5 +1,7 @@
 // src/pages/inventory/StoreInPage.tsx
 import { useState, useEffect, useMemo } from 'react';
+import { useAutoDraft } from '../../hooks/useAutoDraft';
+import DraftRestoredToast from '../../components/DraftRestoredToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PackageOpen, Plus, Trash2, Edit2, AlertCircle, Save, GitBranch,
@@ -207,6 +209,24 @@ export default function StoreInPage() {
 
   // --- Computed quantities ---
   const inQtyNum = parseInt(inQty) || 0;
+  // --- Auto-draft: save form to localStorage, restore on reload ---
+  const storeInDraftState = useMemo(() => ({
+    submissionId, scheduleNo, cutInDate, inQty, cuts, stagedEntries,
+  }), [submissionId, scheduleNo, cutInDate, inQty, cuts, stagedEntries]);
+
+  const { draftRestored, clearDraft, dismissDraftNotice } = useAutoDraft(
+    'store-in-form',
+    storeInDraftState,
+    (saved) => {
+      if (saved.submissionId) setSubmissionId(saved.submissionId);
+      if (saved.scheduleNo) setScheduleNo(saved.scheduleNo);
+      if (saved.cutInDate) setCutInDate(saved.cutInDate);
+      if (saved.inQty) setInQty(saved.inQty);
+      if (saved.cuts) setCuts(saved.cuts);
+      if (saved.stagedEntries) setStagedEntries(saved.stagedEntries);
+    }
+  );
+
   // --- Next cut number for this style+schedule (continuing from existing DB + staged cuts) ---
   const existingCutCount = useMemo(() => {
     if (!submissionId || !scheduleNo.trim()) return 0;
@@ -379,6 +399,7 @@ export default function StoreInPage() {
     setEditingId(null);
     setErrors({});
     setPageError('');
+    clearDraft();
   };
 
   // --- SAVE TO TABLE (staging) ---
@@ -446,6 +467,7 @@ export default function StoreInPage() {
       }
       const count = stagedEntries.length;
       setStagedEntries([]);
+      clearDraft();
       resetForm();
       await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
       setSuccessMsg(`Successfully saved ${count} entry(ies) to database.`);
@@ -536,7 +558,13 @@ export default function StoreInPage() {
   // ==========================================
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-6xl space-y-8 pb-12">
-      {/* Page Header */}
+<DraftRestoredToast
+        visible={draftRestored}
+        onDismiss={dismissDraftNotice}
+        onDiscard={() => { clearDraft(); resetForm(); }}
+      />
+
+            {/* Page Header */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="rounded-lg bg-orange-100 p-2">
           <PackageOpen className="h-6 w-6 text-orange-700" />

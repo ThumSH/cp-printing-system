@@ -4,8 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
 import { FileText, Save, Trash2, AlertCircle, Plus, ChevronDown, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
+import { API } from '../../api/client';
 
-const API_BASE = 'http://localhost:5000/api/audit';
+const API_BASE = API.AUDIT;
 const getHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 // AQL 0.65 Table

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAdminStore, ApprovalRecord, ApprovalStatus } from '../../store/adminStore';
 import { useDevelopmentStore } from '../../store/developmentStore';
+import { API } from '../../api/client';
 
 const INITIAL_FORM_STATE = {
   status: 'Approved' as ApprovalStatus,
@@ -45,7 +46,7 @@ export default function ApprovalSearch() {
         // Fetch store-in records to check which approvals are locked
         try {
           const storeInRes = await fetch(
-            `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/inventory/store-in`,
+            `${API.INVENTORY}/store-in`,
             { headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' } }
           );
           if (storeInRes.ok) {

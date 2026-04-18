@@ -20,6 +20,7 @@ import {
   ProductionCutInfo,
   StoreProductionRecord,
 } from '../../store/inventoryStore';
+import { API } from '../../api/client';
 
 // ==========================================
 // Staging row type (local, not yet saved)
@@ -73,7 +74,7 @@ export default function StoreProductionPage() {
     const load = async () => {
       try {
         await Promise.all([fetchProductionRecords(), fetchEligibleProductionItems(), fetchBulkBalances()]);
-        const lockRes = await fetch('http://localhost:5000/api/inventory/production/locks', {
+        const lockRes = await fetch(`${API.INVENTORY}/production/locks`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         });
         if (lockRes.ok) setProdLocks(await lockRes.json());

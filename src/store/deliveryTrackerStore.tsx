@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { API } from '../api/client';
 
 
 export const TRACKING_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
@@ -92,7 +93,7 @@ interface DeliveryTrackerStore {
   deleteReport: (id: string) => Promise<void>;
 }
 
-const API_BASE = 'http://localhost:5000/api/deliverytracker';
+const API_BASE = API.DELIVERY_TRACKER;
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
