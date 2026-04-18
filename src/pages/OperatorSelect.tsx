@@ -22,9 +22,27 @@ const ROLE_COLORS: Record<string, string> = {
   Worker: 'from-orange-500 to-orange-600',
 };
 
+// Persist custom names in localStorage so they survive logout and appear in dropdown next time
+const RECENT_NAMES_KEY = 'recentOperatorNames';
+
+function getRecentNames(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_NAMES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveRecentName(name: string) {
+  const names = getRecentNames().filter((n) => n.toLowerCase() !== name.toLowerCase());
+  names.unshift(name); // most recent first
+  // Keep max 10 recent names
+  localStorage.setItem(RECENT_NAMES_KEY, JSON.stringify(names.slice(0, 10)));
+}
+
 export default function OperatorSelect() {
   const { user, setOperator, logout } = useAuthStore();
   const [operators, setOperators] = useState<OperatorInfo[]>([]);
+  const [recentNames, setRecentNames] = useState<string[]>(getRecentNames());
   const [customName, setCustomName] = useState('');
   const [showCustom, setShowCustom] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -42,7 +60,11 @@ export default function OperatorSelect() {
 
   const handleSelect = (name: string) => {
     if (!name.trim()) return;
-    setOperator(name.trim());
+    const trimmed = name.trim();
+    // Save to recent names so it appears in dropdown next time (even after logout)
+    saveRecentName(trimmed);
+    setRecentNames(getRecentNames());
+    setOperator(trimmed);
   };
 
   const gradient = ROLE_COLORS[user?.role || ''] || 'from-slate-500 to-slate-600';
@@ -103,14 +125,44 @@ export default function OperatorSelect() {
                 </div>
               )}
 
-              {/* Divider */}
-              {operators.length > 0 && (
-                <div className="flex items-center gap-3">
-                  <div className="h-px flex-1 bg-slate-200" />
-                  <span className="text-[10px] text-slate-400 font-medium">or type your name</span>
-                  <div className="h-px flex-1 bg-slate-200" />
-                </div>
+              {/* Recent custom names (from previous sessions on this device) */}
+              {recentNames.filter((n) => !operators.some((op) => op.name.toLowerCase() === n.toLowerCase())).length > 0 && (
+                <>
+                  {operators.length > 0 && (
+                    <div className="flex items-center gap-3">
+                      <div className="h-px flex-1 bg-slate-200" />
+                      <span className="text-[10px] text-slate-400 font-medium">recently used on this device</span>
+                      <div className="h-px flex-1 bg-slate-200" />
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    {recentNames
+                      .filter((n) => !operators.some((op) => op.name.toLowerCase() === n.toLowerCase()))
+                      .map((name, i) => (
+                        <motion.button
+                          key={name}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.05 }}
+                          onClick={() => handleSelect(name)}
+                          className="flex items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all"
+                        >
+                          <div className="w-9 h-9 rounded-full bg-slate-300 flex items-center justify-center text-white text-xs font-bold">
+                            {name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
+                          </div>
+                          <span className="text-sm font-semibold text-slate-600">{name}</span>
+                        </motion.button>
+                      ))}
+                  </div>
+                </>
               )}
+
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-slate-200" />
+                <span className="text-[10px] text-slate-400 font-medium">or type your name</span>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
 
               {/* Custom name input */}
               <div className="flex gap-2">

@@ -155,7 +155,7 @@ export default function StoreInPage() {
         const styleResPromise = fetch(`${API.BASE}/api/dashboard/styles`, { headers: getAuthHeaders() });
         await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
         const styleRes = await styleResPromise;
-        const lockRes = await fetch('http://localhost:5000/api/inventory/store-in/locks', {
+        const lockRes = await fetch(`${API.INVENTORY}/store-in/locks`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         });
         if (lockRes.ok) setLocks(await lockRes.json());

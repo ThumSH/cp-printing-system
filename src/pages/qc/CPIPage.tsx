@@ -5,6 +5,7 @@ import DraftRestoredToast from '../../components/DraftRestoredToast';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
 import { motion, AnimatePresence } from 'framer-motion';
+import { API } from '../../api/client';
 import {
   ClipboardList,
   Save,
@@ -91,7 +92,7 @@ export default function CPIPage() {
     const load = async () => {
       try {
         await Promise.all([fetchReports(), fetchEligibleCpiItems()]);
-        const lockRes = await fetch('http://localhost:5000/api/qc/reports/locks', {
+        const lockRes = await fetch(`${API.QC}/reports/locks`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         });
         if (lockRes.ok) setCpiLocks(await lockRes.json());
