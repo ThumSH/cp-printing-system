@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { LayoutDashboard, Printer, RefreshCw, Save, CheckCircle2 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 
-const SIZES_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'];
 
 interface SizeData { size: string; qty: number; pd: number; fd: number; }
 interface TrackerRow {
@@ -318,7 +317,7 @@ function printTracker(summary: TrackerSummary) {
   const sizes = summary.allSizes;
   let hdrCols = sizes.map(s => `<th class="sz">${s}</th><th class="pd">PD</th><th class="fd">FD</th>`).join('');
   let bodyRows = '';
-  summary.rows.forEach((r, i) => {
+  summary.rows.forEach((r) => {
     let sizeCells = sizes.map(s => { const d = r.sizeBreakdown.find(x => x.size === s); return `<td class="sz">${d?.qty || ''}</td><td class="pd">${d?.pd || ''}</td><td class="fd">${d?.fd || ''}</td>`; }).join('');
     bodyRows += `<tr><td>${r.inDate}</td><td>${r.deliveryDate}</td><td>${r.styleNo}</td><td>${r.colour}</td><td>${r.inAd}</td><td>${r.ad}</td><td>${r.scheduleNo}</td><td class="c bold">${r.fpoQty}</td><td class="c">${r.allowedPd}</td><td class="c">${r.cutNo}</td>${sizeCells}<td class="c bold red">${r.sizePdTotal || ''}</td><td class="c bold">${r.fdTotal || ''}</td><td class="c bold ${r.exceeded > 0 ? 'red' : ''}">${r.exceeded || ''}</td></tr>`;
   });

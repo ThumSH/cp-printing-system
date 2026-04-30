@@ -1,7 +1,7 @@
 // src/pages/gatepass/AdviceNoteSearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Truck, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock, GitBranch } from 'lucide-react';
+import { Search, Truck, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock } from 'lucide-react';
 import { useAdviceNoteStore, AdviceNoteRecord, AdviceNoteRow } from '../../store/adviceNoteStore';
 
 const RECENT_LIMIT = 10;

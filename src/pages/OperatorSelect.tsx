@@ -44,7 +44,7 @@ export default function OperatorSelect() {
   const [operators, setOperators] = useState<OperatorInfo[]>([]);
   const [recentNames, setRecentNames] = useState<string[]>(getRecentNames());
   const [customName, setCustomName] = useState('');
-  const [showCustom, setShowCustom] = useState(false);
+  const [] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -79,7 +79,7 @@ export default function OperatorSelect() {
         className="w-full max-w-md"
       >
         {/* Header card */}
-        <div className={`rounded-t-2xl bg-gradient-to-r ${gradient} px-6 py-5 text-white`}>
+        <div className={`rounded-t-2xl bg-linear-to-r ${gradient} px-6 py-5 text-white`}>
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-lg font-bold backdrop-blur-sm">
               {initials}
@@ -116,7 +116,7 @@ export default function OperatorSelect() {
                       onClick={() => handleSelect(op.name)}
                       className="flex items-center gap-2.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all"
                     >
-                      <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white text-xs font-bold`}>
+                      <div className={`w-9 h-9 rounded-full bg-linear-to-br ${gradient} flex items-center justify-center text-white text-xs font-bold`}>
                         {op.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
                       </div>
                       <span className="text-sm font-semibold text-slate-800">{op.name}</span>
@@ -178,7 +178,7 @@ export default function OperatorSelect() {
                 <button
                   onClick={() => handleSelect(customName)}
                   disabled={!customName.trim()}
-                  className={`rounded-xl px-4 py-3 text-sm font-bold text-white bg-gradient-to-r ${gradient} hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40`}
+                  className={`rounded-xl px-4 py-3 text-sm font-bold text-white bg-linear-to-r ${gradient} hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40`}
                 >
                   <UserCheck className="h-4 w-4" />
                 </button>

@@ -26,7 +26,7 @@ export default function SplashScreen({ onComplete, minDuration = 1800 }: SplashS
         initial={{ opacity: 1 }}
         exit={{ opacity: 0, scale: 1.02 }}
         transition={{ duration: 0.4, ease: 'easeInOut' }}
-        className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-900 overflow-hidden"
+        className="fixed inset-0 z-99999 flex items-center justify-center bg-slate-900 overflow-hidden"
       >
         {/* Background effects */}
         <div className="absolute inset-0 overflow-hidden">
@@ -34,13 +34,13 @@ export default function SplashScreen({ onComplete, minDuration = 1800 }: SplashS
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.15 }}
             transition={{ duration: 1.5 }}
-            className="absolute -bottom-32 -left-32 w-[500px] h-[500px] rounded-full bg-blue-600 blur-[150px]"
+            className="absolute -bottom-32 -left-32 w-125 h-125 rounded-full bg-blue-600 blur-[150px]"
           />
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.1 }}
             transition={{ duration: 1.5, delay: 0.3 }}
-            className="absolute -top-20 -right-20 w-[400px] h-[400px] rounded-full bg-teal-500 blur-[130px]"
+            className="absolute -top-20 -right-20 w-100 h-100 rounded-full bg-teal-500 blur-[130px]"
           />
           {/* Grid pattern */}
           <div className="absolute inset-0 opacity-[0.03]" style={{
@@ -85,7 +85,7 @@ export default function SplashScreen({ onComplete, minDuration = 1800 }: SplashS
               initial={{ width: '0%' }}
               animate={{ width: '100%' }}
               transition={{ duration: (minDuration - 400) / 1000, ease: 'easeInOut' }}
-              className="h-full rounded-full bg-gradient-to-r from-blue-500 to-teal-400"
+              className="h-full rounded-full bg-linear-to-r from-blue-500 to-teal-400"
             />
           </motion.div>
         </div>

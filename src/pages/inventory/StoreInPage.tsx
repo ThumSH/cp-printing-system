@@ -328,15 +328,6 @@ export default function StoreInPage() {
   };
 
   // --- Schedule duplicate check ---
-  const isScheduleDuplicate = (schedVal: string, subId: string): boolean => {
-    const trimmed = schedVal.trim().toLowerCase();
-    if (!trimmed) return false;
-    const dbDupe = storeInRecords.some(
-      (r) => r.submissionId === subId && r.scheduleNo.toLowerCase() === trimmed && r.id !== editingId
-    );
-    if (dbDupe) return true;
-    return stagedEntries.some((e) => e.submissionId === subId && e.scheduleNo.toLowerCase() === trimmed);
-  };
 
   // --- Validation ---
   const validateForm = (): boolean => {
@@ -520,7 +511,7 @@ export default function StoreInPage() {
     setCutInDate(record.cutInDate);
     setInQty(record.inQty.toString());
     setCuts(
-      record.cuts.map((c, idx) => ({
+      record.cuts.map((c) => ({
         tempId: crypto.randomUUID(),
         cutNo: c.cutNo,
         cutQty: c.cutQty.toString(),

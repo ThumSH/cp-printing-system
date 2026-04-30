@@ -43,7 +43,7 @@ export function PaginationControls({
           <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
             <NavBtn onClick={() => onPageChange(1)} disabled={!hasPrev}><ChevronsLeft className="h-3.5 w-3.5" /></NavBtn>
             <NavBtn onClick={() => onPageChange(currentPage - 1)} disabled={!hasPrev}><ChevronLeft className="h-3.5 w-3.5" /></NavBtn>
-            <span className="px-2.5 py-1 text-xs font-semibold text-slate-700 min-w-[3rem] text-center">
+            <span className="px-2.5 py-1 text-xs font-semibold text-slate-700 min-w-12 text-center">
               {currentPage}<span className="text-slate-400 font-normal"> / {totalPages}</span>
             </span>
             <NavBtn onClick={() => onPageChange(currentPage + 1)} disabled={!hasNext}><ChevronRight className="h-3.5 w-3.5" /></NavBtn>

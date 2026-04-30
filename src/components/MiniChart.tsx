@@ -51,7 +51,7 @@ interface HBarProps {
   height?: number;
 }
 
-export function HorizontalBarChart({ data, height = 28 }: HBarProps) {
+export function HorizontalBarChart({ data }: HBarProps) {
   const globalMax = Math.max(...data.map((d) => d.max || d.value), 1);
   return (
     <div className="space-y-3">

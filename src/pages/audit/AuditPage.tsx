@@ -10,25 +10,6 @@ const API_BASE = API.AUDIT;
 const getHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 // AQL 0.65 Table
-function getAqlSampleSize(qty: number): number {
-  if (qty <= 1) return qty;
-  if (qty >= 2 && qty <= 8) return 3;
-  if (qty >= 9 && qty <= 15) return 5;
-  if (qty >= 16 && qty <= 25) return 8;
-  if (qty >= 26 && qty <= 50) return 13;
-  if (qty >= 51 && qty <= 90) return 20;
-  if (qty >= 91 && qty <= 150) return 32;
-  if (qty >= 151 && qty <= 280) return 50;
-  if (qty >= 281 && qty <= 500) return 80;
-  if (qty >= 501 && qty <= 1200) return 125;
-  if (qty >= 1201 && qty <= 3200) return 200;
-  if (qty >= 3201 && qty <= 10000) return 315;
-  if (qty >= 10001 && qty <= 35000) return 500;
-  if (qty >= 35001 && qty <= 150000) return 800;
-  if (qty >= 150001 && qty <= 500000) return 1250;
-  if (qty >= 500001) return 2000;
-  return 0;
-}
 
 interface BundleInfo { id: string; bundleNo: string; bundleQty: number; size: string; numberRange: string; }
 interface CutInfo { id: string; cutNo: string; cutQty: number; bundles: BundleInfo[]; }
@@ -44,7 +25,7 @@ export default function AuditPage() {
   const [selectedBundleIds, setSelectedBundleIds] = useState<Set<string>>(new Set());
   const [stagingRows, setStagingRows] = useState<StagingRow[]>([]);
   const [auditorName, setAuditorName] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date] = useState(new Date().toISOString().split('T')[0]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -105,17 +86,8 @@ export default function AuditPage() {
   }, [selectedCut, auditedBundleNos, selectedStoreInId]);
 
   // Unique styles for the dropdown
-  const styleOptions = useMemo(() => {
-    const map = new Map<string, EligibleItem>();
-    eligibleItems.forEach((i) => { if (!map.has(i.styleNo)) map.set(i.styleNo, i); });
-    return [...map.values()];
-  }, [eligibleItems]);
 
   // Schedules for selected style
-  const scheduleOptions = useMemo(() => {
-    if (!selectedItem) return [];
-    return eligibleItems.filter((i) => i.styleNo === selectedItem.styleNo);
-  }, [eligibleItems, selectedItem]);
 
   // Selected bundles total — AQL always 32 (fixed at 91-150 range)
   const selectedBundles = bundles.filter((b) => selectedBundleIds.has(b.id));

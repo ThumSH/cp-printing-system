@@ -23,10 +23,8 @@ import {
   CPIReport,
   CpiCutInspection,
   CpiDefectRow,
-  EligibleCpiItem,
   CpiCutInfo,
   InspectionStatus,
-  DEFECT_TYPES,
   createEmptyDefectRows,
 } from '../../store/qcStore';
 
@@ -330,7 +328,7 @@ export default function CPIPage() {
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mx-auto max-w-[1600px] space-y-6 pb-12"
+      className="mx-auto max-w-400 space-y-6 pb-12"
     >
       <DraftRestoredToast
         visible={draftRestored}
@@ -514,12 +512,12 @@ export default function CPIPage() {
                   <thead>
                     <tr className="border-b border-slate-800 bg-slate-200 text-slate-800">
                       <th className="w-10 border-r border-slate-400 px-2 py-1.5 text-center font-bold" rowSpan={2}>Code</th>
-                      <th className="min-w-[160px] border-r border-slate-400 px-2 py-1.5 text-left font-bold" rowSpan={2}>Defect</th>
+                      <th className="min-w-40 border-r border-slate-400 px-2 py-1.5 text-left font-bold" rowSpan={2}>Defect</th>
                       <th className="border-r border-slate-400 px-1 py-1 text-center font-bold" colSpan={2}>Before printing</th>
                       <th className="border-r border-slate-400 px-1 py-1 text-center font-bold" colSpan={2}>After printing</th>
                       <th className="w-16 border-r border-slate-400 px-1 py-1.5 text-center font-bold text-red-700" rowSpan={2}>Defected Qty</th>
                       <th className="w-14 border-r border-slate-400 px-1 py-1.5 text-center font-bold" rowSpan={2}>%</th>
-                      <th className="min-w-[100px] px-2 py-1.5 text-left font-bold" rowSpan={2}>Remarks</th>
+                      <th className="min-w-25 px-2 py-1.5 text-left font-bold" rowSpan={2}>Remarks</th>
                     </tr>
                     <tr className="border-b border-slate-800 bg-slate-100 text-[10px] text-slate-600">
                       <th className="w-16 border-r border-slate-400 px-1 py-1 text-center">Length</th>

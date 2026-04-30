@@ -1,8 +1,8 @@
 // src/pages/inventory/ProductionSearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Factory, ChevronDown, ChevronRight, Filter, X, CalendarDays, RotateCcw, Clock, GitBranch } from 'lucide-react';
-import { useInventoryStore, StoreProductionRecord } from '../../store/inventoryStore';
+import { motion } from 'framer-motion';
+import { Search, Factory, Filter, CalendarDays, RotateCcw, Clock, GitBranch } from 'lucide-react';
+import { useInventoryStore } from '../../store/inventoryStore';
 
 const RECENT_LIMIT = 10;
 
@@ -13,7 +13,7 @@ export default function ProductionSearchPage() {
   const [filterCutNo, setFilterCutNo] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [, setExpandedId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {

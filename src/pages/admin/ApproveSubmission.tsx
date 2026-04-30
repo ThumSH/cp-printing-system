@@ -352,7 +352,7 @@ export default function ApproveSubmission() {
               </span>
             </div>
 
-            <div className="space-y-3 max-h-[700px] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-175 overflow-y-auto pr-1">
               {filteredSubmissions.length > 0 ? (
                 filteredSubmissions.map((sub) => {
                   const isSelected = selectedSubmissionId === sub.id;
@@ -715,7 +715,7 @@ function InfoCard({
         <Icon className="h-4 w-4 text-slate-500" />
         <p className="text-sm font-medium text-slate-600">{label}</p>
       </div>
-      <p className="break-words text-sm font-semibold text-slate-900">{value || '-'}</p>
+      <p className="wrap-break-word text-sm font-semibold text-slate-900">{value || '-'}</p>
     </div>
   );
 }

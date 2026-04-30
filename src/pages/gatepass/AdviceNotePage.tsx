@@ -5,7 +5,7 @@ import {
   FileText, Save, Edit2, Trash2, AlertCircle, Printer, Plus, ChevronDown, ChevronRight, X,
 } from 'lucide-react';
 import {
-  useAdviceNoteStore, AdviceNoteRecord, AdviceNoteRow, EligibleGatepassItem,
+  useAdviceNoteStore, AdviceNoteRecord, AdviceNoteRow,
 } from '../../store/adviceNoteStore';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
@@ -168,7 +168,7 @@ export default function AdviceNotePage() {
           {selectedItem && (
             <div className="border-b border-slate-300 bg-orange-50/30 px-5 py-4">
               <div className="flex items-end gap-3 flex-wrap">
-                <div className="space-y-1 flex-1 min-w-[180px]"><label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">Cut No <span className="text-red-500">*</span></label>
+                <div className="space-y-1 flex-1 min-w-45"><label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">Cut No <span className="text-red-500">*</span></label>
                   <select value={selectedCutNo} onChange={(e) => {
                     const cutNo = e.target.value;
                     setSelectedCutNo(cutNo);
@@ -178,7 +178,7 @@ export default function AdviceNotePage() {
                   }} className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none ${errors.cutNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500'}`}>
                     <option value="">Select cut...</option>{availableCuts.map((c) => (<option key={c.cutNo} value={c.cutNo}>{c.cutNo} — Qty: {c.cutQty} — {c.bundles.length} bundle(s)</option>))}
                   </select></div>
-                <div className="space-y-1 flex-1 min-w-[180px]"><label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">Component <span className="text-[9px] font-normal text-slate-400">(from QC)</span></label>
+                <div className="space-y-1 flex-1 min-w-45"><label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">Component <span className="text-[9px] font-normal text-slate-400">(from QC)</span></label>
                   <div
                     className={`w-full rounded border px-3 py-2 text-sm font-bold outline-none ${
                       selectedComponent

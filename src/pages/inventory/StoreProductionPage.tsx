@@ -2,23 +2,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Factory,
   Plus,
   Trash2,
-  Edit2,
-  AlertCircle,
   Save,
-  GitBranch,
-  CheckCircle2,
   Lock,
 } from 'lucide-react';
 import {
   useInventoryStore,
-  EligibleProductionItem,
-  ProductionCutInfo,
-  StoreProductionRecord,
 } from '../../store/inventoryStore';
 import { API } from '../../api/client';
 
@@ -48,7 +41,6 @@ export default function StoreProductionPage() {
     batchAddProductionRecords,
     deleteProductionRecord,
     fetchBulkBalances,
-    bulkBalances,
   } = useInventoryStore();
 
   // --- Selection state ---
@@ -92,10 +84,6 @@ export default function StoreProductionPage() {
   );
 
   // --- Bulk balance for the selected style ---
-  const styleBulkBalance = useMemo(() => {
-    if (!selectedItem) return null;
-    return bulkBalances.find((b) => b.submissionId === selectedItem.submissionId) || null;
-  }, [selectedItem, bulkBalances]);
 
   // --- Available cuts (adjusted for staging rows already added) ---
   const adjustedCuts = useMemo(() => {
@@ -120,10 +108,6 @@ export default function StoreProductionPage() {
   const issueQtyNum = parseInt(issueQty) || 0;
   const cutBalance = selectedCut ? Math.max(0, selectedCut.availableQty - issueQtyNum) : 0;
 
-  const componentsList = useMemo(() => {
-    if (!selectedItem?.components) return [];
-    return selectedItem.components.split(',').map((c) => c.trim()).filter(Boolean);
-  }, [selectedItem]);
 
   // --- Add row to staging ---
   const handleAddRow = () => {

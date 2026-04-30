@@ -1,7 +1,7 @@
 // src/pages/worker/DowntimePage.tsx
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, Save, Trash2, AlertCircle, Plus, ChevronDown, ChevronRight, CheckCircle2, XCircle, ShieldCheck } from 'lucide-react';
+import { Clock, Save, Trash2, AlertCircle, Plus, ChevronDown, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { API } from '../../api/client';
 
@@ -65,11 +65,9 @@ export default function DowntimePage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const selectedItem = useMemo(() => eligibleStyles.find((i) => i.id === selectedStoreInId) || null, [eligibleStyles, selectedStoreInId]);
 
   // Separate pending vs acknowledged records
   const pendingRecords = records.filter((r) => !r.fullyAcknowledged);
-  const acknowledgedRecords = records.filter((r) => r.fullyAcknowledged);
 
   const handleAddEntry = () => {
     const newErrors: Record<string, string> = {};

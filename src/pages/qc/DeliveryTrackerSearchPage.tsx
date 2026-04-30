@@ -1,7 +1,7 @@
 // src/pages/qc/DeliveryTrackerSearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, LayoutDashboard, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock, Printer } from 'lucide-react';
+import { Search, LayoutDashboard, ChevronDown, ChevronRight, Filter, RotateCcw, Clock } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 
 interface SizeData { size: string; qty: number; pd: number; fd: number; }

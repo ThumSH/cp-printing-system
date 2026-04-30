@@ -3,16 +3,16 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, PackageOpen, ChevronDown, ChevronRight, Layers,
-  GitBranch, Filter, X, CalendarDays, RotateCcw, Clock,
+  GitBranch, Filter, CalendarDays, RotateCcw, Clock,
 } from 'lucide-react';
-import { useInventoryStore, StoreInRecord } from '../../store/inventoryStore';
+import { useInventoryStore } from '../../store/inventoryStore';
 
 const RECENT_LIMIT = 10;
 
 export default function StoreInSearchPage() {
   const {
-    storeInRecords, fetchRecords, bulkBalances, fetchBulkBalances,
-    eligibleStoreInItems, fetchEligibleStoreInItems,
+    storeInRecords, fetchRecords, fetchBulkBalances,
+    fetchEligibleStoreInItems,
   } = useInventoryStore();
 
   // Filters

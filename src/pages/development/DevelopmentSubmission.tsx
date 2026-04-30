@@ -2,7 +2,6 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Send,
   Plus,
   Trash2,
   AlertCircle,

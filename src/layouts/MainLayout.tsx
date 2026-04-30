@@ -2,9 +2,8 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutDashboard, Users, Package, LogOut, Activity, Truck, FileText,
-  Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList, Factory,
-  Settings, ChevronDown, Clock, Menu, X, History } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut, Activity, Truck, FileText,
+  Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList, Factory, Clock, Menu, X, History } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
 
@@ -209,7 +208,7 @@ export default function MainLayout() {
 
         {/* Page content with smooth transitions */}
         <div className="flex-1 overflow-y-auto">
-          <div className="p-6 max-w-[1400px] mx-auto">
+          <div className="p-6 max-w-350 mx-auto">
             <AnimatePresence mode="wait">
               <motion.div
                 key={location.pathname}

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Users, Plus, Edit2, Trash2, KeyRound, Save, X, Loader2, Shield, Eye, EyeOff, Search, UserPlus,
+  Users, Edit2, Trash2, KeyRound, Save, X, Loader2, Shield, Eye, EyeOff, Search, UserPlus,
 } from 'lucide-react';
 import { ROLES, Role, User } from '../../types';
 import { getUsers, createUser, updateUser, deleteUser, resetPassword } from '../../services/services';

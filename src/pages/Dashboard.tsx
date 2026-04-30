@@ -6,10 +6,10 @@ import {
   Package, CheckSquare, Truck, FileText, Factory,
   Clock, AlertTriangle, TrendingUp, Code, ClipboardCheck,
   PackageOpen, ArrowRight, Loader2, RefreshCw, ChevronRight,
-  ChevronDown, BarChart2, Activity, Shield, User, Layers,
-  Circle, CheckCircle2, XCircle, Timer, Inbox, Send,
-  Eye, PieChart as PieIcon, Star, Zap, LayoutDashboard,
-  Scissors, Boxes, Gauge, Building2,
+  ChevronDown, BarChart2, Activity, Shield, Layers,
+  CheckCircle2, XCircle, Timer, Inbox, Send,
+  Eye, PieChart as PieIcon, Star, LayoutDashboard,
+  Boxes, Gauge, Building2,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { API, getAuthHeaders } from '../api/client';
@@ -83,17 +83,6 @@ const STAGE_META: Record<string, { bg: string; text: string; dot: string; order:
 // SHARED UI PRIMITIVES
 // ==========================================
 
-function SectionHeader({ icon: Icon, title, color = 'text-slate-400', subtitle }: { icon: any; title: string; color?: string; subtitle?: string }) {
-  return (
-    <div className="flex items-center gap-2.5 mb-5 pt-6 border-t border-slate-100">
-      <div className="p-1.5 rounded-lg bg-slate-100"><Icon className={`h-4 w-4 ${color}`} /></div>
-      <div>
-        <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500">{title}</h3>
-        {subtitle && <p className="text-[11px] text-slate-400 mt-0.5">{subtitle}</p>}
-      </div>
-    </div>
-  );
-}
 
 function Card({ children, className = '', title, icon: Icon, action, noPadding = false, accent }: {
   children: React.ReactNode; className?: string; title?: string; icon?: any; action?: React.ReactNode; noPadding?: boolean; accent?: string;
@@ -169,21 +158,6 @@ function AlertCard({ icon: Icon, label, value, href, color }: { icon: any; label
   );
 }
 
-function InlineDonut({ value, total, color, size = 64 }: { value: number; total: number; color: string; size?: number }) {
-  const pct = total > 0 ? Math.min(100, Math.round(value / total * 100)) : 0;
-  const r = (size - 8) / 2;
-  const circ = 2 * Math.PI * r;
-  return (
-    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={6} />
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={6}
-          strokeDasharray={circ} strokeDashoffset={circ * (1 - pct/100)} strokeLinecap="round" />
-      </svg>
-      <span className="absolute text-xs font-black text-slate-700">{pct}%</span>
-    </div>
-  );
-}
 
 function SimpleTable({ headers, rows, className = '' }: { headers: string[]; rows: (string | number | React.ReactNode)[][]; className?: string }) {
   return (
@@ -419,7 +393,7 @@ function StoresDashboard({ data, storeInRecords, styles }: { data: DashboardData
         <div className="space-y-3">
           {/* Filters */}
           <div className="flex flex-wrap gap-2">
-            <div className="flex-1 min-w-[160px]">
+            <div className="flex-1 min-w-40">
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Style No</label>
               <select value={styleFilter} onChange={e => setStyleFilter(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
@@ -427,7 +401,7 @@ function StoresDashboard({ data, storeInRecords, styles }: { data: DashboardData
                 {styleOptions.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <div className="flex-1 min-w-[160px]">
+            <div className="flex-1 min-w-40">
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Customer</label>
               <select value={customerFilter} onChange={e => setCustomerFilter(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
@@ -745,7 +719,7 @@ function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleO
   return (
     <div className="space-y-5">
       {/* Today highlight */}
-      <div className="rounded-xl bg-gradient-to-r from-slate-800 to-slate-700 p-5 text-white">
+      <div className="rounded-xl bg-linear-to-r from-slate-800 to-slate-700 p-5 text-white">
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-xs font-medium text-slate-300 uppercase tracking-widest">Today's Output</p>
@@ -878,7 +852,7 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
       {/* Filters */}
       <div className="flex flex-wrap gap-2 p-4 border-b border-slate-100">
         <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search style or customer..."
-          className="flex-1 min-w-[160px] rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+          className="flex-1 min-w-40 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
         <select value={stageFilter} onChange={e => setStageFilter(e.target.value)}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">All stages</option>
@@ -912,11 +886,11 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
               <th className="px-3 py-3 text-right">Disp.</th>
               <th className="px-3 py-3 text-right">Remain</th>
               <th className="px-3 py-3 text-center">Pipeline</th>
-              <th className="px-3 py-3 text-left min-w-[110px]">Progress</th>
+              <th className="px-3 py-3 text-left min-w-27.5">Progress</th>
             </tr>
           </thead>
           <tbody>
-            {slice.map((s, i) => {
+            {slice.map((s) => {
               const pct = s.bulkQty > 0 ? Math.round(s.totalDispatched / s.bulkQty * 100) : 0;
               const isExp = expanded === s.styleNo;
               const extra = styleExtraData.get(s.styleNo) || { totalCutQty: 0, totalBundles: 0, totalInQty: 0 };
@@ -1071,7 +1045,7 @@ function SystemBulkSummary({ styles, storeInRecords }: { styles: StyleOverview[]
     <Card title="System Bulk Qty per Style — Complete Overview" icon={Boxes} noPadding
       action={hasFilter ? <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Filtered View</span> : undefined}>
       {/* Totals row */}
-      <div className="grid grid-cols-2 gap-0 sm:grid-cols-3 lg:grid-cols-6 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+      <div className="grid grid-cols-2 gap-0 sm:grid-cols-3 lg:grid-cols-6 border-b border-slate-200 bg-linear-to-r from-slate-50 to-white">
         <div className="p-4 border-r border-slate-100">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">System Bulk</p>
           <p className="text-2xl font-black text-slate-800 mt-1">{totals.bulk.toLocaleString()}</p>
@@ -1106,7 +1080,7 @@ function SystemBulkSummary({ styles, storeInRecords }: { styles: StyleOverview[]
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3 p-4 border-b border-slate-100">
-        <div className="flex-1 min-w-[160px]">
+        <div className="flex-1 min-w-40">
           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Style No</label>
           <select value={styleFilter} onChange={e => setStyleFilter(e.target.value)}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
@@ -1114,7 +1088,7 @@ function SystemBulkSummary({ styles, storeInRecords }: { styles: StyleOverview[]
             {styleOptions.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <div className="flex-1 min-w-[160px]">
+        <div className="flex-1 min-w-40">
           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Customer</label>
           <select value={customerFilter} onChange={e => setCustomerFilter(e.target.value)}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
@@ -1333,7 +1307,7 @@ export default function Dashboard() {
       {/* ── Executive Header ── */}
       <motion.div
         initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
-        className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 text-white shadow-lg"
+        className="relative overflow-hidden rounded-2xl bg-linear-to-br from-slate-900 via-slate-800 to-slate-900 p-6 text-white shadow-lg"
       >
         {/* Decorative pattern */}
         <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-blue-500/10 blur-3xl" />

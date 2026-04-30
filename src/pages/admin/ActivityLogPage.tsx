@@ -3,8 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity, Search, Filter, LogIn, Plus, Edit2, Trash2, RefreshCw,
-  Loader2, Users, Clock, ChevronDown, ChevronRight, Shield, Eye,
-  AlertTriangle, Calendar, User, XCircle,
+  Loader2, Users, ChevronDown, ChevronRight, Shield,XCircle,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 
@@ -285,7 +284,7 @@ export default function ActivityLogPage() {
           {filteredLogs.length === 0 ? (
             <div className="py-16 text-center"><Activity className="mx-auto mb-3 h-12 w-12 text-slate-200" /><p className="text-slate-400">No activity logs found.</p></div>
           ) : (
-            <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
+            <div className="divide-y divide-slate-50 max-h-150 overflow-y-auto">
               {filteredLogs.map((log, i) => <LogRow key={log.id} log={log} delay={Math.min(i * 0.015, 0.3)} formatTime={formatTime} />)}
             </div>
           )}
@@ -473,7 +472,7 @@ function LogRow({ log, delay, formatTime }: { log: LogEntry; delay: number; form
   );
 }
 
-function UserActionCard({ user, formatTime, formatFullTime }: {
+function UserActionCard({ user, formatFullTime }: {
   user: { userName: string; userRole: string; actions: LogEntry[]; creates: number; updates: number; deletes: number };
   formatTime: (ts: string) => string; formatFullTime: (ts: string) => string;
 }) {
@@ -496,7 +495,7 @@ function UserActionCard({ user, formatTime, formatFullTime }: {
       </div>
       <AnimatePresence>{expanded && (
         <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden border-t border-slate-100">
-          <div className="divide-y divide-slate-50 max-h-[300px] overflow-y-auto">
+          <div className="divide-y divide-slate-50 max-h-75 overflow-y-auto">
             {user.actions.map((a) => {
               const ac = ACTION_CONFIG[a.action] || { icon: Activity, color: 'text-slate-600', bg: 'bg-slate-100' };
               const Icon = ac.icon;

@@ -1,5 +1,4 @@
 // src/components/Toast.tsx
-import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { create } from 'zustand';
 import { CheckCircle2, XCircle, AlertTriangle, Info, X } from 'lucide-react';
@@ -42,7 +41,7 @@ export function ToastContainer() {
   const { toasts, removeToast } = useToast();
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm pointer-events-none">
+    <div className="fixed top-4 right-4 z-9999 flex flex-col gap-2 max-w-sm pointer-events-none">
       <AnimatePresence>
         {toasts.map((t) => {
           const c = CONFIG[t.type];

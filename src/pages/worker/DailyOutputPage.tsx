@@ -757,9 +757,9 @@ export default function DailyOutputPage() {
                 </tbody>
               </table>
             </div>
-            <PaginationControls onSearchChange={function (value: string): void {
+            <PaginationControls onSearchChange={function (): void {
                 throw new Error('Function not implemented.');
-              } } onPageChange={function (page: number): void {
+              } } onPageChange={function (): void {
                 throw new Error('Function not implemented.');
               } } {...workerPagination} placeholder="Search records..." />
           </>
