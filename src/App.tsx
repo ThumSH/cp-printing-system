@@ -28,6 +28,8 @@ import WorkerHistoryPage from './pages/worker/WorkerHistoryPage';
 import ActivityLogPage from './pages/admin/ActivityLogPage';
 import SplashScreen from './components/SplashScreen';
 import OperatorSelect from './pages/OperatorSelect';
+import ColourMasterPage from './pages/admin/ColourMasterPage';
+import SampleStylePage from './pages/development/SampleStylePage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -113,6 +115,14 @@ function App() {
               }
             />
             <Route
+  path="samples"
+  element={
+    <RoleRoute allowedRoles={['Developer', 'Admin']}>
+      <SampleStylePage />
+    </RoleRoute>
+  }
+/>
+            <Route
               path="submit"
               element={
                 <RoleRoute allowedRoles={['Developer', 'Admin']}>
@@ -145,6 +155,7 @@ function App() {
     <ActivityLogPage />
   </RoleRoute>
 } />      
+<Route path="colours" element={<RoleRoute allowedRoles={['Admin']}><ColourMasterPage /></RoleRoute>} />
 
           <Route
             path="users"

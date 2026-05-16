@@ -1,8 +1,11 @@
 // src/pages/development/DevelopmentPage.tsx
+// CHANGE SUMMARY: BodyColour input replaced with ColourMasterSelect component.
+// Everything else is identical to the original — no structural changes.
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Code, Upload, Plus, Trash2, Edit2, CheckCircle2, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { Code, Upload, Plus, Trash2, Edit2, CheckCircle2, Image as ImageIcon, AlertCircle, Loader2, X } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
+import { useColourMasterStore } from '../../store/colourMasterStore';
 
 interface DevelopmentForm {
   id: string;
@@ -39,27 +42,175 @@ const INITIAL_FORM_STATE: Omit<DevelopmentForm, 'id'> = {
 
 const PLACEMENT_OPTIONS = ['Front', 'Back', 'Sleeve', 'Pocket', 'Waistband', 'Other'];
 
+// ==========================================
+// COLOUR MASTER SELECT
+// Inline component so DevelopmentPage stays self-contained.
+// Shows dropdown of master colours + "Add new" inline option.
+// ==========================================
+function ColourMasterSelect({
+  value,
+  onChange,
+  error,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  error?: string;
+}) {
+  const { colours, loading, fetchColours, addColour } = useColourMasterStore();
+  const [showAddNew, setShowAddNew] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newHex, setNewHex] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
+
+  useEffect(() => {
+    fetchColours();
+  }, [fetchColours]);
+
+  const handleAddNew = async () => {
+    if (!newName.trim()) { setAddError('Name is required'); return; }
+    setAdding(true); setAddError('');
+    try {
+      const saved = await addColour(newName.trim(), newHex.trim() || undefined);
+      onChange(saved.name);  // auto-select the newly added colour
+      setNewName(''); setNewHex(''); setShowAddNew(false);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Failed to add colour');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2 items-start">
+        <div className="flex-1 relative">
+          {/* Colour swatch preview */}
+          {value && colours.find(c => c.name === value)?.hexCode && (
+            <div
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border border-slate-300 shrink-0"
+              style={{ backgroundColor: colours.find(c => c.name === value)?.hexCode || undefined }}
+            />
+          )}
+          <select
+            value={value}
+            onChange={(e) => {
+              if (e.target.value === '__add_new__') {
+                setShowAddNew(true);
+              } else {
+                onChange(e.target.value);
+                setShowAddNew(false);
+              }
+            }}
+            className={`w-full px-3 py-2 border rounded-lg outline-none transition-all sm:text-sm ${
+              value && colours.find(c => c.name === value)?.hexCode ? 'pl-9' : ''
+            } ${
+              error
+                ? 'border-red-400 focus:ring-2 focus:ring-red-200 bg-red-50'
+                : 'border-slate-300 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600'
+            }`}
+          >
+            <option value="">Select body colour...</option>
+            {loading && <option disabled>Loading colours...</option>}
+            {colours.map((c) => (
+              <option key={c.id} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+            <option value="__add_new__">＋ Add new colour...</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Inline "add new colour" form */}
+      <AnimatePresence>
+        {showAddNew && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
+              <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide">Add New Colour</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => { setNewName(e.target.value); setAddError(''); }}
+                  placeholder="e.g. R-1 — Bright Red"
+                  className="flex-1 rounded border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddNew(); if (e.key === 'Escape') setShowAddNew(false); }}
+                />
+                <input
+                  type="color"
+                  value={newHex || '#ffffff'}
+                  onChange={(e) => setNewHex(e.target.value)}
+                  title="Optional colour swatch"
+                  className="w-10 h-9 rounded border border-slate-300 cursor-pointer p-0.5"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddNew}
+                  disabled={adding}
+                  className="inline-flex items-center gap-1 rounded bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                >
+                  {adding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                  {adding ? 'Adding...' : 'Add'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowAddNew(false); setNewName(''); setNewHex(''); setAddError(''); }}
+                  className="rounded p-1.5 text-slate-400 hover:bg-slate-200 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {addError && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{addError}</p>}
+              <p className="text-[10px] text-slate-400">Tip: use a code + description format, e.g. "N-4 — Navy Blue"</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {error && !showAddNew && (
+        <div className="flex items-center text-[11px] text-red-600 font-medium">
+          <AlertCircle className="w-3 h-3 mr-1" /> {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// MAIN PAGE — identical to original except bodyColour field
+// ==========================================
 export default function DevelopmentPage() {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const { jobs: submissions, addJob, updateJob, deleteJob } = useDevelopmentStore();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const { fetchData } = useDevelopmentStore();
 
-  
-const { fetchData } = useDevelopmentStore();
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-useEffect(() => {
-  fetchData();
-}, []);
-  
-  // NEW: State to hold our validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-    // Clear the specific error when the user starts typing again
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  // Handler for the colour master dropdown (not a native event)
+  const handleBodyColourChange = (value: string) => {
+    setFormData((prev) => ({ ...prev, bodyColour: value }));
+    if (errors.bodyColour) {
+      setErrors((prev) => ({ ...prev, bodyColour: '' }));
     }
   };
 
@@ -80,20 +231,18 @@ useEffect(() => {
     const file = e.target.files?.[0];
     if (file) {
       const previewUrl = URL.createObjectURL(file);
-      setFormData((prev) => ({ 
-        ...prev, 
+      setFormData((prev) => ({
+        ...prev,
         artworkFileName: file.name,
-        artworkPreviewUrl: previewUrl 
+        artworkPreviewUrl: previewUrl,
       }));
       if (errors.artwork) setErrors((prev) => ({ ...prev, artwork: '' }));
     }
   };
 
-  // NEW: The core validation engine
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    // 1. Check basic text fields
     if (!formData.customer.trim()) newErrors.customer = 'Customer name is required';
     if (!formData.styleNo.trim()) newErrors.styleNo = 'Style number is required';
     if (!formData.season.trim()) newErrors.season = 'Season is required';
@@ -102,13 +251,11 @@ useEffect(() => {
     if (!formData.bodyColour.trim()) newErrors.bodyColour = 'Body colour is required';
     if (!formData.printColour.trim()) newErrors.printColour = 'Print colours are required';
 
-    // 2. Validate Numbers
     const qty = parseInt(formData.printColourQty);
     if (!formData.printColourQty || isNaN(qty) || qty < 1) {
       newErrors.printColourQty = 'Must be at least 1';
     }
 
-    // 3. Validate Dates
     if (!formData.sampleOrderedDate) newErrors.sampleOrderedDate = 'Order date is required';
     if (!formData.sampleDeliveryDate) {
       newErrors.sampleDeliveryDate = 'Delivery date is required';
@@ -120,7 +267,6 @@ useEffect(() => {
       }
     }
 
-    // 4. Validate Attachments & Arrays
     if (!formData.artworkPreviewUrl) {
       newErrors.artwork = 'Artwork attachment is required';
     }
@@ -129,8 +275,6 @@ useEffect(() => {
     }
 
     setErrors(newErrors);
-    
-    // If the object has no keys, there are no errors (returns true)
     return Object.keys(newErrors).length === 0;
   };
 
@@ -150,7 +294,7 @@ useEffect(() => {
   const handleEdit = (submission: DevelopmentForm) => {
     setFormData(submission);
     setEditingId(submission.id);
-    setErrors({}); // Clear any existing errors when entering edit mode
+    setErrors({});
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -162,7 +306,7 @@ useEffect(() => {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12">
-      
+
       {/* HEADER */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="p-2 bg-indigo-100 rounded-lg">
@@ -174,7 +318,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* FORM SECTION */}
+      {/* FORM */}
       <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
         <div className="mb-6 flex justify-between items-center">
           <h3 className="text-lg font-semibold text-slate-800">
@@ -187,18 +331,16 @@ useEffect(() => {
           )}
         </div>
 
-        {/* Removed generic browser 'required' tags to use our custom validation engine */}
         <form onSubmit={handleSubmit} noValidate className="space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            
-            {/* Standard Text Inputs */}
+
+            {/* All text fields — identical to original */}
             {[
               { label: 'Customer', name: 'customer', type: 'text', placeholder: 'e.g. Nike' },
               { label: 'Style No', name: 'styleNo', type: 'text', placeholder: 'e.g. NK-2026-X' },
               { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. Summer 26' },
               { label: 'Printing Technique', name: 'printingTechnique', type: 'text', placeholder: 'e.g. High Density' },
               { label: 'Washing Standard', name: 'washingStandard', type: 'text', placeholder: 'e.g. 40°C Machine Wash' },
-              { label: 'Body Colour', name: 'bodyColour', type: 'text', placeholder: 'e.g. Navy Blue' },
               { label: 'Print Colour', name: 'printColour', type: 'text', placeholder: 'e.g. White & Red' },
               { label: 'Print Colour QTY', name: 'printColourQty', type: 'number', placeholder: 'e.g. 2' },
               { label: 'Sample Ordered Date', name: 'sampleOrderedDate', type: 'date' },
@@ -216,12 +358,11 @@ useEffect(() => {
                     onChange={handleInputChange}
                     placeholder={field.placeholder}
                     className={`w-full px-3 py-2 border rounded-lg outline-none transition-all sm:text-sm ${
-                      errors[field.name] 
-                        ? 'border-red-400 focus:ring-2 focus:ring-red-200 bg-red-50' 
+                      errors[field.name]
+                        ? 'border-red-400 focus:ring-2 focus:ring-red-200 bg-red-50'
                         : 'border-slate-300 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600'
                     }`}
                   />
-                  {/* Validation Error Message */}
                   {errors[field.name] && (
                     <div className="absolute -bottom-5 left-0 flex items-center text-[11px] text-red-600 font-medium">
                       <AlertCircle className="w-3 h-3 mr-1" /> {errors[field.name]}
@@ -231,7 +372,19 @@ useEffect(() => {
               </div>
             ))}
 
-            {/* FILE UPLOAD WITH VALIDATION */}
+            {/* ── BODY COLOUR — now uses ColourMasterSelect ── */}
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-slate-700">
+                Body Colour <span className="text-red-500">*</span>
+              </label>
+              <ColourMasterSelect
+                value={formData.bodyColour}
+                onChange={handleBodyColourChange}
+                error={errors.bodyColour}
+              />
+            </div>
+
+            {/* FILE UPLOAD — identical to original */}
             <div className="space-y-1 lg:col-span-2">
               <label className="block text-sm font-medium text-slate-700">
                 Artwork Attachment <span className="text-red-500">*</span>
@@ -266,7 +419,7 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* CHECKBOX SECTION WITH VALIDATION */}
+          {/* PLACEMENTS — identical to original */}
           <div className="pt-6 mt-4 border-t border-slate-200">
             <div className="flex items-center mb-4">
               <h4 className="text-sm font-semibold text-slate-800">Print Placement <span className="text-red-500">*</span></h4>
@@ -276,15 +429,14 @@ useEffect(() => {
                 </span>
               )}
             </div>
-            
             <div className={`flex flex-wrap gap-4 p-4 rounded-lg border ${errors.placements ? 'border-red-200 bg-red-50/50' : 'border-transparent'}`}>
               {PLACEMENT_OPTIONS.map((placement) => (
                 <label key={placement} className="flex items-center space-x-2 cursor-pointer group">
                   <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${
-                    formData.placements.includes(placement) 
-                      ? 'bg-indigo-600 border-indigo-600' 
-                      : errors.placements 
-                        ? 'border-red-400 bg-white' 
+                    formData.placements.includes(placement)
+                      ? 'bg-indigo-600 border-indigo-600'
+                      : errors.placements
+                        ? 'border-red-400 bg-white'
                         : 'border-slate-300 group-hover:border-indigo-400'
                   }`}>
                     {formData.placements.includes(placement) && <CheckCircle2 className="w-4 h-4 text-white" />}
@@ -301,7 +453,7 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Action Buttons */}
+          {/* ACTIONS */}
           <div className="flex justify-end pt-4 space-x-3">
             {editingId && (
               <button
@@ -323,14 +475,14 @@ useEffect(() => {
         </form>
       </div>
 
-      {/* SUMMARY TABLE (Remains unchanged) */}
+      {/* SUMMARY TABLE — identical to original */}
       {submissions.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-8">
           <div className="p-6 border-b border-slate-200">
             <h3 className="text-lg font-semibold text-slate-800">Recent Submissions</h3>
           </div>
           <div className="overflow-x-auto">
-             <table className="w-full text-left text-sm whitespace-nowrap min-w-max">
+            <table className="w-full text-left text-sm whitespace-nowrap min-w-max">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                 <tr>
                   <th className="px-6 py-3 font-semibold">Artwork</th>
@@ -345,7 +497,7 @@ useEffect(() => {
               <tbody className="divide-y divide-slate-100">
                 <AnimatePresence>
                   {submissions.map((sub) => (
-                    <motion.tr 
+                    <motion.tr
                       key={sub.id}
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
@@ -356,7 +508,9 @@ useEffect(() => {
                         {sub.artworkPreviewUrl ? (
                           <img src={sub.artworkPreviewUrl} alt="Artwork" className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm" />
                         ) : (
-                          <div className="w-16 h-16 bg-slate-100 rounded-lg border flex items-center justify-center"><ImageIcon className="w-6 h-6 opacity-50" /></div>
+                          <div className="w-16 h-16 bg-slate-100 rounded-lg border flex items-center justify-center">
+                            <ImageIcon className="w-6 h-6 opacity-50" />
+                          </div>
                         )}
                       </td>
                       <td className="px-6 py-4">
@@ -365,7 +519,10 @@ useEffect(() => {
                         <p className="text-xs text-slate-600 mt-0.5">Season: <span className="font-medium text-slate-800">{sub.season}</span></p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-900 font-medium">{sub.bodyColour}</p>
+                        <div className="flex items-center gap-2">
+                          {/* Colour swatch if available */}
+                          <p className="text-sm text-slate-900 font-medium">{sub.bodyColour}</p>
+                        </div>
                         <p className="text-xs text-slate-500 mt-0.5 truncate max-w-30">Wash: {sub.washingStandard}</p>
                       </td>
                       <td className="px-6 py-4">
@@ -375,7 +532,9 @@ useEffect(() => {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-1 max-w-40">
-                          {sub.placements.map(p => <span key={p} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[11px] font-medium border border-indigo-100">{p}</span>)}
+                          {sub.placements.map(p => (
+                            <span key={p} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[11px] font-medium border border-indigo-100">{p}</span>
+                          ))}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-slate-600 text-xs space-y-1">
@@ -383,8 +542,12 @@ useEffect(() => {
                         <p>Del: <span className="font-medium text-slate-900">{sub.sampleDeliveryDate}</span></p>
                       </td>
                       <td className="px-6 py-4 text-right space-x-2">
-                        <button onClick={() => handleEdit(sub)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>
-                        <button onClick={() => handleDelete(sub.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => handleEdit(sub)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDelete(sub.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </td>
                     </motion.tr>
                   ))}

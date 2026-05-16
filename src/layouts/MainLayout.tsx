@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutDashboard, Users, LogOut, Activity, Truck, FileText,
-  Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList, Factory, Clock, Menu, X, History } from 'lucide-react';
+  Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList, Factory, Clock, Menu, X, History, 
+  Palette,
+  FlaskConical} from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
 
@@ -32,6 +34,7 @@ const NAV_GROUPS: NavGroup[] = [
       { name: 'Jobs', href: '/development', icon: Code, roles: ['Admin', 'Developer'] },
       { name: 'Submit to admin', href: '/development/submit', icon: Send, roles: ['Admin', 'Developer'] },
       { name: 'Search', href: '/development/search', icon: Search, roles: ['Admin', 'Developer'] },
+      { name: 'Sample Styles', href: '/development/samples', icon: FlaskConical, roles: ['Developer', 'Admin'] }
     ],
   },
   {
@@ -41,6 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
       { name: 'Approval Search', href: '/admin/search', icon: Search, roles: ['Admin'] },
       { name: 'Users', href: '/admin/users', icon: Users, roles: ['Admin'] },
       { name: 'Activity Log', href: '/admin/activity-log', icon: Activity, roles: ['Admin'] },
+      { name: 'Colour Master', href: '/admin/colours', icon: Palette, roles: ['Admin'] }
     ],
   },
   {

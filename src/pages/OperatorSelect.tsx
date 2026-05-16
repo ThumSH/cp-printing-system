@@ -1,6 +1,6 @@
 // src/pages/OperatorSelect.tsx
 // "Who is using this session?" — shown after login, before entering the app
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Users, LogIn, Loader2, UserCheck } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
@@ -24,6 +24,9 @@ const ROLE_COLORS: Record<string, string> = {
 
 // Persist custom names in localStorage so they survive logout and appear in dropdown next time
 const RECENT_NAMES_KEY = 'recentOperatorNames';
+// Cache key for operator list (per role)
+const OPERATOR_CACHE_KEY = (role: string) => `operatorCache_${role}`;
+const OPERATOR_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 function getRecentNames(): string[] {
   try {
@@ -34,9 +37,33 @@ function getRecentNames(): string[] {
 
 function saveRecentName(name: string) {
   const names = getRecentNames().filter((n) => n.toLowerCase() !== name.toLowerCase());
-  names.unshift(name); // most recent first
-  // Keep max 10 recent names
+  names.unshift(name);
   localStorage.setItem(RECENT_NAMES_KEY, JSON.stringify(names.slice(0, 10)));
+}
+
+interface OperatorCache {
+  operators: OperatorInfo[];
+  fetchedAt: number;
+}
+
+function getCachedOperators(role: string): OperatorInfo[] | null {
+  try {
+    const raw = localStorage.getItem(OPERATOR_CACHE_KEY(role));
+    if (!raw) return null;
+    const cache: OperatorCache = JSON.parse(raw);
+    if (Date.now() - cache.fetchedAt > OPERATOR_CACHE_TTL_MS) {
+      localStorage.removeItem(OPERATOR_CACHE_KEY(role));
+      return null;
+    }
+    return cache.operators;
+  } catch { return null; }
+}
+
+function setCachedOperators(role: string, operators: OperatorInfo[]) {
+  try {
+    const cache: OperatorCache = { operators, fetchedAt: Date.now() };
+    localStorage.setItem(OPERATOR_CACHE_KEY(role), JSON.stringify(cache));
+  } catch { /* localStorage full — fail silently */ }
 }
 
 export default function OperatorSelect() {
@@ -44,24 +71,60 @@ export default function OperatorSelect() {
   const [operators, setOperators] = useState<OperatorInfo[]>([]);
   const [recentNames, setRecentNames] = useState<string[]>(getRecentNames());
   const [customName, setCustomName] = useState('');
-  const [] = useState(false);
   const [loading, setLoading] = useState(true);
+  const fetchedRef = useRef(false);
 
   useEffect(() => {
+    if (!user?.role || fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    const role = user.role;
+
+    // Check cache first — avoids the "Loading operators..." flash entirely
+    const cached = getCachedOperators(role);
+    if (cached) {
+      setOperators(cached);
+      setLoading(false);
+      // Background refresh so cache stays warm for next time
+      refreshInBackground(role);
+      return;
+    }
+
+    // No cache — fetch and show spinner
     const load = async () => {
       try {
-        const res = await fetch(`${API.BASE}/api/operator/by-role/${user?.role}`, { headers: getAuthHeaders() });
-        if (res.ok) setOperators(await res.json());
-      } catch { }
+        const res = await fetch(
+          `${API.BASE}/api/operator/by-role/${role}`,
+          { headers: getAuthHeaders() }
+        );
+        if (res.ok) {
+          const data: OperatorInfo[] = await res.json();
+          setCachedOperators(role, data);
+          setOperators(data);
+        }
+      } catch { /* non-critical — user can still type their name */ }
       finally { setLoading(false); }
     };
-    if (user?.role) load();
+    load();
   }, [user?.role]);
+
+  const refreshInBackground = async (role: string) => {
+    try {
+      const res = await fetch(
+        `${API.BASE}/api/operator/by-role/${role}`,
+        { headers: getAuthHeaders() }
+      );
+      if (res.ok) {
+        const data: OperatorInfo[] = await res.json();
+        setCachedOperators(role, data);
+        setOperators(data);
+      }
+    } catch { /* silent */ }
+  };
 
   const handleSelect = (name: string) => {
     if (!name.trim()) return;
     const trimmed = name.trim();
-    // Save to recent names so it appears in dropdown next time (even after logout)
     saveRecentName(trimmed);
     setRecentNames(getRecentNames());
     setOperator(trimmed);
@@ -112,14 +175,14 @@ export default function OperatorSelect() {
                       key={op.id}
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.05 }}
+                      transition={{ delay: i * 0.04 }}
                       onClick={() => handleSelect(op.name)}
                       className="flex items-center gap-2.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all"
                     >
-                      <div className={`w-9 h-9 rounded-full bg-linear-to-br ${gradient} flex items-center justify-center text-white text-xs font-bold`}>
+                      <div className={`w-9 h-9 rounded-full bg-linear-to-br ${gradient} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
                         {op.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
                       </div>
-                      <span className="text-sm font-semibold text-slate-800">{op.name}</span>
+                      <span className="text-sm font-semibold text-slate-800 truncate">{op.name}</span>
                     </motion.button>
                   ))}
                 </div>
@@ -143,14 +206,14 @@ export default function OperatorSelect() {
                           key={name}
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.05 }}
+                          transition={{ delay: i * 0.04 }}
                           onClick={() => handleSelect(name)}
                           className="flex items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all"
                         >
-                          <div className="w-9 h-9 rounded-full bg-slate-300 flex items-center justify-center text-white text-xs font-bold">
+                          <div className="w-9 h-9 rounded-full bg-slate-300 flex items-center justify-center text-white text-xs font-bold shrink-0">
                             {name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
                           </div>
-                          <span className="text-sm font-semibold text-slate-600">{name}</span>
+                          <span className="text-sm font-semibold text-slate-600 truncate">{name}</span>
                         </motion.button>
                       ))}
                   </div>
@@ -190,8 +253,10 @@ export default function OperatorSelect() {
               </p>
 
               {/* Logout option */}
-              <button onClick={logout}
-                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors mt-2">
+              <button
+                onClick={logout}
+                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors mt-2"
+              >
                 <LogIn className="h-3.5 w-3.5 rotate-180" /> Sign out and switch account
               </button>
             </div>
