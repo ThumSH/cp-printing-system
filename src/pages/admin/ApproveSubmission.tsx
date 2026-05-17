@@ -5,9 +5,10 @@ import {
   ClipboardCheck, Search, CheckCircle2, Clock,
   Image as ImageIcon, Loader2, User2, Palette,
   CalendarDays, Layers3, Shirt, RefreshCw, MessageSquare,
-  ZoomIn, X, Package,
+  ZoomIn, X, Package, Lock,
 } from 'lucide-react';
 import { useSampleStyleStore, SampleStyle } from '../../store/sampleStyleStore';
+import { useInventoryStore } from '../../store/inventoryStore';
 import { API } from '../../api/client';
 
 // ── Lightbox ──────────────────────────────────────────────────────────────────
@@ -19,19 +20,13 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <button onClick={onClose}
-        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors">
         <X className="w-6 h-6" />
       </button>
-      <img
-        src={src} alt="Sample artwork"
+      <img src={src} alt="Sample artwork"
         className="max-h-[90vh] max-w-[90vw] rounded-xl shadow-2xl object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
+        onClick={e => e.stopPropagation()} />
     </div>
   );
 }
@@ -39,21 +34,14 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
 // ── Clickable image ───────────────────────────────────────────────────────────
 function StyleImage({ src }: { src: string | null }) {
   const [open, setOpen] = useState(false);
-
-  if (!src) {
-    return (
-      <div className="w-36 h-36 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
-        <ImageIcon className="w-10 h-10 text-slate-300" />
-      </div>
-    );
-  }
-
+  if (!src) return (
+    <div className="w-36 h-36 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+      <ImageIcon className="w-10 h-10 text-slate-300" />
+    </div>
+  );
   return (
     <>
-      <div
-        className="w-36 h-36 rounded-xl border border-slate-200 shadow-sm shrink-0 relative group cursor-zoom-in overflow-hidden"
-        onClick={() => setOpen(true)}
-      >
+      <div className="w-36 h-36 rounded-xl border border-slate-200 shadow-sm shrink-0 relative group cursor-zoom-in overflow-hidden" onClick={() => setOpen(true)}>
         <img src={src} alt="Sample" className="w-full h-full object-cover" />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
           <ZoomIn className="w-7 h-7 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
@@ -77,9 +65,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function InfoCard({ icon: Icon, label, value }: {
-  icon: React.ElementType; label: string; value: string;
-}) {
+function InfoCard({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-200 p-3">
       <div className="flex items-center gap-2 mb-1">
@@ -91,39 +77,52 @@ function InfoCard({ icon: Icon, label, value }: {
   );
 }
 
-// ── main page ─────────────────────────────────────────────────────────────────
+// ==========================================
+// MAIN PAGE
+// ==========================================
 export default function ApproveSubmission() {
   const { styles, loading, refreshing, fetchStyles, adminAction } = useSampleStyleStore();
+  const { storeInRecords, fetchRecords } = useInventoryStore();
 
   const [searchCustomer, setSearchCustomer] = useState('');
-  const [searchStyle, setSearchStyle] = useState('');
-  const [selectedId, setSelectedId] = useState('');
-  const [status, setStatus] = useState<'Approved' | 'Pending'>('Pending');
-  const [remarks, setRemarks] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [searchStyle, setSearchStyle]       = useState('');
+  const [selectedId, setSelectedId]         = useState('');
+  const [status, setStatus]                 = useState<'Approved' | 'Pending'>('Pending');
+  const [remarks, setRemarks]               = useState('');
+  const [saving, setSaving]                 = useState(false);
+  const [saveError, setSaveError]           = useState('');
+  const [saveSuccess, setSaveSuccess]       = useState(false);
 
-  useEffect(() => { fetchStyles(); }, [fetchStyles]);
+  useEffect(() => {
+    fetchStyles();
+    fetchRecords();
+  }, [fetchStyles, fetchRecords]);
 
   const submittedStyles = useMemo(() =>
-    styles.filter((s) => s.submittedToAdmin), [styles]);
+    styles.filter(s => s.submittedToAdmin), [styles]);
 
   const filtered = useMemo(() => {
-    const c = searchCustomer.trim().toLowerCase();
+    const c  = searchCustomer.trim().toLowerCase();
     const st = searchStyle.trim().toLowerCase();
     return submittedStyles
-      .filter((s) =>
-        (!c || s.customer.toLowerCase().includes(c)) &&
+      .filter(s =>
+        (!c  || s.customer.toLowerCase().includes(c)) &&
         (!st || s.styleNo.toLowerCase().includes(st))
       )
       .sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
   }, [submittedStyles, searchCustomer, searchStyle]);
 
   const selected = useMemo(() =>
-    styles.find((s) => s.id === selectedId) || null, [styles, selectedId]);
+    styles.find(s => s.id === selectedId) || null, [styles, selectedId]);
 
   const imgUrl = selected?.imagePath ? `${API.BASE}${selected.imagePath}` : null;
+
+  // ── Lock detection ────────────────────────────────────────────────────────
+  // A submission is locked if ANY StoreInRecord has been created for it.
+  const isLocked = useMemo(() => {
+    if (!selected) return false;
+    return storeInRecords.some(r => r.submissionId === selected.id);
+  }, [selected, storeInRecords]);
 
   const handleSelect = (s: SampleStyle) => {
     setSelectedId(s.id);
@@ -134,7 +133,7 @@ export default function ApproveSubmission() {
   };
 
   const handleSave = async () => {
-    if (!selected) return;
+    if (!selected || isLocked) return;
     setSaving(true); setSaveError(''); setSaveSuccess(false);
     try {
       await adminAction(selected.id, status, remarks || undefined);
@@ -159,7 +158,7 @@ export default function ApproveSubmission() {
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Approve Submissions</h1>
               <p className="mt-1 text-sm text-slate-500">
-                Review sample style details and set approval status. The Bulk Qty you approve flows into all downstream stages.
+                Review sample style details and set approval status. Decisions are locked once goods enter Store-In.
               </p>
             </div>
           </div>
@@ -178,10 +177,10 @@ export default function ApproveSubmission() {
           <h2 className="text-sm font-semibold text-slate-900">Search</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input type="text" value={searchCustomer} onChange={(e) => setSearchCustomer(e.target.value)}
+          <input type="text" value={searchCustomer} onChange={e => setSearchCustomer(e.target.value)}
             placeholder="Filter by customer…"
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-          <input type="text" value={searchStyle} onChange={(e) => setSearchStyle(e.target.value)}
+          <input type="text" value={searchStyle} onChange={e => setSearchStyle(e.target.value)}
             placeholder="Filter by style no…"
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           <button onClick={() => { setSearchCustomer(''); setSearchStyle(''); }}
@@ -204,39 +203,45 @@ export default function ApproveSubmission() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-semibold text-slate-900">Submitted Styles</h2>
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                  {filtered.length}
-                </span>
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{filtered.length}</span>
               </div>
 
               {filtered.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-                  No submissions yet.
-                </div>
+                <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No submissions yet.</div>
               ) : (
                 <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                  {filtered.map((s) => (
-                    <button key={s.id} onClick={() => handleSelect(s)}
-                      className={`w-full rounded-xl border p-4 text-left transition ${
-                        selectedId === s.id
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-900 truncate">{s.styleNo}</p>
-                          <p className="text-xs text-slate-500 truncate">{s.customer}</p>
+                  {filtered.map(s => {
+                    // Check if this style is locked
+                    const locked = storeInRecords.some(r => r.submissionId === s.id);
+                    return (
+                      <button key={s.id} onClick={() => handleSelect(s)}
+                        className={`w-full rounded-xl border p-4 text-left transition ${
+                          selectedId === s.id
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-semibold text-slate-900 truncate">{s.styleNo}</p>
+                              {locked && (
+                                <span title="Locked — goods already received in Store-In">
+                                  <Lock className="h-3 w-3 text-slate-400 shrink-0" />
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 truncate">{s.customer}</p>
+                          </div>
+                          <StatusBadge status={s.adminStatus} />
                         </div>
-                        <StatusBadge status={s.adminStatus} />
-                      </div>
-                      <div className="mt-2 text-xs text-slate-400 flex gap-3 flex-wrap">
-                        <span>{s.bodyColour}</span>
-                        {s.bulkQty && <span className="font-medium text-slate-600">{Number(s.bulkQty).toLocaleString()} pcs</span>}
-                        <span>Submitted: {s.submittedAt?.slice(0, 10) || '—'}</span>
-                      </div>
-                    </button>
-                  ))}
+                        <div className="mt-2 text-xs text-slate-400 flex gap-3 flex-wrap">
+                          <span>{s.bodyColour}</span>
+                          {s.bulkQty && <span className="font-medium text-slate-600">{Number(s.bulkQty).toLocaleString()} pcs</span>}
+                          <span>Submitted: {s.submittedAt?.slice(0, 10) || '—'}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -248,9 +253,9 @@ export default function ApproveSubmission() {
               {selected ? (
                 <motion.div key={selected.id}
                   initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-                  className="space-y-5"
-                >
-                  {/* Style detail — LIGHTBOX IMAGE */}
+                  className="space-y-5">
+
+                  {/* Style detail */}
                   <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-start gap-5 pb-5 border-b border-slate-100 mb-5">
                       <div className="flex flex-col items-center gap-1">
@@ -264,11 +269,18 @@ export default function ApproveSubmission() {
                       <div className="flex-1 min-w-0">
                         <h2 className="text-xl font-bold text-slate-900">{selected.styleNo}</h2>
                         <p className="text-sm text-slate-500 mt-0.5">{selected.customer} · {selected.season}</p>
-                        <div className="mt-3"><StatusBadge status={selected.adminStatus} /></div>
+                        <div className="mt-3 flex items-center gap-2 flex-wrap">
+                          <StatusBadge status={selected.adminStatus} />
+                          {isLocked && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                              <Lock className="h-3 w-3" /> Decision Locked
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Bulk Qty — prominent highlight */}
+                    {/* Bulk Qty highlight */}
                     {selected.bulkQty && (
                       <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center gap-3">
                         <Package className="h-5 w-5 text-blue-600 shrink-0" />
@@ -283,26 +295,25 @@ export default function ApproveSubmission() {
                     )}
 
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      <InfoCard icon={User2} label="Customer" value={selected.customer} />
-                      <InfoCard icon={Shirt} label="Style No" value={selected.styleNo} />
-                      <InfoCard icon={Layers3} label="Season" value={selected.season} />
-                      <InfoCard icon={Palette} label="Body Colour" value={selected.bodyColour} />
-                      <InfoCard icon={Palette} label="Print Colour" value={selected.printColour} />
-                      <InfoCard icon={Palette} label="Technique" value={selected.printingTechnique} />
-                      <InfoCard icon={Layers3} label="Print Colour Qty" value={selected.printColourQty} />
-                      <InfoCard icon={Layers3} label="Washing Standard" value={selected.washingStandard} />
+                      <InfoCard icon={User2}      label="Customer"         value={selected.customer} />
+                      <InfoCard icon={Shirt}      label="Style No"         value={selected.styleNo} />
+                      <InfoCard icon={Layers3}    label="Season"           value={selected.season} />
+                      <InfoCard icon={Palette}    label="Body Colour"      value={selected.bodyColour} />
+                      <InfoCard icon={Palette}    label="Print Colour"     value={selected.printColour} />
+                      <InfoCard icon={Palette}    label="Technique"        value={selected.printingTechnique} />
+                      <InfoCard icon={Layers3}    label="Print Colour Qty" value={selected.printColourQty} />
+                      <InfoCard icon={Layers3}    label="Washing Standard" value={selected.washingStandard} />
                       <InfoCard icon={CalendarDays} label="RC Meeting Date" value={selected.rcMeetingDate || '—'} />
-                      <InfoCard icon={Layers3} label="AC Number" value={selected.acNumber || '—'} />
-                      <InfoCard icon={Layers3} label="Board Set" value={selected.boardSet || '—'} />
-                      <InfoCard icon={CalendarDays} label="Submitted At" value={selected.submittedAt?.slice(0, 10) || '—'} />
+                      <InfoCard icon={Layers3}    label="AC Number"        value={selected.acNumber || '—'} />
+                      <InfoCard icon={Layers3}    label="Board Set"        value={selected.boardSet || '—'} />
+                      <InfoCard icon={CalendarDays} label="Submitted At"   value={selected.submittedAt?.slice(0, 10) || '—'} />
                     </div>
 
-                    {/* Placements */}
                     {selected.placements && (
                       <div className="mt-4">
                         <p className="text-xs font-medium text-slate-500 mb-2">Placements</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {selected.placements.split(',').filter(Boolean).map((p) => (
+                          {selected.placements.split(',').filter(Boolean).map(p => (
                             <span key={p} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-medium">{p}</span>
                           ))}
                         </div>
@@ -317,9 +328,7 @@ export default function ApproveSubmission() {
                         <MessageSquare className="h-4 w-4 text-indigo-600" />
                         <h3 className="text-sm font-semibold text-indigo-800">Developer Comments</h3>
                       </div>
-                      <p className="text-sm text-indigo-900 whitespace-pre-wrap leading-relaxed">
-                        {selected.developerComments}
-                      </p>
+                      <p className="text-sm text-indigo-900 whitespace-pre-wrap leading-relaxed">{selected.developerComments}</p>
                     </div>
                   )}
 
@@ -327,73 +336,110 @@ export default function ApproveSubmission() {
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <h3 className="text-sm font-semibold text-slate-800 mb-3">Submission Details</h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <InfoCard icon={CalendarDays} label="Submitted At" value={selected.submittedAt?.slice(0, 10) || '—'} />
-                      <InfoCard icon={CalendarDays} label="Client Approved At" value={selected.clientApprovedAt?.slice(0, 10) || '—'} />
-                      <InfoCard icon={User2} label="Client Approved By" value={selected.clientApprovedBy || '—'} />
-                      <InfoCard icon={User2} label="Admin Action By" value={selected.adminActionBy || '—'} />
+                      <InfoCard icon={CalendarDays} label="Submitted At"        value={selected.submittedAt?.slice(0, 10) || '—'} />
+                      <InfoCard icon={CalendarDays} label="Client Approved At"  value={selected.clientApprovedAt?.slice(0, 10) || '—'} />
+                      <InfoCard icon={User2}        label="Client Approved By"  value={selected.clientApprovedBy || '—'} />
+                      <InfoCard icon={User2}        label="Admin Action By"     value={selected.adminActionBy || '—'} />
                     </div>
                   </div>
 
-                  {/* Admin decision */}
-                  <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center gap-2 mb-4">
-                      <ClipboardCheck className="h-5 w-5 text-slate-500" />
-                      <h3 className="text-base font-semibold text-slate-900">Admin Decision</h3>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                        <select value={status}
-                          onChange={(e) => { setStatus(e.target.value as any); setSaveSuccess(false); }}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                          <option value="Pending">Pending</option>
-                          <option value="Approved">Approved</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                          Admin Remarks (optional)
-                        </label>
-                        <textarea value={remarks} rows={3}
-                          onChange={(e) => { setRemarks(e.target.value); setSaveSuccess(false); }}
-                          placeholder="Any notes for the developer…"
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                        />
-                      </div>
-
-                      {saveError && (
-                        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
-                          <Loader2 className="h-4 w-4 shrink-0 mt-0.5 hidden" />
-                          {saveError}
+                  {/* ── Admin Decision — locked or editable ────────────────── */}
+                  {isLocked ? (
+                    // ── LOCKED STATE ───────────────────────────────────────────
+                    <div className="rounded-2xl border-2 border-slate-300 bg-slate-50 p-6 shadow-sm">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="p-2 rounded-full bg-slate-200">
+                          <Lock className="h-5 w-5 text-slate-500" />
                         </div>
-                      )}
-
-                      {saveSuccess && (
-                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4" /> Decision saved successfully.
+                        <div>
+                          <h3 className="text-base font-semibold text-slate-700">Decision Locked</h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Store-In records exist for this style. The approval decision cannot be changed once goods have been received.
+                          </p>
                         </div>
-                      )}
-
-                      <div className="flex gap-3 pt-2 border-t border-slate-100">
-                        <button onClick={handleSave} disabled={saving}
-                          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2">
-                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                          {saving ? 'Saving…' : 'Save Decision'}
-                        </button>
-                        <button onClick={() => { setSelectedId(''); setSaveSuccess(false); setSaveError(''); }}
-                          className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-                          Clear
-                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                          <p className="text-xs font-medium text-slate-500 mb-1">Final Status</p>
+                          <StatusBadge status={selected.adminStatus} />
+                        </div>
+                        {selected.adminRemarks && (
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs font-medium text-slate-500 mb-1">Admin Remarks</p>
+                            <p className="text-sm text-slate-700">{selected.adminRemarks}</p>
+                          </div>
+                        )}
+                        {selected.adminActionBy && (
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs font-medium text-slate-500 mb-1">Decided By</p>
+                            <p className="text-sm font-semibold text-slate-700">{selected.adminActionBy}</p>
+                          </div>
+                        )}
+                        {selected.adminActionAt && (
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs font-medium text-slate-500 mb-1">Decided At</p>
+                            <p className="text-sm font-semibold text-slate-700">{selected.adminActionAt?.slice(0, 10)}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    // ── EDITABLE STATE ─────────────────────────────────────────
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="flex items-center gap-2 mb-4">
+                        <ClipboardCheck className="h-5 w-5 text-slate-500" />
+                        <h3 className="text-base font-semibold text-slate-900">Admin Decision</h3>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+                          <select value={status}
+                            onChange={e => { setStatus(e.target.value as any); setSaveSuccess(false); }}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="Pending">Pending</option>
+                            <option value="Approved">Approved</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Admin Remarks (optional)</label>
+                          <textarea value={remarks} rows={3}
+                            onChange={e => { setRemarks(e.target.value); setSaveSuccess(false); }}
+                            placeholder="Any notes for the developer…"
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+                        </div>
+
+                        {saveError && (
+                          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                            {saveError}
+                          </div>
+                        )}
+                        {saveSuccess && (
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4" /> Decision saved successfully.
+                          </div>
+                        )}
+
+                        <div className="flex gap-3 pt-2 border-t border-slate-100">
+                          <button onClick={handleSave} disabled={saving}
+                            className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2">
+                            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                            {saving ? 'Saving…' : 'Save Decision'}
+                          </button>
+                          <button onClick={() => { setSelectedId(''); setSaveSuccess(false); setSaveError(''); }}
+                            className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                 </motion.div>
               ) : (
                 <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                  className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-sm"
-                >
+                  className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-sm">
                   <ClipboardCheck className="mx-auto h-10 w-10 text-slate-300" />
                   <h3 className="mt-4 text-base font-semibold text-slate-900">Select a submission</h3>
                   <p className="mt-1 text-sm text-slate-500">Choose a submitted style from the left to review.</p>
