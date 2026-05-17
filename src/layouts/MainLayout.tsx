@@ -2,10 +2,11 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutDashboard, Users, LogOut, Activity, Truck, FileText,
-  Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList, Factory, Clock, Menu, X, History, 
-  Palette,
-  FlaskConical} from 'lucide-react';
+import {
+  LayoutDashboard, Users, LogOut, Activity, Truck, FileText,
+  Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList,
+  Factory, Clock, Menu, X, History, Palette, FlaskConical,
+} from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
 
@@ -14,6 +15,8 @@ interface NavItem {
   href: string;
   icon: React.ElementType;
   roles: Role[];
+  // When true, only exact path match is active (prevents parent matching children)
+  exact?: boolean;
 }
 
 interface NavGroup {
@@ -25,16 +28,18 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Overview',
     items: [
-      { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores', 'Worker'] },
+      { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores', 'Worker'], exact: true },
     ],
   },
   {
     label: 'Development',
     items: [
-      { name: 'Jobs', href: '/development', icon: Code, roles: ['Admin', 'Developer'] },
-      { name: 'Submit to admin', href: '/development/submit', icon: Send, roles: ['Admin', 'Developer'] },
+      { name: 'Jobs', href: '/development', icon: Code, roles: ['Admin', 'Developer'], exact: true },
+      // exact: true so /development/samples doesn't stay active when on /development/samples/search
+      { name: 'Sample Styles', href: '/development/samples', icon: FlaskConical, roles: ['Admin', 'Developer'], exact: true },
+      { name: 'Sample Search', href: '/development/samples/search', icon: Search, roles: ['Admin', 'Developer'] },
+      { name: 'Submit to Admin', href: '/development/submit', icon: Send, roles: ['Admin', 'Developer'] },
       { name: 'Search', href: '/development/search', icon: Search, roles: ['Admin', 'Developer'] },
-      { name: 'Sample Styles', href: '/development/samples', icon: FlaskConical, roles: ['Developer', 'Admin'] }
     ],
   },
   {
@@ -44,7 +49,7 @@ const NAV_GROUPS: NavGroup[] = [
       { name: 'Approval Search', href: '/admin/search', icon: Search, roles: ['Admin'] },
       { name: 'Users', href: '/admin/users', icon: Users, roles: ['Admin'] },
       { name: 'Activity Log', href: '/admin/activity-log', icon: Activity, roles: ['Admin'] },
-      { name: 'Colour Master', href: '/admin/colours', icon: Palette, roles: ['Admin'] }
+      { name: 'Colour Master', href: '/admin/colours', icon: Palette, roles: ['Admin', 'Developer'] },
     ],
   },
   {
@@ -52,16 +57,16 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { name: 'Store In', href: '/inventory/in', icon: PackageOpen, roles: ['Admin', 'Stores'] },
       { name: 'Store In Search', href: '/inventory/search', icon: Search, roles: ['Admin', 'Stores'] },
-      { name: 'Production', href: '/inventory/production', icon: Factory, roles: ['Admin', 'Stores'] },
+      { name: 'Production', href: '/inventory/production', icon: Factory, roles: ['Admin', 'Stores'], exact: true },
       { name: 'Production Search', href: '/inventory/production/search', icon: Search, roles: ['Admin', 'Stores'] },
     ],
   },
   {
     label: 'Quality',
     items: [
-      { name: 'CPI Inspection', href: '/qc/cpi', icon: ClipboardList, roles: ['Admin', 'QC'] },
+      { name: 'CPI Inspection', href: '/qc/cpi', icon: ClipboardList, roles: ['Admin', 'QC'], exact: true },
       { name: 'CPI Search', href: '/qc/cpi/search', icon: Search, roles: ['Admin', 'QC'] },
-      { name: 'Delivery Tracker', href: '/qc/delivery-tracker', icon: LayoutDashboard, roles: ['Admin', 'QC'] },
+      { name: 'Delivery Tracker', href: '/qc/delivery-tracker', icon: LayoutDashboard, roles: ['Admin', 'QC'], exact: true },
       { name: 'Tracker Search', href: '/qc/delivery-tracker/search', icon: Search, roles: ['Admin', 'QC'] },
     ],
   },
@@ -75,14 +80,14 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Audit',
     items: [
-      { name: 'Audit Reports', href: '/audit', icon: FileText, roles: ['Admin', 'Audit'] },
+      { name: 'Audit Reports', href: '/audit', icon: FileText, roles: ['Admin', 'Audit'], exact: true },
       { name: 'Audit Search', href: '/audit/search', icon: Search, roles: ['Admin', 'Audit'] },
     ],
   },
   {
     label: 'Worker',
     items: [
-      { name: 'Daily Output', href: '/worker', icon: Factory, roles: ['Admin', 'Worker'] },
+      { name: 'Daily Output', href: '/worker', icon: Factory, roles: ['Admin', 'Worker'], exact: true },
       { name: 'Downtime', href: '/worker/downtime', icon: Clock, roles: ['Admin', 'Worker'] },
       { name: 'History', href: '/worker/history', icon: History, roles: ['Admin', 'Worker'] },
     ],
@@ -99,6 +104,11 @@ const ROLE_COLORS: Record<string, string> = {
   Worker: 'bg-orange-100 text-orange-700',
 };
 
+function isNavActive(itemHref: string, pathname: string, exact?: boolean): boolean {
+  if (exact) return pathname === itemHref;
+  return pathname === itemHref || pathname.startsWith(itemHref + '/');
+}
+
 export default function MainLayout() {
   const location = useLocation();
   const { user, logout } = useAuthStore();
@@ -113,7 +123,7 @@ export default function MainLayout() {
 
   const currentPageName = visibleGroups
     .flatMap((g) => g.items)
-    .find((item) => item.href === location.pathname || (location.pathname.startsWith(item.href) && item.href !== '/'))
+    .find((item) => isNavActive(item.href, location.pathname, item.exact))
     ?.name || 'Dashboard';
 
   const initials = user?.name
@@ -130,12 +140,10 @@ export default function MainLayout() {
         transition={{ duration: 0.2, ease: 'easeInOut' }}
         className="bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden"
       >
-        {/* Logo */}
         <div className="h-16 flex items-center px-5 border-b border-slate-100 shrink-0">
           <img src="/logo.svg" alt="Colourplus" className="h-10 w-auto object-contain" />
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-5 scrollbar-thin">
           {visibleGroups.map((group) => (
             <div key={group.label}>
@@ -144,22 +152,19 @@ export default function MainLayout() {
               </p>
               <div className="space-y-0.5">
                 {group.items.map((item) => {
-                  const isActive = item.href === '/'
-                    ? location.pathname === '/'
-                    : location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+                  const active = isNavActive(item.href, location.pathname, item.exact);
                   const Icon = item.icon;
-
                   return (
                     <Link
                       key={item.href}
                       to={item.href}
                       className={`flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${
-                        isActive
+                        active
                           ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20'
                           : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                       }`}
                     >
-                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-white' : 'text-slate-400'}`} />
                       <span className="truncate">{item.name}</span>
                     </Link>
                   );
@@ -169,7 +174,6 @@ export default function MainLayout() {
           ))}
         </nav>
 
-        {/* User card at bottom */}
         <div className="border-t border-slate-100 p-3 shrink-0">
           <div className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2.5">
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${ROLE_COLORS[user?.role || ''] || 'bg-slate-200 text-slate-600'}`}>
@@ -192,7 +196,6 @@ export default function MainLayout() {
 
       {/* MAIN */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        {/* Top bar */}
         <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
             <button
@@ -204,13 +207,11 @@ export default function MainLayout() {
             <div className="h-5 w-px bg-slate-200" />
             <h1 className="text-sm font-semibold text-slate-800">{currentPageName}</h1>
           </div>
-
           <div className="flex items-center gap-3 text-xs text-slate-500">
             <span>{new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
           </div>
         </header>
 
-        {/* Page content with smooth transitions */}
         <div className="flex-1 overflow-y-auto">
           <div className="p-6 max-w-350 mx-auto">
             <AnimatePresence mode="wait">

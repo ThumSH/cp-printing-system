@@ -13,8 +13,9 @@ export interface ColourMaster {
 
 interface ColourMasterStore {
   colours: ColourMaster[];
-  loading: boolean;        // true ONLY on the very first fetch (no data yet)
-  refreshing: boolean;     // true on background refreshes (data already shown)
+  loading: boolean;
+  refreshing: boolean;
+  error: string | null;
   lastFetchedAt: number | null;
   fetchColours: (force?: boolean) => Promise<void>;
   addColour: (name: string, hexCode?: string) => Promise<ColourMaster>;
@@ -24,7 +25,7 @@ interface ColourMasterStore {
 }
 
 const API_BASE = `${API.BASE}/api/colourmaster`;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function sortColours(colours: ColourMaster[]) {
   return [...colours].sort((a, b) => {
@@ -37,40 +38,31 @@ export const useColourMasterStore = create<ColourMasterStore>((set, get) => ({
   colours: [],
   loading: false,
   refreshing: false,
+  error: null,
   lastFetchedAt: null,
 
   fetchColours: async (force = false) => {
-    const { lastFetchedAt, loading, refreshing, colours } = get();
-
-    // Already in flight — don't double-fetch
+    const { loading, refreshing, lastFetchedAt, colours } = get();
     if (loading || refreshing) return;
 
     const cacheValid = lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS;
-
-    // Cache is fresh and not forced — skip entirely
     if (!force && cacheValid) return;
 
     const hasData = colours.length > 0;
-
-    // If we already have data (returning to page), use background refresh
-    // so the UI never goes blank with a spinner
-    if (hasData) {
-      set({ refreshing: true });
-    } else {
-      set({ loading: true });
-    }
+    set(hasData
+      ? { refreshing: true, error: null }
+      : { loading: true, error: null }
+    );
 
     try {
-      const res = await fetch(`${API_BASE}?includeInactive=true`, {
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error(await res.text());
+      const res = await fetch(`${API_BASE}?includeInactive=true`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
       const data: ColourMaster[] = await res.json();
-      set({ colours: sortColours(data), lastFetchedAt: Date.now() });
+      set({ colours: sortColours(data), lastFetchedAt: Date.now(), loading: false, refreshing: false, error: null });
     } catch (e) {
-      console.error('Failed to fetch colour master:', e);
-    } finally {
-      set({ loading: false, refreshing: false });
+      const message = e instanceof Error ? e.message : 'Failed to load colours';
+      console.error('colourMasterStore.fetchColours:', message);
+      set({ loading: false, refreshing: false, error: message });
     }
   },
 
@@ -96,30 +88,20 @@ export const useColourMasterStore = create<ColourMasterStore>((set, get) => ({
     });
     if (!res.ok) throw new Error(await res.text());
     const updated: ColourMaster = await res.json();
-    set((state) => ({
-      colours: sortColours(state.colours.map((c) => (c.id === id ? updated : c))),
-    }));
+    set((state) => ({ colours: sortColours(state.colours.map((c) => (c.id === id ? updated : c))) }));
     return updated;
   },
 
   deleteColour: async (id) => {
-    const res = await fetch(`${API_BASE}/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await res.text());
     set((state) => ({ colours: state.colours.filter((c) => c.id !== id) }));
   },
 
   toggleActive: async (id) => {
-    const res = await fetch(`${API_BASE}/${id}/toggle`, {
-      method: 'PATCH',
-      headers: getAuthHeaders(),
-    });
+    const res = await fetch(`${API_BASE}/${id}/toggle`, { method: 'PATCH', headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await res.text());
     const updated: ColourMaster = await res.json();
-    set((state) => ({
-      colours: sortColours(state.colours.map((c) => (c.id === id ? updated : c))),
-    }));
+    set((state) => ({ colours: sortColours(state.colours.map((c) => (c.id === id ? updated : c))) }));
   },
 }));

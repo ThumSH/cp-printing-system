@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import DevelopmentPage from './pages/development/DevelopmentPage';
 import DevelopmentSubmission from './pages/development/DevelopmentSubmission';
 import SubmissionSearch from './pages/development/SubmissionSearch';
+import SampleStylePage from './pages/development/SampleStylePage';
+import SampleStyleSearchPage from './pages/development/Samplestylesearchpage';
 import ApproveSubmission from './pages/admin/ApproveSubmission';
 import ApprovalSearch from './pages/admin/ApprovalSearch';
 import StoreInPage from './pages/inventory/StoreInPage';
@@ -29,25 +31,16 @@ import ActivityLogPage from './pages/admin/ActivityLogPage';
 import SplashScreen from './components/SplashScreen';
 import OperatorSelect from './pages/OperatorSelect';
 import ColourMasterPage from './pages/admin/ColourMasterPage';
-import SampleStylePage from './pages/development/SampleStylePage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
 const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-
-  if (isAuthenticated) {
-    return <Navigate to="/" replace />;
-  }
-
+  if (isAuthenticated) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
@@ -59,271 +52,125 @@ const RoleRoute = ({
   allowedRoles: string[];
 }) => {
   const user = useAuthStore((state) => state.user);
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (!allowedRoles.includes(user.role)) {
-    return <Navigate to="/" replace />;
-  }
-
+  if (!user) return <Navigate to="/login" replace />;
+  if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
 function App() {
-   const [showSplash, setShowSplash] = useState(true);
-   const { needsOperatorSelect } = useAuthStore();
-   
-   if (showSplash) {
-    return <SplashScreen onComplete={() => setShowSplash(false)} />;
-  }
+  const [showSplash, setShowSplash] = useState(true);
+  const { needsOperatorSelect } = useAuthStore();
 
-  if (needsOperatorSelect) {
-    return <OperatorSelect />;
-  }
+  if (showSplash) return <SplashScreen onComplete={() => setShowSplash(false)} />;
+  if (needsOperatorSelect) return <OperatorSelect />;
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route
-          path="/login"
-          element={
-            <PublicRoute>
-              <Login />
-            </PublicRoute>
-          }
-        />
+        <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
 
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <MainLayout />
-            </ProtectedRoute>
-          }
-        >
+        <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
           <Route index element={<Dashboard />} />
 
+          {/* ── Development ── */}
           <Route path="development">
-            <Route
-              index
-              element={
-                <RoleRoute allowedRoles={['Developer', 'Admin']}>
-                  <DevelopmentPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-  path="samples"
-  element={
-    <RoleRoute allowedRoles={['Developer', 'Admin']}>
-      <SampleStylePage />
-    </RoleRoute>
-  }
-/>
-            <Route
-              path="submit"
-              element={
-                <RoleRoute allowedRoles={['Developer', 'Admin']}>
-                  <DevelopmentSubmission />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="search"
-              element={
-                <RoleRoute allowedRoles={['Developer', 'Admin', 'QC']}>
-                  <SubmissionSearch />
-                </RoleRoute>
-              }
-            />
+            <Route index element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <DevelopmentPage />
+              </RoleRoute>
+            } />
+
+            {/* IMPORTANT: samples/search must come BEFORE samples
+                so React Router matches the more specific path first */}
+            <Route path="samples/search" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <SampleStyleSearchPage />
+              </RoleRoute>
+            } />
+
+            <Route path="samples" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <SampleStylePage />
+              </RoleRoute>
+            } />
+
+            <Route path="submit" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <DevelopmentSubmission />
+              </RoleRoute>
+            } />
+
+            <Route path="search" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin', 'QC']}>
+                <SubmissionSearch />
+              </RoleRoute>
+            } />
           </Route>
 
+          {/* ── Admin ── */}
           <Route path="admin">
-            <Route
-              path="approve"
-              element={
-                <RoleRoute allowedRoles={['Admin']}>
-                  <ApproveSubmission />
-                </RoleRoute>
-              }
-            /> 
-
+            <Route path="approve" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <ApproveSubmission />
+              </RoleRoute>
+            } />
             <Route path="activity-log" element={
-  <RoleRoute allowedRoles={['Admin']}>
-    <ActivityLogPage />
-  </RoleRoute>
-} />      
-<Route path="colours" element={<RoleRoute allowedRoles={['Admin']}><ColourMasterPage /></RoleRoute>} />
-
-          <Route
-            path="users"
-            element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <ActivityLogPage />
+              </RoleRoute>
+            } />
+            <Route path="colours" element={
+              <RoleRoute allowedRoles={['Admin', 'Developer']}>
+                <ColourMasterPage />
+              </RoleRoute>
+            } />
+            <Route path="users" element={
               <RoleRoute allowedRoles={['Admin']}>
                 <UserManagementPage />
               </RoleRoute>
-            }
-          />
-          
-            <Route
-              path="search"
-              element={
-                <RoleRoute allowedRoles={['Admin']}>
-                  <ApprovalSearch />
-                </RoleRoute>
-              }
-            />
+            } />
+            <Route path="search" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <ApprovalSearch />
+              </RoleRoute>
+            } />
           </Route>
 
+          {/* ── Inventory / Stores ── */}
           <Route path="inventory">
-            <Route
-              index
-              element={
-                <RoleRoute allowedRoles={['Stores', 'Admin']}>
-                  <StoreInPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="in"
-              element={
-                <RoleRoute allowedRoles={['Stores', 'Admin']}>
-                  <StoreInPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="production"
-              element={
-                <RoleRoute allowedRoles={['Stores', 'Admin']}>
-                  <StoreProductionPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="search"
-              element={
-                <RoleRoute allowedRoles={['Stores', 'Admin']}>
-                  <StoreInSearchPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="production/search"
-              element={
-                <RoleRoute allowedRoles={['Stores', 'Admin']}>
-                  <ProductionSearchPage />
-                </RoleRoute>
-              }
-            />
+            <Route index element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreInPage /></RoleRoute>} />
+            <Route path="in" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreInPage /></RoleRoute>} />
+            <Route path="production" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreProductionPage /></RoleRoute>} />
+            <Route path="search" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreInSearchPage /></RoleRoute>} />
+            <Route path="production/search" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><ProductionSearchPage /></RoleRoute>} />
           </Route>
 
+          {/* ── QC ── */}
           <Route path="qc">
-            <Route
-              index
-              element={
-                <RoleRoute allowedRoles={['QC', 'Admin']}>
-                  <CPIPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="cpi"
-              element={
-                <RoleRoute allowedRoles={['QC', 'Admin']}>
-                  <CPIPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="delivery-tracker"
-              element={
-                <RoleRoute allowedRoles={['QC', 'Admin']}>
-                  <DeliveryTrackerPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="cpi/search"
-              element={
-                <RoleRoute allowedRoles={['QC', 'Admin']}>
-                  <CPISearchPage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="delivery-tracker/search"
-              element={
-                <RoleRoute allowedRoles={['QC', 'Admin']}>
-                  <DeliveryTrackerSearchPage />
-                </RoleRoute>
-              }
-            />
+            <Route index element={<RoleRoute allowedRoles={['QC', 'Admin']}><CPIPage /></RoleRoute>} />
+            <Route path="cpi" element={<RoleRoute allowedRoles={['QC', 'Admin']}><CPIPage /></RoleRoute>} />
+            <Route path="delivery-tracker" element={<RoleRoute allowedRoles={['QC', 'Admin']}><DeliveryTrackerPage /></RoleRoute>} />
+            <Route path="cpi/search" element={<RoleRoute allowedRoles={['QC', 'Admin']}><CPISearchPage /></RoleRoute>} />
+            <Route path="delivery-tracker/search" element={<RoleRoute allowedRoles={['QC', 'Admin']}><DeliveryTrackerSearchPage /></RoleRoute>} />
           </Route>
 
-          <Route
-            path="audit"
-            element={
-              <RoleRoute allowedRoles={['Audit', 'Admin']}>
-                <AuditPage />
-              </RoleRoute>
-            }
-          />
+          {/* ── Audit ── */}
+          <Route path="audit" element={<RoleRoute allowedRoles={['Audit', 'Admin']}><AuditPage /></RoleRoute>} />
+          <Route path="audit/search" element={<RoleRoute allowedRoles={['Audit', 'Admin']}><AuditSearchPage /></RoleRoute>} />
 
-          <Route
-            path="audit/search"
-            element={
-              <RoleRoute allowedRoles={['Audit', 'Admin']}>
-                <AuditSearchPage />
-              </RoleRoute>
-            }
-          />
-
+          {/* ── Gatepass ── */}
           <Route path="gatepass">
-            <Route
-              index
-              element={
-                <RoleRoute allowedRoles={['Gatepass', 'Admin']}>
-                  <AdviceNotePage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="advicenote"
-              element={
-                <RoleRoute allowedRoles={['Gatepass', 'Admin']}>
-                  <AdviceNotePage />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="search"
-              element={
-                <RoleRoute allowedRoles={['Gatepass', 'Admin']}>
-                  <AdviceNoteSearchPage />
-                </RoleRoute>
-              }
-            />
+            <Route index element={<RoleRoute allowedRoles={['Gatepass', 'Admin']}><AdviceNotePage /></RoleRoute>} />
+            <Route path="advicenote" element={<RoleRoute allowedRoles={['Gatepass', 'Admin']}><AdviceNotePage /></RoleRoute>} />
+            <Route path="search" element={<RoleRoute allowedRoles={['Gatepass', 'Admin']}><AdviceNoteSearchPage /></RoleRoute>} />
           </Route>
 
+          {/* ── Worker ── */}
           <Route path="worker" element={<DailyOutputPage />} />
-          <Route path="worker/downtime" element={
-  <RoleRoute allowedRoles={['Worker', 'Admin']}>
-    <DowntimeReportPage />
-  </RoleRoute>
-} />
+          <Route path="worker/downtime" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><DowntimeReportPage /></RoleRoute>} />
+          <Route path="worker/history" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><WorkerHistoryPage /></RoleRoute>} />
 
-
-          <Route path="worker/history" element={
-  <RoleRoute allowedRoles={['Worker', 'Admin']}>
-    <WorkerHistoryPage />
-  </RoleRoute>
-} />
-
-          <Route path="orders" element={<div className="p-4">Orders Page Coming Soon</div>} />
-          <Route path="customers" element={<div className="p-4">Customers Page Coming Soon</div>} />
-          <Route path="settings" element={<div className="p-4">Settings Page Coming Soon</div>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
