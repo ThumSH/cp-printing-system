@@ -13,7 +13,7 @@ export interface SampleStyle {
   printColour: string;
   printColourQty: string;
   washingStandard: string;
-  placements: string;
+  component: string;  // single component: Front, Back, Sleeve, etc.
   imagePath?: string;
   clientApproved: boolean;
   clientApprovedAt?: string;
@@ -52,10 +52,17 @@ interface SampleStyleStore {
     developerComments?: string;
   }) => Promise<SampleStyle>;
   adminAction: (id: string, status: 'Approved' | 'Pending', remarks?: string) => Promise<SampleStyle>;
+  reviseStyle: (id: string, data: {
+    extraBulkQty: string;
+    rcMeetingDate?: string;
+    acNumber?: string;
+    boardSet?: string;
+    comments?: string;
+  }) => Promise<SampleStyle>;
 }
 
 const BASE = `${API.BASE}/api/samplestyle`;
-const CACHE_TTL = 3 * 60 * 1000;
+const CACHE_TTL = 30 * 1000; // 30 seconds — keeps UI snappy without hammering the server
 
 export const useSampleStyleStore = create<SampleStyleStore>((set, get) => ({
   styles: [],
@@ -120,6 +127,25 @@ export const useSampleStyleStore = create<SampleStyleStore>((set, get) => ({
     const updated: SampleStyle = await res.json();
     set((state) => ({ styles: state.styles.map((s) => (s.id === id ? updated : s)) }));
     return updated;
+  },
+
+  reviseStyle: async (id, data) => {
+    const res = await fetch(`${BASE}/${id}/revise`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        extraBulkQty: data.extraBulkQty,
+        rcMeetingDate: data.rcMeetingDate,
+        acNumber: data.acNumber,
+        boardSet: data.boardSet,
+        comments: data.comments,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const newStyle: SampleStyle = await res.json();
+    // Add the new revision to the store
+    set((state) => ({ styles: [newStyle, ...state.styles] }));
+    return newStyle;
   },
 
   adminAction: async (id, status, remarks) => {

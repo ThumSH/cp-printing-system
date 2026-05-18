@@ -63,21 +63,17 @@ function StatusBadge({ style }: { style: SampleStyle }) {
 
 // ── expandable detail panel ───────────────────────────────────────────────────
 function DetailPanel({ style }: { style: SampleStyle }) {
-  const placements = style.placements ? style.placements.split(',').filter(Boolean) : [];
+  const component = (style as any).component || '';
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-sm">
       <div><p className="text-xs text-slate-500 font-medium">Print Colour</p><p className="font-semibold text-slate-800">{style.printColour || '—'}</p></div>
       <div><p className="text-xs text-slate-500 font-medium">Print Colour Qty</p><p className="font-semibold text-slate-800">{style.printColourQty || '—'}</p></div>
       <div><p className="text-xs text-slate-500 font-medium">Washing Standard</p><p className="font-semibold text-slate-800">{style.washingStandard || '—'}</p></div>
       <div><p className="text-xs text-slate-500 font-medium">Technique</p><p className="font-semibold text-slate-800">{style.printingTechnique || '—'}</p></div>
-      {placements.length > 0 && (
+      {component && (
         <div className="col-span-2 md:col-span-4">
-          <p className="text-xs text-slate-500 font-medium mb-1">Placements</p>
-          <div className="flex flex-wrap gap-1">
-            {placements.map((p) => (
-              <span key={p} className="px-2 py-0.5 bg-white border border-slate-200 text-slate-600 rounded text-xs">{p}</span>
-            ))}
-          </div>
+          <p className="text-xs text-slate-500 font-medium mb-1">Component</p>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">{component}</span>
         </div>
       )}
       {style.submittedToAdmin && (
@@ -156,7 +152,7 @@ export default function SampleStyleSearchPage() {
   const { styles, loading, refreshing, fetchStyles } = useSampleStyleStore();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
 
-  useEffect(() => { fetchStyles(); }, [fetchStyles]);
+  useEffect(() => { fetchStyles(true); }, [fetchStyles]);
 
   // Build dropdown options from actual data
   const styleNos = useMemo(() => unique(styles.map((s) => s.styleNo)), [styles]);

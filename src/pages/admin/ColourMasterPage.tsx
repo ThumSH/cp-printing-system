@@ -1,6 +1,6 @@
 // src/pages/admin/ColourMasterPage.tsx
 // Accessible by: Admin (full CRUD) and Developer (view + add only)
-import { useState, useEffect, JSXElementConstructor, Key, ReactElement, ReactNode, ReactPortal } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette, Plus, Edit2, Trash2, CheckCircle2, XCircle,
@@ -187,10 +187,10 @@ export default function ColourMasterPage() {
                     <div className="rounded-lg border border-indigo-200 bg-white px-4 py-3 space-y-2">
                       <p className="text-xs font-bold text-slate-700">Required format:</p>
                       <code className="block text-xs font-mono bg-slate-100 px-2 py-1 rounded text-indigo-700">
-                        CODE-# — Descriptive Name
+                        CODE-#-Name
                       </code>
                       <ul className="space-y-0.5">
-                        {COLOUR_FORMAT_RULES.map((r: string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | Promise<string | number | bigint | boolean | ReactPortal | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | null | undefined, i: Key | null | undefined) => (
+                        {COLOUR_FORMAT_RULES.map((r, i) => (
                           <li key={i} className="text-[11px] text-slate-500 flex items-start gap-1">
                             <span className="text-indigo-400 font-bold shrink-0">•</span> {r}
                           </li>
@@ -199,7 +199,7 @@ export default function ColourMasterPage() {
                       <div className="border-t border-slate-100 pt-2">
                         <p className="text-[11px] font-semibold text-slate-600 mb-1">Click to use example:</p>
                         <div className="flex flex-wrap gap-2">
-                          {['W-1 — White', 'GR-2 — Grey Melange', 'BL-3 — Baby Blue', 'R-1 — Bright Red'].map((ex) => (
+                          {['R-1-Bright Red', 'N-4-Navy Blue', 'GR-2-Grey Melange', 'W-1-White'].map((ex) => (
                             <button key={ex} type="button"
                               onClick={() => handleAddNameChange(ex)}
                               className="text-[11px] font-mono text-indigo-600 hover:text-indigo-800 hover:underline">
@@ -220,7 +220,7 @@ export default function ColourMasterPage() {
                     type="text"
                     value={addForm.name}
                     onChange={(e) => handleAddNameChange(e.target.value)}
-                    placeholder='e.g. W-1 — White'
+                    placeholder='e.g. R-1-Bright Red'
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSubmit(); } }}
                     className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition-all ${
                       addNameError

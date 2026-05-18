@@ -1,13 +1,18 @@
 // src/pages/development/DevelopmentPage.tsx
-import { useState, useEffect } from 'react';
+// One DevelopmentJob = one style + one component + one body colour.
+// Use "Copy from existing style" to pre-fill shared fields when adding a
+// second component (e.g. Back) to a style that already has Front.
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Code, Upload, Plus, Trash2, Edit2, CheckCircle2,
-  Image as ImageIcon, AlertCircle, Loader2, X,
+  Image as ImageIcon, AlertCircle, Loader2, X, Copy,
 } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
 import { useColourMasterStore } from '../../store/colourMasterStore';
 import { API, getAuthHeaders } from '../../api/client';
+
+const COMPONENT_OPTIONS = ['Front', 'Back', 'Sleeve', 'Pocket', 'Waistband', 'Other'];
 
 interface DevelopmentForm {
   id: string;
@@ -16,14 +21,14 @@ interface DevelopmentForm {
   season: string;
   printingTechnique: string;
   artworkFileName: string;
-  artworkPreviewUrl: string; // server path e.g. /uploads/artworks/artwork_123.png
+  artworkPreviewUrl: string;
   washingStandard: string;
   bodyColour: string;
   printColour: string;
   printColourQty: string;
   sampleOrderedDate: string;
   sampleDeliveryDate: string;
-  placements: string[];
+  component: string;
 }
 
 const INITIAL_FORM_STATE: Omit<DevelopmentForm, 'id'> = {
@@ -39,10 +44,8 @@ const INITIAL_FORM_STATE: Omit<DevelopmentForm, 'id'> = {
   printColourQty: '',
   sampleOrderedDate: '',
   sampleDeliveryDate: '',
-  placements: [],
+  component: '',
 };
-
-const PLACEMENT_OPTIONS = ['Front', 'Back', 'Sleeve', 'Pocket', 'Waistband', 'Other'];
 
 // ── Colour Master Select ──────────────────────────────────────────────────────
 function ColourMasterSelect({
@@ -100,7 +103,7 @@ function ColourMasterSelect({
               <div className="flex gap-2">
                 <input type="text" value={newName}
                   onChange={(e) => { setNewName(e.target.value); setAddError(''); }}
-                  placeholder="e.g. R-1 — Bright Red"
+                  placeholder="e.g. R-1-Bright Red"
                   className="flex-1 rounded border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   autoFocus
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddNew(); if (e.key === 'Escape') setShowAddNew(false); }}
@@ -118,7 +121,7 @@ function ColourMasterSelect({
                 </button>
               </div>
               {addError && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{addError}</p>}
-              <p className="text-[10px] text-slate-400">Tip: use a code + description format, e.g. "N-4 — Navy Blue"</p>
+              <p className="text-[10px] text-slate-400">Format: CODE-#-Name e.g. "R-1-Bright Red" or "N-4-Navy Blue"</p>
             </div>
           </motion.div>
         )}
@@ -133,20 +136,69 @@ function ColourMasterSelect({
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+// ==========================================
+// MAIN PAGE
+// ==========================================
 export default function DevelopmentPage() {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const { jobs: submissions, addJob, updateJob, deleteJob, fetchData } = useDevelopmentStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Artwork state — keep the File object so we can upload it
+  // Copy-from feature
+  const [copyFromId, setCopyFromId] = useState('');
+  const [copyApplied, setCopyApplied] = useState(false);
+
   const [artworkFile, setArtworkFile] = useState<File | null>(null);
-  // Local blob URL for preview only (not saved — we upload to server on submit)
   const [artworkBlobUrl, setArtworkBlobUrl] = useState('');
   const [uploadingArtwork, setUploadingArtwork] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
+
+  // Unique styles for the copy-from dropdown
+  // Group by StyleNo + Customer to avoid duplicates
+  const uniqueStyleOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return submissions.filter(s => {
+      const key = `${s.styleNo}||${s.customer}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [submissions]);
+
+  const handleCopyFrom = (jobId: string) => {
+    setCopyFromId(jobId);
+    if (!jobId) { setCopyApplied(false); return; }
+
+    const source = submissions.find(s => s.id === jobId);
+    if (!source) return;
+
+    // Copy all shared fields — leave component and bodyColour blank for user to fill
+    setFormData({
+      ...INITIAL_FORM_STATE,
+      customer:          source.customer,
+      styleNo:           source.styleNo,
+      season:            source.season,
+      printingTechnique: source.printingTechnique,
+      washingStandard:   source.washingStandard,
+      printColour:       source.printColour,
+      printColourQty:    source.printColourQty,
+      sampleOrderedDate: source.sampleOrderedDate,
+      sampleDeliveryDate: source.sampleDeliveryDate,
+      artworkFileName:   source.artworkFileName,
+      artworkPreviewUrl: source.artworkPreviewUrl,
+      // bodyColour and component intentionally left blank
+      bodyColour: '',
+      component:  '',
+    });
+
+    // Restore artwork preview from server URL
+    setArtworkBlobUrl(source.artworkPreviewUrl ? `${API.BASE}${source.artworkPreviewUrl}` : '');
+    setArtworkFile(null);
+    setCopyApplied(true);
+    setErrors({});
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -159,19 +211,9 @@ export default function DevelopmentPage() {
     if (errors.bodyColour) setErrors((prev) => ({ ...prev, bodyColour: '' }));
   };
 
-  const handleCheckboxChange = (placement: string) => {
-    setFormData((prev) => {
-      const isSelected = prev.placements.includes(placement);
-      return { ...prev, placements: isSelected ? prev.placements.filter(p => p !== placement) : [...prev.placements, placement] };
-    });
-    if (errors.placements) setErrors((prev) => ({ ...prev, placements: '' }));
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Show local blob URL as preview immediately
     const blob = URL.createObjectURL(file);
     setArtworkFile(file);
     setArtworkBlobUrl(blob);
@@ -179,44 +221,36 @@ export default function DevelopmentPage() {
     if (errors.artwork) setErrors((prev) => ({ ...prev, artwork: '' }));
   };
 
-  // Upload artwork to server, returns server path or throws
   const uploadArtworkToServer = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append('file', file);
     const headers = getAuthHeaders();
     delete (headers as any)['Content-Type'];
-
-    const res = await fetch(`${API.BASE}/api/development/artwork`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-
+    const res = await fetch(`${API.BASE}/api/development/artwork`, { method: 'POST', headers, body: formData });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    return data.url; // e.g. /uploads/artworks/artwork_123.png
+    return data.url;
   };
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!formData.customer.trim()) newErrors.customer = 'Customer name is required';
-    if (!formData.styleNo.trim()) newErrors.styleNo = 'Style number is required';
-    if (!formData.season.trim()) newErrors.season = 'Season is required';
+    if (!formData.customer.trim())          newErrors.customer          = 'Customer name is required';
+    if (!formData.styleNo.trim())           newErrors.styleNo           = 'Style number is required';
+    if (!formData.season.trim())            newErrors.season            = 'Season is required';
     if (!formData.printingTechnique.trim()) newErrors.printingTechnique = 'Printing technique is required';
-    if (!formData.washingStandard.trim()) newErrors.washingStandard = 'Washing standard is required';
-    if (!formData.bodyColour.trim()) newErrors.bodyColour = 'Body colour is required';
-    if (!formData.printColour.trim()) newErrors.printColour = 'Print colours are required';
+    if (!formData.washingStandard.trim())   newErrors.washingStandard   = 'Washing standard is required';
+    if (!formData.bodyColour.trim())        newErrors.bodyColour        = 'Body colour is required';
+    if (!formData.printColour.trim())       newErrors.printColour       = 'Print colours are required';
+    if (!formData.component)               newErrors.component          = 'Select a component for this job';
     const qty = parseInt(formData.printColourQty);
     if (!formData.printColourQty || isNaN(qty) || qty < 1) newErrors.printColourQty = 'Must be at least 1';
-    if (!formData.sampleOrderedDate) newErrors.sampleOrderedDate = 'Order date is required';
+    if (!formData.sampleOrderedDate)        newErrors.sampleOrderedDate  = 'Order date is required';
     if (!formData.sampleDeliveryDate) {
       newErrors.sampleDeliveryDate = 'Delivery date is required';
     } else if (formData.sampleOrderedDate && new Date(formData.sampleDeliveryDate) < new Date(formData.sampleOrderedDate)) {
       newErrors.sampleDeliveryDate = 'Delivery cannot be before order date';
     }
-    // Artwork is valid if either a new file is chosen OR an existing server URL is present
     if (!artworkFile && !formData.artworkPreviewUrl) newErrors.artwork = 'Artwork attachment is required';
-    if (formData.placements.length === 0) newErrors.placements = 'Select at least one placement';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -226,13 +260,11 @@ export default function DevelopmentPage() {
     if (!validateForm()) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
 
     let serverArtworkUrl = formData.artworkPreviewUrl;
-
-    // If a new file was selected, upload it first
     if (artworkFile) {
       setUploadingArtwork(true);
       try {
         serverArtworkUrl = await uploadArtworkToServer(artworkFile);
-      } catch (err) {
+      } catch {
         setErrors((prev) => ({ ...prev, artwork: 'Failed to upload artwork. Please try again.' }));
         setUploadingArtwork(false);
         return;
@@ -242,7 +274,7 @@ export default function DevelopmentPage() {
 
     const jobData = {
       ...formData,
-      artworkPreviewUrl: serverArtworkUrl, // real server path
+      artworkPreviewUrl: serverArtworkUrl,
       id: editingId ?? Math.random().toString(36).substr(2, 9),
     };
 
@@ -256,24 +288,39 @@ export default function DevelopmentPage() {
     setFormData(INITIAL_FORM_STATE);
     setArtworkFile(null);
     setArtworkBlobUrl('');
+    setCopyFromId('');
+    setCopyApplied(false);
   };
 
   const handleEdit = (submission: DevelopmentForm) => {
     setFormData(submission);
     setEditingId(submission.id);
     setArtworkFile(null);
-    // Show existing server image as preview
     setArtworkBlobUrl(submission.artworkPreviewUrl ? `${API.BASE}${submission.artworkPreviewUrl}` : '');
+    setCopyFromId('');
+    setCopyApplied(false);
     setErrors({});
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this development record?')) deleteJob(id);
+    if (window.confirm('Delete this development record?')) deleteJob(id);
   };
 
-  // Preview URL: prefer blob (just picked) → server URL (existing) → nothing
+  const resetForm = () => {
+    setFormData(INITIAL_FORM_STATE);
+    setEditingId(null);
+    setArtworkFile(null);
+    setArtworkBlobUrl('');
+    setCopyFromId('');
+    setCopyApplied(false);
+    setErrors({});
+  };
+
   const previewUrl = artworkBlobUrl || (formData.artworkPreviewUrl ? `${API.BASE}${formData.artworkPreviewUrl}` : '');
+
+  // Fields that are locked when copied (shared across components of same style)
+  const lockedFields = copyApplied && !editingId;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12">
@@ -282,12 +329,14 @@ export default function DevelopmentPage() {
         <div className="p-2 bg-indigo-100 rounded-lg"><Code className="w-6 h-6 text-indigo-700" /></div>
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Development Workspace</h2>
-          <p className="text-slate-500 text-sm">Create and manage new print formulas, screens, and artwork.</p>
+          <p className="text-slate-500 text-sm">
+            One job per component. Adding Front + Back for the same style? Use "Copy from existing style".
+          </p>
         </div>
       </div>
 
       <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
-        <div className="mb-6 flex justify-between items-center">
+        <div className="mb-6 flex justify-between items-center flex-wrap gap-3">
           <h3 className="text-lg font-semibold text-slate-800">
             {editingId ? 'Edit Development Job' : 'New Development Job'}
           </h3>
@@ -296,13 +345,55 @@ export default function DevelopmentPage() {
           )}
         </div>
 
+        {/* ── COPY FROM EXISTING STYLE ─────────────────────────────────────── */}
+        {!editingId && submissions.length > 0 && (
+          <div className={`mb-6 rounded-xl border p-4 ${copyApplied ? 'border-emerald-300 bg-emerald-50/50' : 'border-indigo-200 bg-indigo-50/40'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Copy className={`h-4 w-4 ${copyApplied ? 'text-emerald-600' : 'text-indigo-600'}`} />
+              <p className="text-sm font-semibold text-slate-800">
+                Adding another component to an existing style?
+              </p>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Select an existing job to copy all shared fields (Style No, Customer, Season, Technique, Dates, Artwork).
+              Then just pick the new <strong>Component</strong> and <strong>Body Colour</strong>.
+            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <select
+                value={copyFromId}
+                onChange={e => handleCopyFrom(e.target.value)}
+                className="flex-1 min-w-48 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select a style to copy from...</option>
+                {uniqueStyleOptions.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.styleNo} | {s.customer} | {s.season} | {(s as any).component}
+                  </option>
+                ))}
+              </select>
+              {copyApplied && (
+                <button type="button" onClick={resetForm}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                  <X className="h-3.5 w-3.5" /> Clear
+                </button>
+              )}
+            </div>
+            {copyApplied && (
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Shared fields copied. Now select the Component and Body Colour for this new job.
+              </div>
+            )}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} noValidate className="space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
             {[
-              { label: 'Customer', name: 'customer', type: 'text', placeholder: 'e.g. Nike' },
-              { label: 'Style No', name: 'styleNo', type: 'text', placeholder: 'e.g. NK-2026-X' },
-              { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. Summer 26' },
+              { label: 'Customer', name: 'customer', type: 'text', placeholder: 'e.g. Boss' },
+              { label: 'Style No', name: 'styleNo', type: 'text', placeholder: 'e.g. BO-9090' },
+              { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. SS26' },
               { label: 'Printing Technique', name: 'printingTechnique', type: 'text', placeholder: 'e.g. High Density' },
               { label: 'Washing Standard', name: 'washingStandard', type: 'text', placeholder: 'e.g. 40°C Machine Wash' },
               { label: 'Print Colour', name: 'printColour', type: 'text', placeholder: 'e.g. White & Red' },
@@ -316,14 +407,23 @@ export default function DevelopmentPage() {
                 </label>
                 <div className="relative">
                   <input type={field.type} name={field.name}
-                    value={(formData as any)[field.name]} onChange={handleInputChange}
+                    value={(formData as any)[field.name]}
+                    onChange={handleInputChange}
                     placeholder={field.placeholder}
+                    readOnly={lockedFields}
                     className={`w-full px-3 py-2 border rounded-lg outline-none transition-all sm:text-sm ${
                       errors[field.name]
                         ? 'border-red-400 focus:ring-2 focus:ring-red-200 bg-red-50'
-                        : 'border-slate-300 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600'
+                        : lockedFields
+                          ? 'border-slate-200 bg-slate-50 text-slate-600 cursor-not-allowed'
+                          : 'border-slate-300 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600'
                     }`}
                   />
+                  {lockedFields && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300" title="Copied from existing style">
+                      <Copy className="h-3.5 w-3.5" />
+                    </div>
+                  )}
                   {errors[field.name] && (
                     <div className="absolute -bottom-5 left-0 flex items-center text-[11px] text-red-600 font-medium">
                       <AlertCircle className="w-3 h-3 mr-1" /> {errors[field.name]}
@@ -333,36 +433,46 @@ export default function DevelopmentPage() {
               </div>
             ))}
 
+            {/* Body Colour — always editable (changes per component) */}
             <div className="space-y-1">
-              <label className="block text-sm font-medium text-slate-700">Body Colour <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-slate-700">
+                Body Colour <span className="text-red-500">*</span>
+                {copyApplied && <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">Pick new colour</span>}
+              </label>
               <ColourMasterSelect value={formData.bodyColour} onChange={handleBodyColourChange} error={errors.bodyColour} />
             </div>
 
-            {/* ARTWORK UPLOAD */}
+            {/* Artwork — locked if copied (reuses existing artwork) */}
             <div className="space-y-1 lg:col-span-2">
               <label className="block text-sm font-medium text-slate-700">
                 Artwork Attachment <span className="text-red-500">*</span>
+                {lockedFields && previewUrl && (
+                  <span className="ml-2 text-[10px] font-normal text-slate-400">Copied from existing job —
+                    <button type="button" onClick={() => { setArtworkFile(null); setArtworkBlobUrl(''); setFormData(p => ({ ...p, artworkFileName: '', artworkPreviewUrl: '' })); }}
+                      className="ml-1 text-indigo-600 hover:underline">change</button>
+                  </span>
+                )}
               </label>
               <div className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-lg transition-colors ${
-                errors.artwork ? 'border-red-400 bg-red-50' : 'border-slate-300 hover:bg-slate-50'
+                errors.artwork ? 'border-red-400 bg-red-50' : lockedFields && previewUrl ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-300 hover:bg-slate-50'
               }`}>
                 {previewUrl ? (
                   <div className="flex flex-col items-center gap-2">
-                    <img src={previewUrl} alt="Preview"
-                      className="h-32 object-contain rounded border border-slate-200 shadow-sm" />
+                    <img src={previewUrl} alt="Preview" className="h-32 object-contain rounded border border-slate-200 shadow-sm" />
                     <p className="text-xs text-slate-500 font-medium">{formData.artworkFileName}</p>
-                    <label className="cursor-pointer text-sm font-medium text-indigo-600 hover:text-indigo-500">
-                      <span>Change File</span>
-                      <input type="file" className="sr-only" onChange={handleFileChange} accept="image/*" />
-                    </label>
+                    {!lockedFields && (
+                      <label className="cursor-pointer text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                        <span>Change File</span>
+                        <input type="file" className="sr-only" onChange={handleFileChange} accept="image/*" />
+                      </label>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-1 text-center">
-                    {uploadingArtwork ? (
-                      <Loader2 className="mx-auto h-8 w-8 text-indigo-500 animate-spin" />
-                    ) : (
-                      <Upload className={`mx-auto h-8 w-8 ${errors.artwork ? 'text-red-400' : 'text-slate-400'}`} />
-                    )}
+                    {uploadingArtwork
+                      ? <Loader2 className="mx-auto h-8 w-8 text-indigo-500 animate-spin" />
+                      : <Upload className={`mx-auto h-8 w-8 ${errors.artwork ? 'text-red-400' : 'text-slate-400'}`} />
+                    }
                     <div className="flex text-sm text-slate-600 justify-center">
                       <label className="relative cursor-pointer rounded-md font-medium text-indigo-600 hover:text-indigo-500">
                         <span>{uploadingArtwork ? 'Uploading…' : 'Upload an image'}</span>
@@ -379,40 +489,58 @@ export default function DevelopmentPage() {
             </div>
           </div>
 
-          {/* PLACEMENTS */}
+          {/* ── COMPONENT SELECTOR ─────────────────────────────────────────── */}
           <div className="pt-6 mt-4 border-t border-slate-200">
-            <div className="flex items-center mb-4">
-              <h4 className="text-sm font-semibold text-slate-800">Print Placement <span className="text-red-500">*</span></h4>
-              {errors.placements && (
-                <span className="ml-3 flex items-center text-[12px] text-red-600 font-medium bg-red-50 px-2 py-0.5 rounded border border-red-100">
-                  <AlertCircle className="w-3 h-3 mr-1" /> {errors.placements}
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
+              <h4 className="text-sm font-semibold text-slate-800">
+                Component <span className="text-red-500">*</span>
+              </h4>
+              {copyApplied && (
+                <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-medium">
+                  Pick the new component for this job
+                </span>
+              )}
+              {!copyApplied && (
+                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
+                  One component per job — create a separate job for each additional component
+                </span>
+              )}
+              {errors.component && (
+                <span className="flex items-center text-[12px] text-red-600 font-medium bg-red-50 px-2 py-0.5 rounded border border-red-100">
+                  <AlertCircle className="w-3 h-3 mr-1" /> {errors.component}
                 </span>
               )}
             </div>
-            <div className={`flex flex-wrap gap-4 p-4 rounded-lg border ${errors.placements ? 'border-red-200 bg-red-50/50' : 'border-transparent'}`}>
-              {PLACEMENT_OPTIONS.map((placement) => (
-                <label key={placement} className="flex items-center space-x-2 cursor-pointer group">
-                  <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${
-                    formData.placements.includes(placement) ? 'bg-indigo-600 border-indigo-600'
-                      : errors.placements ? 'border-red-400 bg-white' : 'border-slate-300 group-hover:border-indigo-400'
-                  }`}>
-                    {formData.placements.includes(placement) && <CheckCircle2 className="w-4 h-4 text-white" />}
-                  </div>
-                  <span className="text-sm text-slate-700 font-medium select-none">{placement}</span>
-                  <input type="checkbox" className="sr-only"
-                    checked={formData.placements.includes(placement)}
-                    onChange={() => handleCheckboxChange(placement)} />
-                </label>
+            <div className={`flex flex-wrap gap-3 p-4 rounded-lg border ${errors.component ? 'border-red-200 bg-red-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
+              {COMPONENT_OPTIONS.map((opt) => (
+                <button key={opt} type="button"
+                  onClick={() => {
+                    setFormData((prev) => ({ ...prev, component: opt }));
+                    if (errors.component) setErrors((prev) => ({ ...prev, component: '' }));
+                  }}
+                  className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all ${
+                    formData.component === opt
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/20'
+                      : 'bg-white text-slate-700 border-slate-300 hover:border-indigo-400 hover:text-indigo-600'
+                  }`}
+                >
+                  {formData.component === opt && <CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />}
+                  {opt}
+                </button>
               ))}
             </div>
+            {formData.component && (
+              <p className="mt-2 text-xs text-slate-500">
+                This job covers the <span className="font-bold text-indigo-700">{formData.component}</span> component only.
+              </p>
+            )}
           </div>
 
           <div className="flex justify-end pt-4 space-x-3">
-            {editingId && (
-              <button type="button"
-                onClick={() => { setEditingId(null); setFormData(INITIAL_FORM_STATE); setArtworkFile(null); setArtworkBlobUrl(''); setErrors({}); }}
+            {(editingId || copyApplied) && (
+              <button type="button" onClick={resetForm}
                 className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium transition-colors">
-                Cancel Edit
+                {editingId ? 'Cancel Edit' : 'Clear Form'}
               </button>
             )}
             <button type="submit" disabled={uploadingArtwork}
@@ -420,29 +548,30 @@ export default function DevelopmentPage() {
               {uploadingArtwork
                 ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Uploading artwork…</>
                 : editingId
-                  ? <><CheckCircle2 className="w-4 h-4 mr-2" /> Update Submission</>
-                  : <><Plus className="w-4 h-4 mr-2" /> Submit Development</>
+                  ? <><CheckCircle2 className="w-4 h-4 mr-2" /> Update Job</>
+                  : <><Plus className="w-4 h-4 mr-2" /> Create Development Job</>
               }
             </button>
           </div>
         </form>
       </div>
 
-      {/* SUMMARY TABLE */}
+      {/* ── JOBS TABLE ───────────────────────────────────────────────────────── */}
       {submissions.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-8">
           <div className="p-6 border-b border-slate-200">
-            <h3 className="text-lg font-semibold text-slate-800">Recent Submissions</h3>
+            <h3 className="text-lg font-semibold text-slate-800">Development Jobs</h3>
+            <p className="text-xs text-slate-400 mt-1">Each row = one component of a style. Same Style No may appear multiple times with different components.</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap min-w-max">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                 <tr>
                   <th className="px-6 py-3 font-semibold">Artwork</th>
-                  <th className="px-6 py-3 font-semibold">Customer Details</th>
-                  <th className="px-6 py-3 font-semibold">Garment Spec</th>
+                  <th className="px-6 py-3 font-semibold">Customer / Style</th>
+                  <th className="px-6 py-3 font-semibold">Component</th>
+                  <th className="px-6 py-3 font-semibold">Body Colour</th>
                   <th className="px-6 py-3 font-semibold">Print Spec</th>
-                  <th className="px-6 py-3 font-semibold">Placements</th>
                   <th className="px-6 py-3 font-semibold">Dates (Ord / Del)</th>
                   <th className="px-6 py-3 font-semibold text-right">Actions</th>
                 </tr>
@@ -470,32 +599,26 @@ export default function DevelopmentPage() {
                           <p className="text-xs text-slate-600 mt-0.5">Season: <span className="font-medium text-slate-800">{sub.season}</span></p>
                         </td>
                         <td className="px-6 py-4">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">
+                            {(sub as any).component || '—'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
                           <p className="text-sm text-slate-900 font-medium">{sub.bodyColour}</p>
-                          <p className="text-xs text-slate-500 mt-0.5 truncate max-w-30">Wash: {sub.washingStandard}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Wash: {sub.washingStandard}</p>
                         </td>
                         <td className="px-6 py-4">
                           <p className="font-medium text-slate-900">{sub.printingTechnique}</p>
                           <p className="text-xs text-slate-700 mt-0.5">{sub.printColourQty} Colors</p>
                           <p className="text-xs text-slate-500 mt-0.5 truncate max-w-30">{sub.printColour}</p>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-wrap gap-1 max-w-40">
-                            {sub.placements.map(p => (
-                              <span key={p} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[11px] font-medium border border-indigo-100">{p}</span>
-                            ))}
-                          </div>
-                        </td>
                         <td className="px-6 py-4 text-slate-600 text-xs space-y-1">
                           <p>Ord: <span className="font-medium text-slate-900">{sub.sampleOrderedDate}</span></p>
                           <p>Del: <span className="font-medium text-slate-900">{sub.sampleDeliveryDate}</span></p>
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
-                          <button onClick={() => handleEdit(sub)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => handleDelete(sub.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <button onClick={() => handleEdit(sub as any)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>
+                          <button onClick={() => handleDelete(sub.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
                         </td>
                       </motion.tr>
                     );

@@ -4,8 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FlaskConical, CheckCircle2, XCircle, Upload, Image as ImageIcon,
   RefreshCw, Loader2, AlertCircle, Clock, Send, ChevronDown, ChevronUp,
+  GitBranch, X,
 } from 'lucide-react';
 import { useSampleStyleStore, SampleStyle } from '../../store/sampleStyleStore';
+import { useInventoryStore } from '../../store/inventoryStore';
 import { API } from '../../api/client';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -86,15 +88,16 @@ function ImageCell({ style }: { style: SampleStyle }) {
 }
 
 // ── expandable detail row ─────────────────────────────────────────────────────
-function DetailRow({ style, onToggleApprove }: {
+function DetailRow({ style, onToggleApprove, onRevise }: {
   style: SampleStyle;
   onToggleApprove: (id: string) => void;
+  onRevise?: (style: SampleStyle) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [toggleError, setToggleError] = useState('');
 
-  const placements = style.placements ? style.placements.split(',').filter(Boolean) : [];
+  const component = (style as any).component || '';
 
   const handleToggle = async () => {
     setToggling(true); setToggleError('');
@@ -119,11 +122,9 @@ function DetailRow({ style, onToggleApprove }: {
         <td className="px-4 py-3 text-sm text-slate-700">{style.bodyColour || '—'}</td>
         <td className="px-4 py-3 text-sm text-slate-700">{style.printingTechnique || '—'}</td>
         <td className="px-4 py-3">
-          <div className="flex flex-wrap gap-1">
-            {placements.map((p) => (
-              <span key={p} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{p}</span>
-            ))}
-          </div>
+          {component ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">{component}</span>
+          ) : <span className="text-slate-300 text-xs">—</span>}
         </td>
         <td className="px-4 py-3"><StatusBadge style={style} /></td>
         <td className="px-4 py-3">
@@ -144,6 +145,15 @@ function DetailRow({ style, onToggleApprove }: {
               </button>
             ) : (
               <span className="text-xs text-slate-400 italic">Submitted</span>
+            )}
+            {/* Add Revision — only for admin-approved styles */}
+            {style.adminStatus === 'Approved' && onRevise && (
+              <button
+                onClick={() => onRevise(style)}
+                className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+              >
+                <GitBranch className="h-3 w-3" /> Add Revision
+              </button>
             )}
             {toggleError && <p className="text-[10px] text-red-600">{toggleError}</p>}
             <button
@@ -199,10 +209,41 @@ function DetailRow({ style, onToggleApprove }: {
 
 // ── main page ─────────────────────────────────────────────────────────────────
 export default function SampleStylePage() {
-  const { styles, loading, refreshing, fetchStyles, toggleClientApprove } = useSampleStyleStore();
+  const { styles, loading, refreshing, fetchStyles, toggleClientApprove, reviseStyle } = useSampleStyleStore();
+  const { storeInRecords, fetchRecords } = useInventoryStore();
+
+  // Revision modal
+  const [reviseTarget, setReviseTarget] = useState<SampleStyle | null>(null);
+  const [reviseForm, setReviseForm]     = useState({ extraBulkQty: '', rcMeetingDate: '', acNumber: '', boardSet: '', comments: '' });
+  const [revising, setRevising]         = useState(false);
+  const [reviseError, setReviseError]   = useState('');
+  const [reviseSuccess, setReviseSuccess] = useState('');
+
+  const handleRevise = async () => {
+    if (!reviseTarget) return;
+    if (!reviseForm.extraBulkQty || Number(reviseForm.extraBulkQty) <= 0) {
+      setReviseError('Extra Bulk Qty must be a positive number.'); return;
+    }
+    setRevising(true); setReviseError('');
+    try {
+      await reviseStyle(reviseTarget.id, {
+        extraBulkQty:  reviseForm.extraBulkQty,
+        rcMeetingDate: reviseForm.rcMeetingDate || undefined,
+        acNumber:      reviseForm.acNumber      || undefined,
+        boardSet:      reviseForm.boardSet      || undefined,
+        comments:      reviseForm.comments      || undefined,
+      });
+      setReviseSuccess(`Revision created — extra ${reviseForm.extraBulkQty} pcs sent to admin.`);
+      setReviseForm({ extraBulkQty: '', rcMeetingDate: '', acNumber: '', boardSet: '', comments: '' });
+      setReviseTarget(null);
+      await fetchStyles(true);
+    } catch (e) {
+      setReviseError(e instanceof Error ? e.message : 'Failed to create revision.');
+    } finally { setRevising(false); }
+  };
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'submitted'>('all');
 
-  useEffect(() => { fetchStyles(); }, [fetchStyles]);
+  useEffect(() => { fetchStyles(true); fetchRecords?.(); }, [fetchStyles]);
 
   const filtered = styles.filter((s) => {
     if (filter === 'pending') return !s.clientApproved && !s.submittedToAdmin;
@@ -282,7 +323,7 @@ export default function SampleStylePage() {
                   <th className="px-4 py-3 font-semibold">Style / Customer</th>
                   <th className="px-4 py-3 font-semibold">Body Colour</th>
                   <th className="px-4 py-3 font-semibold">Technique</th>
-                  <th className="px-4 py-3 font-semibold">Placements</th>
+                  <th className="px-4 py-3 font-semibold">Component</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold">Actions</th>
                 </tr>
@@ -293,6 +334,7 @@ export default function SampleStylePage() {
                     key={style.id}
                     style={style}
                     onToggleApprove={toggleClientApprove}
+                    onRevise={setReviseTarget}
                   />
                 ))}
               </tbody>
@@ -304,6 +346,103 @@ export default function SampleStylePage() {
       <p className="text-xs text-slate-400 text-right">
         {counts.approved} ready to submit · {counts.submitted} submitted to admin
       </p>
+
+      {/* ── REVISION MODAL ──────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {reviseTarget && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={() => setReviseTarget(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <GitBranch className="h-5 w-5 text-blue-600" />
+                    <h2 className="text-lg font-bold text-slate-900">Add Revision</h2>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    <span className="font-semibold text-indigo-700">{reviseTarget.styleNo}</span>
+                    {' — '}{(reviseTarget as any).component} · {reviseTarget.bodyColour}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Current approved bulk: <span className="font-bold text-slate-600">{Number(reviseTarget.bulkQty || 0).toLocaleString()} pcs</span>
+                  </p>
+                </div>
+                <button onClick={() => setReviseTarget(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800">
+                Enter the <strong>extra qty</strong> only. This creates a new revision sent to admin for approval.
+                The system automatically sums all approved revisions for this component.
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Extra Bulk Qty <span className="text-red-500">*</span></label>
+                  <input type="number" min="1" value={reviseForm.extraBulkQty}
+                    onChange={e => setReviseForm(p => ({ ...p, extraBulkQty: e.target.value }))}
+                    placeholder="e.g. 500"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus />
+                  {reviseForm.extraBulkQty && Number(reviseForm.extraBulkQty) > 0 && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      New total: <span className="font-bold text-blue-700">{(Number(reviseTarget.bulkQty || 0) + Number(reviseForm.extraBulkQty)).toLocaleString()} pcs</span>
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">RC Meeting Date</label>
+                    <input type="date" value={reviseForm.rcMeetingDate}
+                      onChange={e => setReviseForm(p => ({ ...p, rcMeetingDate: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">AC Number</label>
+                    <input type="text" value={reviseForm.acNumber}
+                      onChange={e => setReviseForm(p => ({ ...p, acNumber: e.target.value }))}
+                      placeholder="e.g. AC-993"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Comments for Admin</label>
+                  <textarea value={reviseForm.comments} rows={3}
+                    onChange={e => setReviseForm(p => ({ ...p, comments: e.target.value }))}
+                    placeholder="e.g. Client increased Front order by 500 pcs..."
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+                </div>
+              </div>
+              {reviseError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{reviseError}</div>}
+              <div className="flex gap-3 pt-2 border-t border-slate-100">
+                <button onClick={handleRevise} disabled={revising}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60 transition-colors">
+                  {revising ? <><Loader2 className="h-4 w-4 animate-spin" />Submitting…</> : <><GitBranch className="h-4 w-4" />Submit Revision</>}
+                </button>
+                <button onClick={() => setReviseTarget(null)}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {reviseSuccess && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-6 right-6 z-50 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 shadow-lg flex items-center gap-3 max-w-sm">
+            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+            <p className="text-sm text-emerald-800">{reviseSuccess}</p>
+            <button onClick={() => setReviseSuccess('')} className="ml-auto text-emerald-500"><X className="h-4 w-4" /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

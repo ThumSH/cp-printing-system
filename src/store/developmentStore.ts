@@ -17,7 +17,7 @@ export interface DevelopmentJob {
   printColourQty: string;
   sampleOrderedDate: string;
   sampleDeliveryDate: string;
-  placements: string[];
+  component: string;  // single component: Front, Back, Sleeve, etc.
 }
 
 export interface SubmissionForm {
@@ -38,12 +38,15 @@ interface DevelopmentStore {
   addJob: (job: DevelopmentJob) => Promise<void>;
   updateJob: (id: string, updatedJob: DevelopmentJob) => Promise<void>;
   deleteJob: (id: string) => Promise<void>;
-  addSubmission: (sub: Omit<SubmissionForm, 'id' | 'revisionNo' | 'isLatestRevision'>) => Promise<void>;
+  addSubmission: (
+    sub: Omit<SubmissionForm, 'id' | 'revisionNo' | 'isLatestRevision'>
+  ) => Promise<void>;
   updateSubmission: (id: string, updatedSub: SubmissionForm) => Promise<void>;
   deleteSubmission: (id: string) => Promise<void>;
 }
 
 const API_URL = `${API.BASE}/api/development`;
+ 
 const getHeaders = getAuthHeaders;
 
 const getSubmissionKey = (sub: Pick<SubmissionForm, 'styleNo' | 'customerName'>) =>
@@ -65,7 +68,9 @@ const normalizeSubmissions = (submissions: SubmissionForm[]): SubmissionForm[] =
     const sorted = [...group].sort((a, b) => {
       const dateDiff =
         new Date(a.submissionDate).getTime() - new Date(b.submissionDate).getTime();
+
       if (dateDiff !== 0) return dateDiff;
+
       return a.id.localeCompare(b.id);
     });
 
@@ -81,6 +86,7 @@ const normalizeSubmissions = (submissions: SubmissionForm[]): SubmissionForm[] =
   return normalized.sort((a, b) => {
     const bTime = new Date(b.submissionDate).getTime();
     const aTime = new Date(a.submissionDate).getTime();
+
     if (bTime !== aTime) return bTime - aTime;
     return b.revisionNo - a.revisionNo;
   });
@@ -100,7 +106,11 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
       if (jobsRes.ok && subsRes.ok) {
         const jobs = await jobsRes.json();
         const submissions = await subsRes.json();
-        set({ jobs, submissions: normalizeSubmissions(submissions) });
+
+        set({
+          jobs,
+          submissions: normalizeSubmissions(submissions),
+        });
       }
     } catch (error) {
       console.error('Failed to fetch development data:', error);
@@ -115,20 +125,18 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
     });
 
     if (res.ok) {
+      // Backend returns { job, sampleStyle } — unwrap both
       const data = await res.json();
+      const savedJob   = data.job   ?? data;   // fallback if shape differs
+      const sampleStyle = data.sampleStyle;
 
-      // Backend now returns { job, sampleStyle } — unwrap correctly
-      // Falls back to treating the whole response as the job for safety
-      const savedJob: DevelopmentJob = data.job ?? data;
-      const savedSampleStyle = data.sampleStyle ?? null;
-
-      // Add job to this store
+      // Update jobs list immediately
       set((state) => ({ jobs: [savedJob, ...state.jobs] }));
 
-      // Instantly add the new SampleStyle to sampleStyleStore
-      // so it appears on the Sample Styles page without a full refetch
-      if (savedSampleStyle) {
-        useSampleStyleStore.getState().addStyle(savedSampleStyle);
+      // Push the auto-created SampleStyle into sampleStyleStore immediately
+      // so Sample Styles page shows it without needing a manual refresh
+      if (sampleStyle) {
+        useSampleStyleStore.getState().addStyle(sampleStyle);
       }
     }
   },
@@ -154,7 +162,9 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
     });
 
     if (res.ok) {
-      set((state) => ({ jobs: state.jobs.filter((job) => job.id !== id) }));
+      set((state) => ({
+        jobs: state.jobs.filter((job) => job.id !== id),
+      }));
     }
   },
 
@@ -186,6 +196,7 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
 
     if (res.ok) {
       const savedSub = await res.json();
+
       set((state) => ({
         submissions: normalizeSubmissions([...state.submissions, savedSub]),
       }));
