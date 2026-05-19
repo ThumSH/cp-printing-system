@@ -72,7 +72,7 @@ function InfoCard({ icon: Icon, label, value }: { icon: React.ElementType; label
         <Icon className="h-3.5 w-3.5 text-slate-400" />
         <p className="text-xs font-medium text-slate-500">{label}</p>
       </div>
-      <p className="text-sm font-semibold text-slate-900 break-words">{value || '—'}</p>
+      <p className="text-sm font-semibold text-slate-900 wrap-break-word">{value || '—'}</p>
     </div>
   );
 }
@@ -209,7 +209,7 @@ export default function ApproveSubmission() {
               {filtered.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No submissions yet.</div>
               ) : (
-                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-125 overflow-y-auto pr-1">
                   {filtered.map(s => {
                     // Check if this style is locked
                     const locked = storeInRecords.some(r => r.submissionId === s.id);
@@ -309,11 +309,11 @@ export default function ApproveSubmission() {
                       <InfoCard icon={CalendarDays} label="Submitted At"   value={selected.submittedAt?.slice(0, 10) || '—'} />
                     </div>
 
-                    {selected.placements && (
+                   {(selected as any).placements && (
                       <div className="mt-4">
                         <p className="text-xs font-medium text-slate-500 mb-2">Placements</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {selected.placements.split(',').filter(Boolean).map(p => (
+                          {(selected as any).placements.split(',').filter(Boolean).map((p: string) => (
                             <span key={p} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-medium">{p}</span>
                           ))}
                         </div>

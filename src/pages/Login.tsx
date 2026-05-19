@@ -45,9 +45,9 @@ export default function Login() {
           ============================================ */}
       <div className="hidden lg:flex lg:w-[52%] relative overflow-hidden bg-slate-900">
         {/* Ambient gradients */}
-        <div className="absolute -bottom-32 -left-32 w-[450px] h-[450px] rounded-full bg-blue-600/20 blur-[100px]" />
-        <div className="absolute top-[10%] right-[-5%] w-[350px] h-[350px] rounded-full bg-cyan-500/10 blur-[80px]" />
-        <div className="absolute top-[60%] right-[20%] w-[200px] h-[200px] rounded-full bg-indigo-500/10 blur-[60px]" />
+        <div className="absolute -bottom-32 -left-32 w-112.5 h-112.5 rounded-full bg-blue-600/20 blur-[100px]" />
+        <div className="absolute top-[10%] right-[-5%] w-87.5 h-87.5 rounded-full bg-cyan-500/10 blur-[80px]" />
+        <div className="absolute top-[60%] right-[20%] w-50 h-50 rounded-full bg-indigo-500/10 blur-[60px]" />
 
         {/* Subtle grid */}
         <div className="absolute inset-0 opacity-[0.04]" style={{
@@ -66,9 +66,9 @@ export default function Login() {
             className="relative mb-10"
           >
             {/* Outer glow ring */}
-            <div className="absolute -inset-8 rounded-[2rem] bg-gradient-to-br from-blue-500/10 via-cyan-500/5 to-teal-500/10 blur-2xl" />
+            <div className="absolute -inset-8 rounded-4xl bg-linear-to-br from-blue-500/10 via-cyan-500/5 to-teal-500/10 blur-2xl" />
             {/* Glass container */}
-            <div className="relative rounded-[1.5rem] bg-white/[0.07] backdrop-blur-sm border border-white/[0.1] p-8 shadow-2xl shadow-blue-900/20">
+            <div className="relative rounded-3xl bg-white/[0.07] backdrop-blur-sm border border-white/10 p-8 shadow-2xl shadow-blue-900/20">
               <img src="/cp-logo.png" alt="Colourplus" className="h-44 w-auto drop-shadow-xl" />
             </div>
           </motion.div>
@@ -83,7 +83,7 @@ export default function Login() {
             <h1 className="text-[2.6rem] font-black text-white leading-[1.1] tracking-tight">
               Screen Printing
               <br />
-              <span className="bg-gradient-to-r from-blue-400 via-cyan-400 to-teal-400 bg-clip-text text-transparent">
+              <span className="bg-linear-to-r from-blue-400 via-cyan-400 to-teal-400 bg-clip-text text-transparent">
                 Management System
               </span>
             </h1>
@@ -106,7 +106,7 @@ export default function Login() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.4, delay: 0.4 + i * 0.07 }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-white/[0.06] text-slate-300 border border-white/[0.08] backdrop-blur-sm"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-white/6 text-slate-300 border border-white/8 backdrop-blur-sm"
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />
                   {f.label}
@@ -122,7 +122,7 @@ export default function Login() {
             transition={{ delay: 1 }}
             className="absolute bottom-8 left-10 right-10 flex items-center gap-3"
           >
-            <div className="h-px flex-1 bg-gradient-to-r from-slate-800 to-transparent" />
+            <div className="h-px flex-1 bg-linear-to-r from-slate-800 to-transparent" />
             <p className="text-[11px] text-slate-400 whitespace-nowrap">
               Developed By Tranzix Global Impex Pvt (Ltd)
             </p>
@@ -139,11 +139,11 @@ export default function Login() {
         <div className="absolute inset-0 opacity-[0.99]" style={{ backgroundImage: MESH_PATTERN }} />
 
         {/* ---- LAYER 2: Ink splash gradients ---- */}
-        <div className="absolute top-[-8%] right-[-12%] w-[420px] h-[420px] rounded-full opacity-[0.09]"
+        <div className="absolute top-[-8%] right-[-12%] w-105 h-105 rounded-full opacity-[0.09]"
           style={{ background: 'radial-gradient(circle, #3b82f6 0%, transparent 70%)' }} />
-        <div className="absolute bottom-[-5%] left-[-8%] w-[350px] h-[350px] rounded-full opacity-[0.06]"
+        <div className="absolute bottom-[-5%] left-[-8%] w-87.5 h-87.5 rounded-full opacity-[0.06]"
           style={{ background: 'radial-gradient(circle, #6366f1 0%, transparent 70%)' }} />
-        <div className="absolute top-[45%] left-[60%] w-[180px] h-[180px] rounded-full opacity-[0.05]"
+        <div className="absolute top-[45%] left-[60%] w-45 h-45 rounded-full opacity-[0.05]"
           style={{ background: 'radial-gradient(circle, #14b8a6 0%, transparent 70%)' }} />
 
         {/* ---- LAYER 3: Registration marks (screen printing alignment marks) ---- */}
@@ -203,7 +203,7 @@ export default function Login() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-[360px] relative z-10"
+          className="w-full max-w-90 relative z-10"
         >
           {/* Mobile logo */}
           <div className="lg:hidden mb-8 flex justify-center">

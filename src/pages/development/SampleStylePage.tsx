@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FlaskConical, CheckCircle2, XCircle, Upload, Image as ImageIcon,
-  RefreshCw, Loader2, AlertCircle, Clock, Send, ChevronDown, ChevronUp,
+  RefreshCw, Loader2, Clock, ChevronDown, ChevronUp,
   GitBranch, X,
 } from 'lucide-react';
 import { useSampleStyleStore, SampleStyle } from '../../store/sampleStyleStore';
@@ -210,7 +210,7 @@ function DetailRow({ style, onToggleApprove, onRevise }: {
 // ── main page ─────────────────────────────────────────────────────────────────
 export default function SampleStylePage() {
   const { styles, loading, refreshing, fetchStyles, toggleClientApprove, reviseStyle } = useSampleStyleStore();
-  const { storeInRecords, fetchRecords } = useInventoryStore();
+  const { fetchRecords } = useInventoryStore();
 
   // Revision modal
   const [reviseTarget, setReviseTarget] = useState<SampleStyle | null>(null);
@@ -385,8 +385,8 @@ export default function SampleStylePage() {
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Extra Bulk Qty <span className="text-red-500">*</span></label>
-                  <input type="number" min="1" value={reviseForm.extraBulkQty}
-                    onChange={e => setReviseForm(p => ({ ...p, extraBulkQty: e.target.value }))}
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={reviseForm.extraBulkQty}
+                    onChange={e => setReviseForm(p => ({ ...p, extraBulkQty: e.target.value.replace(/[^0-9]/g, '') }))}
                     placeholder="e.g. 500"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500"
                     autoFocus />

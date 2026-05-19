@@ -64,9 +64,10 @@ interface EligibleStyle {
   customerName: string;
   cutNo: string;
   lineNo: string;
-  /** The single component (Part) chosen by QC in the CPI inspection for this specific cut. */
   component: string;
-  orderQty: number;
+  bodyColour: string; 
+  originalQty: number; // <-- FIX: Mapped to true original issue qty from DB
+  orderQty: number;    // Note: Backend sends the REMAINING qty in this field
   dispatchedQty: number;
 }
 
@@ -117,10 +118,10 @@ const SECTIONS: { key: keyof LockedFields; label: string; color: string; bgColor
 export default function DailyOutputPage() {
   const [eligibleStyles, setEligibleStyles] = useState<EligibleStyle[]>([]);
   const [records, setRecords] = useState<DailyOutputRecord[]>([]);
-  // Cascading selection: pick Style -> then Cut -> then Line (which resolves to a production record)
-  const [pickedStyleKey, setPickedStyleKey] = useState('');   // format: "styleNo|||customerName"
+  
+  const [pickedStyleKey, setPickedStyleKey] = useState('');   
   const [pickedCutNo, setPickedCutNo] = useState('');
-  const [selectedStoreInId, setSelectedStoreInId] = useState(''); // still the final production record id
+  const [selectedStoreInId, setSelectedStoreInId] = useState(''); 
   const [selectedComponent, setSelectedComponent] = useState('');
   const [tableNo, setTableNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -133,7 +134,6 @@ export default function DailyOutputPage() {
 
   const [confirmModal, setConfirmModal] = useState<{ rowIndex: number; slot: TimeSlot } | null>(null);
 
-  // --- Auto-draft: save form to localStorage, restore on reload ---
   const workerDraftState = useMemo(() => ({
     pickedStyleKey, pickedCutNo, selectedStoreInId,
     selectedComponent, tableNo, date, workerName, timeSlots,
@@ -183,42 +183,49 @@ export default function DailyOutputPage() {
 
   const effectiveStoreInId = selectedItem?.storeInRecordId || '';
 
-  // --- Cascading dropdown data ---
-  // Step 1: distinct styles (one entry per styleNo+customer) with total remaining qty
   const distinctStyles = useMemo(() => {
-    const map = new Map<string, { key: string; styleNo: string; customerName: string; totalRemaining: number; prodCount: number }>();
+    const map = new Map<string, {
+      key: string; styleNo: string; customerName: string;
+      totalRemaining: number; prodCount: number; components: string[];
+    }>();
     eligibleStyles.forEach((s) => {
-      const key = `${s.styleNo}|||${s.customerName}`;
+      const key = s.styleNo + '|||' + s.customerName;
+      const comp = s.component || '';
       const existing = map.get(key);
       if (existing) {
         existing.totalRemaining += s.orderQty;
         existing.prodCount += 1;
+        if (comp && !existing.components.includes(comp)) existing.components.push(comp);
       } else {
-        map.set(key, { key, styleNo: s.styleNo, customerName: s.customerName, totalRemaining: s.orderQty, prodCount: 1 });
+        map.set(key, {
+          key, styleNo: s.styleNo, customerName: s.customerName,
+          totalRemaining: s.orderQty, prodCount: 1,
+          components: comp ? [comp] : [],
+        });
       }
     });
     return Array.from(map.values()).sort((a, b) => a.styleNo.localeCompare(b.styleNo));
   }, [eligibleStyles]);
 
-  // Step 2: distinct cuts for the picked style
   const cutsForStyle = useMemo(() => {
     if (!pickedStyleKey) return [];
     const [styleNo, customerName] = pickedStyleKey.split('|||');
-    const rows = eligibleStyles.filter((s) => s.styleNo === styleNo && s.customerName === customerName);
-    const map = new Map<string, { cutNo: string; totalRemaining: number; lineCount: number }>();
-    rows.forEach((s) => {
+    const rows = eligibleStyles.filter(s => s.styleNo === styleNo && s.customerName === customerName);
+    const map = new Map<string, { cutNo: string; totalRemaining: number; lineCount: number; components: string[] }>();
+    rows.forEach(s => {
+      const comp = s.component || '';
       const existing = map.get(s.cutNo);
       if (existing) {
         existing.totalRemaining += s.orderQty;
         existing.lineCount += 1;
+        if (comp && !existing.components.includes(comp)) existing.components.push(comp);
       } else {
-        map.set(s.cutNo, { cutNo: s.cutNo, totalRemaining: s.orderQty, lineCount: 1 });
+        map.set(s.cutNo, { cutNo: s.cutNo, totalRemaining: s.orderQty, lineCount: 1, components: comp ? [comp] : [] });
       }
     });
     return Array.from(map.values()).sort((a, b) => a.cutNo.localeCompare(b.cutNo));
   }, [eligibleStyles, pickedStyleKey]);
 
-  // Step 3: lines (production records) for the picked style + cut — each entry is ONE production record
   const linesForCut = useMemo(() => {
     if (!pickedStyleKey || !pickedCutNo) return [];
     const [styleNo, customerName] = pickedStyleKey.split('|||');
@@ -263,7 +270,8 @@ export default function DailyOutputPage() {
     }
   }, [activeRecord]);
 
-  const issueQty = selectedItem?.orderQty ?? 0;
+  // FIX: Use originalQty from the backend to represent the true base issue quantity
+  const issueQty = selectedItem?.originalQty ?? 0;
 
   const totals = useMemo(() => ({
     seating: timeSlots.reduce((s, t) => s + (Number(t.seating) || 0), 0),
@@ -274,27 +282,39 @@ export default function DailyOutputPage() {
     dispatch: timeSlots.reduce((s, t) => s + (Number(t.dispatch) || 0), 0),
   }), [timeSlots]);
 
-  // Every column counts independently — sum all 6 stages across all time slots.
-  const totalCompleted = totals.seating + totals.printing + totals.curing + totals.checking + totals.packing + totals.dispatch;
-
-  // Sum across OTHER saved records for this same production (not the one being edited).
-  // Covers 'afternoon worker picks up from morning' — sees 100 already done elsewhere.
   const persistedElsewhere = useMemo(() => {
-    if (!selectedItem) return 0;
-    return records
-      .filter((r) =>
-        r.productionRecordId === selectedItem.productionRecordId &&
-        r.id !== activeRecordId
-      )
-      .reduce((sum, r) =>
-        sum + (r.totalSeating || 0) + (r.totalPrinting || 0) + (r.totalCuring || 0)
-            + (r.totalChecking || 0) + (r.totalPacking || 0) + (r.totalDispatch || 0),
-        0);
+    if (!selectedItem) return { seating: 0, printing: 0, curing: 0, checking: 0, packing: 0, dispatch: 0 };
+    // Only tally sums from records that aren't currently being edited
+    const other = records.filter(r => r.productionRecordId === selectedItem.productionRecordId && r.id !== activeRecordId);
+    return {
+      seating: other.reduce((sum, r) => sum + (r.totalSeating || 0), 0),
+      printing: other.reduce((sum, r) => sum + (r.totalPrinting || 0), 0),
+      curing: other.reduce((sum, r) => sum + (r.totalCuring || 0), 0),
+      checking: other.reduce((sum, r) => sum + (r.totalChecking || 0), 0),
+      packing: other.reduce((sum, r) => sum + (r.totalPacking || 0), 0),
+      dispatch: other.reduce((sum, r) => sum + (r.totalDispatch || 0), 0),
+    };
   }, [records, selectedItem, activeRecordId]);
 
-  const allocatedTotal = persistedElsewhere + totalCompleted;
-  const realRemaining = issueQty - allocatedTotal;
-  const isOverLimit = realRemaining < 0;
+  const allocated = useMemo(() => ({
+    seating: persistedElsewhere.seating + totals.seating,
+    printing: persistedElsewhere.printing + totals.printing,
+    curing: persistedElsewhere.curing + totals.curing,
+    checking: persistedElsewhere.checking + totals.checking,
+    packing: persistedElsewhere.packing + totals.packing,
+    dispatch: persistedElsewhere.dispatch + totals.dispatch,
+  }), [persistedElsewhere, totals]);
+
+  const totalAllocated = 
+    allocated.seating + 
+    allocated.printing + 
+    allocated.curing + 
+    allocated.checking + 
+    allocated.packing + 
+    allocated.dispatch;
+
+  const realRemaining = issueQty - totalAllocated;
+  const isOverLimit = totalAllocated > issueQty;
   const remaining = realRemaining;
 
   const updateSlot = (index: number, field: keyof TimeSlot, value: string) => {
@@ -321,7 +341,6 @@ export default function DailyOutputPage() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-
     setPageError('');
     setConfirmModal({ rowIndex, slot: timeSlots[rowIndex] });
   };
@@ -378,7 +397,7 @@ export default function DailyOutputPage() {
       customerName: selectedItem?.customerName ?? '',
       cutNo: selectedItem?.cutNo ?? '',
       component: selectedComponent,
-      orderQty: issueQty,
+      orderQty: issueQty, // Safe: sending the true base issue qty to DB
       tableNo: tableNo.trim(),
       timeSlots: slotsToSave,
       totalSeating: newTotals.seating,
@@ -458,7 +477,7 @@ export default function DailyOutputPage() {
         </div>
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Worker — Daily Output</h2>
-          <p className="text-sm text-slate-500">Submit outputs per time slot. "Completed" reflects final dispatch totals.</p>
+          <p className="text-sm text-slate-500">Distribute your issued pieces across the stages they are currently located in.</p>
         </div>
       </div>
 
@@ -484,7 +503,7 @@ export default function DailyOutputPage() {
                 value={pickedStyleKey}
                 onChange={(e) => {
                   setPickedStyleKey(e.target.value);
-                  setPickedCutNo('');            // reset downstream
+                  setPickedCutNo('');            
                   setSelectedStoreInId('');
                   setSelectedComponent('');
                 }}
@@ -493,7 +512,9 @@ export default function DailyOutputPage() {
                 <option value="">Select style...</option>
                 {distinctStyles.map((s) => (
                   <option key={s.key} value={s.key}>
-                    {s.styleNo} — {s.customerName} ({s.prodCount} cut{s.prodCount !== 1 ? 's' : ''}, remaining {s.totalRemaining})
+                    {s.styleNo} — {s.customerName}
+                    {s.components.length > 0 ? ' [' + s.components.join(', ') + ']' : ''}
+                    {' (' + s.prodCount + ' cut' + (s.prodCount !== 1 ? 's' : '') + ', remaining ' + s.totalRemaining + ')'}
                   </option>
                 ))}
               </select>
@@ -514,7 +535,9 @@ export default function DailyOutputPage() {
                 <option value="">{pickedStyleKey ? 'Select cut...' : 'Pick a style first'}</option>
                 {cutsForStyle.map((c) => (
                   <option key={c.cutNo} value={c.cutNo}>
-                    Cut {c.cutNo} — {c.lineCount} line{c.lineCount !== 1 ? 's' : ''} (remaining {c.totalRemaining})
+                    {c.cutNo}
+                    {c.components.length > 0 ? ' [' + c.components.join(', ') + ']' : ''}
+                    {' — ' + c.lineCount + ' line' + (c.lineCount !== 1 ? 's' : '') + ' · remaining ' + c.totalRemaining}
                   </option>
                 ))}
               </select>
@@ -534,11 +557,18 @@ export default function DailyOutputPage() {
                 className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:cursor-not-allowed ${errors.style ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-teal-500'}`}
               >
                 <option value="">{pickedCutNo ? 'Select line...' : 'Pick a cut first'}</option>
-                {linesForCut.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    Line {l.lineNo || '-'} — Issued {l.orderQty}
-                  </option>
-                ))}
+                {linesForCut.map((l) => {
+                  const comp = l.component || '';
+                  const colour = l.bodyColour || '';
+                  return (
+                    <option key={l.id} value={l.id}>
+                      {'Line ' + (l.lineNo || '—')}
+                      {comp ? ' · ' + comp : ''}
+                      {colour ? ' · ' + colour : ''}
+                      {' — Issued ' + l.originalQty + ' (Rem: ' + l.orderQty + ')'}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -555,7 +585,7 @@ export default function DailyOutputPage() {
                 value={selectedComponent}
                 readOnly
                 disabled
-                placeholder="Auto-filled from Production"
+                placeholder="Auto-filled"
                 title="This field is locked and auto-filled from the production record"
                 className={`w-full rounded border px-3 py-2 text-sm font-bold outline-none cursor-not-allowed ${
                   selectedComponent ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-50 text-slate-400'
@@ -594,10 +624,10 @@ export default function DailyOutputPage() {
             
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
               <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 uppercase tracking-wide">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Total Completed
+                <CheckCircle2 className="h-3.5 w-3.5" /> Total Distributed
               </div>
-              <p className="mt-1 text-2xl font-black text-emerald-700">{totalCompleted}</p>
-              <p className="text-[11px] text-slate-500">Based on final dispatch quantities</p>
+              <p className="mt-1 text-2xl font-black text-emerald-700">{totalAllocated}</p>
+              <p className="text-[11px] text-slate-500">Sum of pieces across all stages</p>
             </div>
 
             <div className={`rounded-lg border p-4 ${remaining <= 0 ? 'border-slate-200 bg-slate-50' : 'border-blue-200 bg-blue-50'}`}>
@@ -605,20 +635,18 @@ export default function DailyOutputPage() {
                 <TrendingDown className="h-3.5 w-3.5" /> Remaining
               </div>
               <p className={`mt-1 text-2xl font-black ${remaining <= 0 ? 'text-slate-700' : 'text-blue-700'}`}>{remaining}</p>
-              <p className="text-[11px] text-slate-500">{remaining <= 0 ? (remaining < 0 ? 'Overage / Excess' : 'All completed ✓') : `${issueQty} - ${totalCompleted}`}</p>
+              <p className="text-[11px] text-slate-500">{remaining <= 0 ? (remaining < 0 ? 'Overage / Excess' : 'All pieces distributed ✓') : `${issueQty} - ${totalAllocated}`}</p>
             </div>
           </div>
         )}
 
-        {/* Over-limit warning banner */}
         {isOverLimit && (
           <div className="rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 flex items-center gap-3">
             <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-bold text-red-700">Issue Qty Exceeded</p>
               <p className="text-xs text-red-600">
-                You've allocated <span className="font-bold">{allocatedTotal}</span> pieces but the Issue Qty is only <span className="font-bold">{issueQty}</span>.
-                Reduce by <span className="font-bold">{Math.abs(realRemaining)}</span> to save.
+                The total number of pieces distributed across all stages exceeds your Issue Qty ({issueQty}). Please verify your distribution.
               </p>
             </div>
           </div>
@@ -677,7 +705,6 @@ export default function DailyOutputPage() {
                                 ? 'bg-teal-600 hover:bg-teal-700'
                                 : 'bg-slate-300 cursor-not-allowed'
                           }`}
-                          title={isOverLimit ? `Exceeds by ${Math.abs(realRemaining)}` : ''}
                         >
                           {hasNewData ? <><Save className="h-3 w-3" /> Save</> : <><CheckCircle2 className="h-3 w-3" /> Saved</>}
                         </button>
@@ -699,7 +726,6 @@ export default function DailyOutputPage() {
               </tbody>
             </table>
           </div>
-
         )}
       </div>
 
@@ -725,7 +751,7 @@ export default function DailyOutputPage() {
                     <th className="px-4 py-2.5 text-left">Component</th>
                     <th className="px-4 py-2.5 text-left">Table</th>
                     <th className="px-4 py-2.5 text-right">Issue</th>
-                    <th className="px-4 py-2.5 text-right">Completed</th>
+                    <th className="px-4 py-2.5 text-right">Distributed</th>
                     <th className="px-4 py-2.5 text-right">Remaining</th>
                     <th className="px-4 py-2.5 text-left">Worker</th>
                     <th className="px-4 py-2.5 text-right"></th>
@@ -734,7 +760,14 @@ export default function DailyOutputPage() {
                 <tbody className="divide-y divide-slate-50">
                   {workerPagination.paginated.map((r) => {
                     const rec = r as DailyOutputRecord;
-                    const recCompleted = rec.totalDispatch || 0;
+                    const recCompleted = 
+                      (rec.totalSeating || 0) +
+                      (rec.totalPrinting || 0) +
+                      (rec.totalCuring || 0) +
+                      (rec.totalChecking || 0) +
+                      (rec.totalPacking || 0) +
+                      (rec.totalDispatch || 0);
+
                     const rem = rec.orderQty - recCompleted;
                     
                     return (
@@ -757,11 +790,12 @@ export default function DailyOutputPage() {
                 </tbody>
               </table>
             </div>
-            <PaginationControls onSearchChange={function (): void {
-                throw new Error('Function not implemented.');
-              } } onPageChange={function (): void {
-                throw new Error('Function not implemented.');
-              } } {...workerPagination} placeholder="Search records..." />
+            <PaginationControls 
+              onSearchChange={workerPagination.setSearch} 
+              onPageChange={workerPagination.goToPage} 
+              {...workerPagination} 
+              placeholder="Search records..." 
+            />
           </>
         )}
       </div>

@@ -7,9 +7,9 @@ import {
   Clock, AlertTriangle, TrendingUp, Code, ClipboardCheck,
   PackageOpen, ArrowRight, Loader2, RefreshCw, ChevronRight,
   ChevronDown, BarChart2, Activity, Shield, Layers,
-  CheckCircle2, XCircle, Timer, Inbox, Send,
-  Eye, PieChart as PieIcon, Star, LayoutDashboard,
-  Boxes, Gauge, Building2,
+  CheckCircle2, XCircle, Inbox, Send,
+  Eye, PieChart as PieIcon, LayoutDashboard,
+  Boxes, Gauge, Building2, ListFilter,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { MiniBarChart, PieChart, MiniDonut, ProgressBar, HorizontalBarChart } from '../components/MiniChart';
@@ -169,29 +169,31 @@ function StageBadge({ stage }: { stage: string }) {
 }
 
 function MiniProgress({ value, max, color = '#3b82f6' }: { value: number; max: number; color?: string }) {
-  const pct = max > 0 ? Math.min(100, Math.round(value / max * 100)) : 0;
+  const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
         <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
-      <span className="text-[11px] font-semibold text-slate-500 w-7 text-right">{pct}%</span>
+      <span className="text-[10px] font-semibold text-slate-500 whitespace-nowrap">
+        {value.toLocaleString()} / {max.toLocaleString()}
+      </span>
     </div>
   );
 }
 
 function PipelineSteps({ style }: { style: StyleOverview }) {
   const steps = [
-    { label: 'Approved', done: true,                      color: '#94a3b8' },
-    { label: 'Received', done: style.totalReceived > 0,   color: '#f59e0b' },
+    { label: 'Admin',    done: true,                      color: '#94a3b8' },
+    { label: 'Store-In', done: style.totalReceived > 0,   color: '#f59e0b' },
     { label: 'QC',       done: style.qcPassed > 0,        color: '#3b82f6' },
-    { label: 'Issued',   done: style.totalIssued > 0,     color: '#8b5cf6' },
-    { label: 'Dispatch', done: style.totalDispatched > 0, color: '#14b8a6' },
+    { label: 'Prod',     done: style.totalIssued > 0,     color: '#8b5cf6' },
+    { label: 'Gatepass', done: style.totalDispatched > 0, color: '#14b8a6' },
   ];
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-0.5" title={steps.map(s => s.label).join(' ➔ ')}>
       {steps.map((s, i) => (
-        <div key={i} className="flex items-center">
+        <div key={i} className="flex items-center group relative">
           <div className={`w-4 h-4 rounded-full flex items-center justify-center ${s.done ? '' : 'bg-slate-100'}`}
             style={s.done ? { backgroundColor: s.color } : {}}>
             {s.done ? <div className="w-1.5 h-1.5 bg-white rounded-full" /> : <div className="w-1.5 h-1.5 bg-slate-300 rounded-full" />}
@@ -206,42 +208,52 @@ function PipelineSteps({ style }: { style: StyleOverview }) {
 // ==========================================
 // ROLE DASHBOARDS
 // ==========================================
-function DeveloperDashboard({ data }: { data: DashboardData }) {
-  const passRate = data.approvals.total > 0 ? Math.round(data.approvals.approved / data.approvals.total * 100) : 0;
+
+function DeveloperDashboard({ data, styles }: { data: DashboardData, styles: StyleOverview[] }) {
+  const runningJobs = data.development.totalJobs - data.approvals.approved;
+  const top10Styles = styles.slice(0, 10); 
+  const pendingApprovals = Math.max(Number(data.development?.pendingSubmissions) || 0, Number(data.approvals?.pending) || 0);
+  
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiCard icon={Code}           label="Jobs Created"       value={data.development.totalJobs}        color="blue"    href="/development"        delay={0.05} />
-        <KpiCard icon={FileText}       label="Total Submissions"  value={data.development.totalSubmissions} color="purple"  href="/development/submit" delay={0.1}  />
-        <KpiCard icon={CheckCircle2}   label="Approved"           value={data.approvals.approved}           color="emerald"                            delay={0.15} />
-        <KpiCard icon={Timer}          label="Pending Approval"   value={data.development.pendingSubmissions} color={data.development.pendingSubmissions > 0 ? 'amber' : 'slate'} delay={0.2} />
+        <KpiCard icon={Code}           label="Total Styles (Jobs)" value={data.development.totalJobs} color="blue"    href="/development"        delay={0.05} />
+        <KpiCard icon={Activity}       label="Running Styles"      value={runningJobs > 0 ? runningJobs : 0} color="amber" delay={0.1}  />
+        <KpiCard icon={CheckCircle2}   label="Client Approved"     value={data.approvals.approved}           color="emerald"                            delay={0.15} />
+        <KpiCard icon={RefreshCw}      label="Client Revisions"    value={data.approvals.rejected}           color="red" delay={0.2} />
       </div>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card title="Submission Status" icon={PieIcon}>
-          <PieChart data={[
-            { label: 'Approved', value: data.approvals.approved, color: '#10b981' },
-            { label: 'Rejected', value: data.approvals.rejected, color: '#ef4444' },
-            { label: 'Pending',  value: data.approvals.pending,  color: '#f59e0b' },
-          ]} centerValue={String(data.approvals.total)} centerLabel="Total" />
+        <Card title="Top 10 Recent Styles & Bulk Qty" icon={Layers} className="lg:col-span-2">
+          <SimpleTable
+            headers={['Style No', 'Customer', 'Current Stage', 'Bulk Qty']}
+            rows={top10Styles.map((s) => [
+              <span className="font-bold">{s.styleNo}</span>,
+              <span className="text-slate-600">{s.customerName}</span>,
+              <StageBadge stage={s.stage} />,
+              <span className="font-bold text-slate-700">{s.bulkQty.toLocaleString()} pcs</span>
+            ])}
+          />
         </Card>
-        <Card title="Approval Breakdown" icon={BarChart2} className="lg:col-span-2">
-          <div className="grid grid-cols-3 gap-4 mb-5">
-            <StatTile label="Approved"  value={data.approvals.approved} color="text-emerald-700" bg="bg-emerald-50" sub="submissions" />
-            <StatTile label="Rejected"  value={data.approvals.rejected} color="text-red-700"     bg="bg-red-50"     sub="submissions" />
-            <StatTile label="Pass Rate" value={`${passRate}%`}          color="text-blue-700"    bg="bg-blue-50"    sub="all-time" />
+
+        <Card title="Approval Breakdown" icon={BarChart2}>
+          <div className="grid grid-cols-2 gap-4 mb-5">
+            <StatTile label="Approved"  value={data.approvals.approved} color="text-emerald-700" bg="bg-emerald-50" />
+            <StatTile label="Revisions" value={data.approvals.rejected} color="text-red-700"     bg="bg-red-50" />
           </div>
           <div className="space-y-2.5">
-            <ProgressBar value={data.approvals.approved} max={data.approvals.total} label="Approval rate"  color="#10b981" />
-            <ProgressBar value={data.approvals.rejected} max={data.approvals.total} label="Rejection rate" color="#ef4444" />
-            <ProgressBar value={data.approvals.pending}  max={data.approvals.total} label="Pending"        color="#f59e0b" />
+            <ProgressBar value={data.approvals.approved} max={data.approvals.total} label="Approved Total"  color="#10b981" />
+            <ProgressBar value={data.approvals.rejected} max={data.approvals.total} label="Revision Total" color="#ef4444" />
+            <ProgressBar value={pendingApprovals}        max={data.approvals.total} label="Pending Review" color="#f59e0b" />
           </div>
         </Card>
       </div>
-      {data.development.pendingSubmissions > 0 && (
+
+      {pendingApprovals > 0 && (
         <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 px-5 py-4 flex items-center gap-3">
           <Clock className="h-5 w-5 text-amber-600 shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-bold text-amber-800">You have {data.development.pendingSubmissions} submission{data.development.pendingSubmissions > 1 ? 's' : ''} awaiting admin review</p>
+            <p className="text-sm font-bold text-amber-800">You have {pendingApprovals} submission{pendingApprovals > 1 ? 's' : ''} awaiting admin review</p>
             <p className="text-xs text-amber-600 mt-0.5">These will be approved or rejected by the admin team.</p>
           </div>
           <Link to="/development/submit" className="text-xs font-bold text-amber-700 flex items-center gap-1 hover:underline">View <ArrowRight className="h-3 w-3" /></Link>
@@ -257,9 +269,9 @@ function StoresDashboard({ data, storeInRecords, styles }: { data: DashboardData
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const allSummaries = useMemo(() => buildStoreInStyleSummaries(storeInRecords), [storeInRecords]);
-  const styleOptions = useMemo(() => Array.from(new Set(allSummaries.map(r => r.styleNo))).filter(Boolean).sort(), [allSummaries]);
-  const customerOptions = useMemo(() => Array.from(new Set(allSummaries.map(r => r.customerName))).filter(Boolean).sort(), [allSummaries]);
+  const allSummaries = useMemo(() => buildStoreInStyleSummaries(storeInRecords), [storeInRecords]),
+        styleOptions = useMemo(() => Array.from(new Set(allSummaries.map(r => r.styleNo))).filter(Boolean).sort(), [allSummaries]),
+        customerOptions = useMemo(() => Array.from(new Set(allSummaries.map(r => r.customerName))).filter(Boolean).sort(), [allSummaries]);
 
   const filtered = useMemo(() => allSummaries.filter(r => {
     if (styleFilter && r.styleNo !== styleFilter) return false;
@@ -383,7 +395,6 @@ function StoresDashboard({ data, storeInRecords, styles }: { data: DashboardData
 }
 
 function QCDashboard({ data, styles }: { data: DashboardData; styles: StyleOverview[] }) {
-  const passRate = data.qc.totalCpiReports > 0 ? Math.round(data.qc.passed / data.qc.totalCpiReports * 100) : 0;
   const qcStyles = styles.filter(s => s.qcTotal > 0);
   return (
     <div className="space-y-5">
@@ -391,7 +402,7 @@ function QCDashboard({ data, styles }: { data: DashboardData; styles: StyleOverv
         <KpiCard icon={CheckSquare}  label="Total Inspections" value={data.qc.totalCpiReports} color="blue"    href="/qc/cpi" delay={0.05} />
         <KpiCard icon={Activity}     label="Received Today"    value={data.qc.todayCpi}        color="teal"               delay={0.1}  />
         <KpiCard icon={CheckCircle2} label="Passed"            value={data.qc.passed}          color="emerald"            delay={0.15} />
-        <KpiCard icon={XCircle}      label="Failed"            value={data.qc.failed}          color={data.qc.failed > 0 ? 'red' : 'slate'} delay={0.2} />
+        <KpiCard icon={Clock}        label="Pending QC"        value={data.qc.pending}         color={data.qc.pending > 0 ? 'amber' : 'slate'} delay={0.2} />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card title="Inspection Results" icon={PieIcon}>
@@ -399,25 +410,25 @@ function QCDashboard({ data, styles }: { data: DashboardData; styles: StyleOverv
             { label: 'Passed',  value: data.qc.passed,  color: '#10b981' },
             { label: 'Failed',  value: data.qc.failed,  color: '#ef4444' },
             { label: 'Pending', value: data.qc.pending, color: '#f59e0b' },
-          ]} centerValue={String(data.qc.totalCpiReports)} centerLabel="Total" />
+          ]} centerValue={String(data.qc.passed)} centerLabel="Passed" />
         </Card>
         <Card title="Summary Stats" icon={BarChart2} className="lg:col-span-2">
           <div className="grid grid-cols-3 gap-4 mb-4">
-            <StatTile label="Pass Rate" value={`${passRate}%`}   color="text-emerald-700" bg="bg-emerald-50" />
-            <StatTile label="Pending"   value={data.qc.pending}  color="text-amber-700"  bg="bg-amber-50"   />
-            <StatTile label="Today"     value={data.qc.todayCpi} color="text-blue-700"   bg="bg-blue-50"    />
+            <StatTile label="Total Passed" value={data.qc.passed}  color="text-emerald-700" bg="bg-emerald-50" />
+            <StatTile label="Total Failed" value={data.qc.failed}  color="text-red-700"     bg="bg-red-50"   />
+            <StatTile label="Today"        value={data.qc.todayCpi} color="text-blue-700"   bg="bg-blue-50"    />
           </div>
           <div className="space-y-2.5">
-            <ProgressBar value={data.qc.passed}  max={data.qc.totalCpiReports} label="Pass rate"    color="#10b981" />
-            <ProgressBar value={data.qc.failed}  max={data.qc.totalCpiReports} label="Fail rate"    color="#ef4444" />
-            <ProgressBar value={data.qc.pending} max={data.qc.totalCpiReports} label="Pending rate" color="#f59e0b" />
+            <ProgressBar value={data.qc.passed}  max={data.qc.totalCpiReports} label="Passed amount"  color="#10b981" />
+            <ProgressBar value={data.qc.failed}  max={data.qc.totalCpiReports} label="Failed amount"  color="#ef4444" />
+            <ProgressBar value={data.qc.pending} max={data.qc.totalCpiReports} label="Pending amount" color="#f59e0b" />
           </div>
         </Card>
       </div>
       {qcStyles.length > 0 && (
         <Card title="QC Results — Per Style" icon={CheckSquare}>
           <SimpleTable
-            headers={['Style', 'Customer', 'Total', 'Passed', 'Failed', 'Pending', 'Pass Rate']}
+            headers={['Style', 'Customer', 'Total', 'Passed', 'Failed', 'Pending', 'Completion Amount']}
             rows={qcStyles.map(s => [
               <span className="font-bold">{s.styleNo}</span>,
               <span className="text-slate-500">{s.customerName}</span>,
@@ -438,14 +449,15 @@ function GatepassDashboard({ data, styles }: { data: DashboardData; styles: Styl
   const dispatchedStyles = styles.filter(s => s.totalDispatched > 0);
   const totalBulk = styles.reduce((s, x) => s + x.bulkQty, 0);
   const totalDispatched = styles.reduce((s, x) => s + x.totalDispatched, 0);
-  const deliveryRate = totalBulk > 0 ? Math.round(totalDispatched / totalBulk * 100) : 0;
+  const remaining = Math.max(0, totalBulk - totalDispatched);
+  
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard icon={Truck}    label="Total Advice Notes" value={data.gatepass.totalAdviceNotes}                    color="blue"    href="/gatepass/advicenote" delay={0.05} />
         <KpiCard icon={Package}  label="Total Dispatched"   value={data.gatepass.totalDispatchedQty.toLocaleString()} sub="pcs"       color="emerald"             delay={0.1}  />
         <KpiCard icon={Activity} label="Dispatched Today"   value={data.gatepass.todayDispatched}                     color="teal"                                delay={0.15} />
-        <KpiCard icon={Star}     label="Delivery Rate"      value={`${deliveryRate}%`}                                color={deliveryRate >= 80 ? 'emerald' : deliveryRate >= 50 ? 'amber' : 'red'} delay={0.2} />
+        <KpiCard icon={Boxes}    label="Remaining Qty"      value={remaining.toLocaleString()}                        color={remaining > 0 ? 'amber' : 'slate'}   delay={0.2} />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card title="Delivery Progress" icon={Truck}>
@@ -480,7 +492,6 @@ function GatepassDashboard({ data, styles }: { data: DashboardData; styles: Styl
 }
 
 function AuditDashboard({ data, styles }: { data: DashboardData; styles: StyleOverview[] }) {
-  const passRate = data.audit.total > 0 ? Math.round(data.audit.passed / data.audit.total * 100) : 0;
   const auditedStyles = styles.filter(s => s.auditTotal > 0);
   return (
     <div className="space-y-5">
@@ -488,31 +499,29 @@ function AuditDashboard({ data, styles }: { data: DashboardData; styles: StyleOv
         <KpiCard icon={Shield}       label="Total Audits" value={data.audit.total}  color="blue"    href="/audit" delay={0.05} />
         <KpiCard icon={CheckCircle2} label="Passed"       value={data.audit.passed} color="emerald"              delay={0.1}  />
         <KpiCard icon={XCircle}      label="Failed"       value={data.audit.failed} color={data.audit.failed > 0 ? 'red' : 'slate'} delay={0.15} />
-        <KpiCard icon={Star}         label="Pass Rate"    value={`${passRate}%`}    color={passRate >= 80 ? 'emerald' : passRate >= 50 ? 'amber' : 'red'} delay={0.2} />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card title="Audit Results" icon={PieIcon}>
           <PieChart data={[
             { label: 'Pass', value: data.audit.passed, color: '#10b981' },
             { label: 'Fail', value: data.audit.failed, color: '#ef4444' },
-          ]} centerValue={`${passRate}%`} centerLabel="Pass rate" />
+          ]} centerValue={String(data.audit.passed)} centerLabel="Passed" />
         </Card>
         <Card title="Audit Stats" icon={BarChart2} className="lg:col-span-2">
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <StatTile label="Pass Rate" value={`${passRate}%`}    color="text-emerald-700" bg="bg-emerald-50" />
-            <StatTile label="Passed"    value={data.audit.passed} color="text-emerald-700" bg="bg-emerald-50" />
-            <StatTile label="Failed"    value={data.audit.failed} color="text-red-700"     bg="bg-red-50"     />
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <StatTile label="Total Passed" value={data.audit.passed} color="text-emerald-700" bg="bg-emerald-50" />
+            <StatTile label="Total Failed" value={data.audit.failed} color="text-red-700"     bg="bg-red-50"     />
           </div>
           <div className="space-y-2">
-            <ProgressBar value={data.audit.passed} max={data.audit.total} label="Pass rate" color="#10b981" />
-            <ProgressBar value={data.audit.failed} max={data.audit.total} label="Fail rate" color="#ef4444" />
+            <ProgressBar value={data.audit.passed} max={data.audit.total} label="Passed amount" color="#10b981" />
+            <ProgressBar value={data.audit.failed} max={data.audit.total} label="Failed amount" color="#ef4444" />
           </div>
         </Card>
       </div>
       {auditedStyles.length > 0 && (
         <Card title="Audit Results — Per Style" icon={Shield}>
           <SimpleTable
-            headers={['Style', 'Customer', 'Total', 'Passed', 'Failed', 'Pass Rate', 'Stage']}
+            headers={['Style', 'Customer', 'Total', 'Passed', 'Failed', 'Completion Amount', 'Current Stage']}
             rows={auditedStyles.map(s => [
               <span className="font-bold">{s.styleNo}</span>,
               <span className="text-slate-500">{s.customerName}</span>,
@@ -543,7 +552,7 @@ function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleO
   ];
   return (
     <div className="space-y-5">
-      <div className="rounded-xl bg-gradient-to-r from-slate-800 to-slate-700 p-5 text-white">
+      <div className="rounded-xl bg-linear-to-r from-slate-800 to-slate-700 p-5 text-white">
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-xs font-medium text-slate-300 uppercase tracking-widest">Today's Output</p>
@@ -623,64 +632,126 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
   const PAGE = 10;
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
+  const [componentSearch, setComponentSearch] = useState('');
+  const [colourSearch, setColourSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [stageFilter, setStageFilter] = useState('');
+  const [showTop10, setShowTop10] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const styleExtraData = useMemo(() => {
-    const map = new Map<string, { totalCutQty: number; totalBundles: number; totalInQty: number }>();
+    const map = new Map<string, { totalCutQty: number; totalBundles: number; totalInQty: number; components: Set<string>; colours: Set<string>; latestDate: string }>();
     storeInRecords.forEach(r => {
       const bundleCount = (r.cuts || []).reduce((s, c) => s + (c.bundles?.length || 0), 0);
-      const existing = map.get(r.styleNo) || { totalCutQty: 0, totalBundles: 0, totalInQty: 0 };
+      const existing = map.get(r.styleNo) || { totalCutQty: 0, totalBundles: 0, totalInQty: 0, components: new Set(), colours: new Set(), latestDate: '' };
       existing.totalCutQty += r.totalCutQty || 0;
       existing.totalBundles += bundleCount;
       existing.totalInQty += r.inQty || 0;
+      if (r.components) existing.components.add(r.components);
+      if (r.bodyColour) existing.colours.add(r.bodyColour);
+      if (r.cutInDate && r.cutInDate > existing.latestDate) existing.latestDate = r.cutInDate;
       map.set(r.styleNo, existing);
     });
     return map;
   }, [storeInRecords]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return styles.filter(s => {
+    let result = styles.filter(s => {
+      const q = search.trim().toLowerCase();
       if (q && !s.styleNo.toLowerCase().includes(q) && !s.customerName.toLowerCase().includes(q)) return false;
       if (stageFilter && s.stage !== stageFilter) return false;
+
+      const extra = styleExtraData.get(s.styleNo);
+      if (componentSearch && extra && !Array.from(extra.components).some(c => c.toLowerCase().includes(componentSearch.toLowerCase()))) return false;
+      if (colourSearch && extra && !Array.from(extra.colours).some(c => c.toLowerCase().includes(colourSearch.toLowerCase()))) return false;
+      if (dateFrom && extra && extra.latestDate < dateFrom) return false;
+      if (dateTo && extra && extra.latestDate > dateTo) return false;
+
       return true;
     });
-  }, [styles, search, stageFilter]);
+
+    if (showTop10) {
+      result = result.sort((a, b) => {
+        const dateA = styleExtraData.get(a.styleNo)?.latestDate || '';
+        const dateB = styleExtraData.get(b.styleNo)?.latestDate || '';
+        return dateB.localeCompare(dateA);
+      }).slice(0, 10);
+    }
+
+    return result;
+  }, [styles, search, stageFilter, componentSearch, colourSearch, dateFrom, dateTo, showTop10, styleExtraData]);
 
   const pages = Math.ceil(filtered.length / PAGE);
   const slice = filtered.slice(page * PAGE, (page + 1) * PAGE);
-  useEffect(() => { setPage(0); }, [search, stageFilter]);
+  
+  useEffect(() => { setPage(0); }, [search, stageFilter, componentSearch, colourSearch, dateFrom, dateTo, showTop10]);
+
+  const hasActiveFilters = search || stageFilter || componentSearch || colourSearch || dateFrom || dateTo || showTop10;
 
   return (
-    <Card title={`All Styles — Full Pipeline (${filtered.length} of ${styles.length})`} icon={TrendingUp} noPadding>
-      <div className="flex flex-wrap gap-2 p-4 border-b border-slate-100">
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search style or customer..."
-          className="flex-1 min-w-40 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-        <select value={stageFilter} onChange={e => setStageFilter(e.target.value)}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">All stages</option>
-          {Object.keys(STAGE_META).map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        {(search || stageFilter) && (
-          <button onClick={() => { setSearch(''); setStageFilter(''); }} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600">Clear</button>
-        )}
+    <Card title={`All Styles Pipeline Tracker (${filtered.length} of ${styles.length})`} icon={TrendingUp} noPadding>
+      <div className="p-4 border-b border-slate-100 bg-slate-50 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <ListFilter className="h-4 w-4 text-slate-500" />
+          <h4 className="text-[11px] font-bold uppercase text-slate-500">Filter & Search Pipeline</h4>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search Style or Customer..."
+            className="flex-1 min-w-35 rounded border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500" />
+          
+          <input type="text" value={componentSearch} onChange={e => setComponentSearch(e.target.value)} placeholder="Search Component (e.g. Front)..."
+            className="w-40 rounded border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500" />
+          
+          <input type="text" value={colourSearch} onChange={e => setColourSearch(e.target.value)} placeholder="Search Body Colour..."
+            className="w-40 rounded border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500" />
+
+          <select value={stageFilter} onChange={e => setStageFilter(e.target.value)}
+            className="w-35 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none focus:border-blue-500">
+            <option value="">All Current Stages</option>
+            {Object.keys(STAGE_META).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-500 uppercase">From</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              className="rounded border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500" />
+            <span className="text-[10px] font-bold text-slate-500 uppercase">To</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+              className="rounded border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500" />
+          </div>
+
+          <button onClick={() => setShowTop10(!showTop10)}
+            className={`ml-auto rounded px-4 py-1.5 text-xs font-bold transition-colors ${showTop10 ? 'bg-indigo-600 text-white shadow-sm' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}>
+            {showTop10 ? 'Showing Top 10' : 'Show Top 10 Recent'}
+          </button>
+
+          {hasActiveFilters && (
+            <button onClick={() => { setSearch(''); setStageFilter(''); setComponentSearch(''); setColourSearch(''); setDateFrom(''); setDateTo(''); setShowTop10(false); }} 
+              className="rounded bg-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-300">
+              Clear All
+            </button>
+          )}
+        </div>
       </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-              <th className="px-3 py-3 text-left w-6"></th>
-              <th className="px-3 py-3 text-left">Style</th>
-              <th className="px-3 py-3 text-left">Customer</th>
-              <th className="px-3 py-3 text-center">Stage</th>
-              <th className="px-3 py-3 text-right">Bulk</th>
-              <th className="px-3 py-3 text-right">IN</th>
-              <th className="px-3 py-3 text-right">Issued</th>
-              <th className="px-3 py-3 text-right">Disp.</th>
-              <th className="px-3 py-3 text-right">Remain</th>
-              <th className="px-3 py-3 text-center">Pipeline</th>
-              <th className="px-3 py-3 text-left min-w-27.5">Progress</th>
+            <tr className="bg-slate-800 text-[10px] font-bold uppercase tracking-wide text-white">
+              <th className="px-3 py-3 text-left w-6 border-r border-slate-700"></th>
+              <th className="px-3 py-3 text-left border-r border-slate-700">Style</th>
+              <th className="px-3 py-3 text-left border-r border-slate-700">Customer</th>
+              <th className="px-3 py-3 text-center border-r border-slate-700">Current Stage</th>
+              <th className="px-3 py-3 text-right bg-slate-700 border-r border-slate-600">Bulk Qty</th>
+              <th className="px-3 py-3 text-right bg-blue-900 border-r border-slate-600">Store-In Qty</th>
+              <th className="px-3 py-3 text-right bg-purple-900 border-r border-slate-600">Production Qty</th>
+              <th className="px-3 py-3 text-right bg-teal-900 border-r border-slate-600">Gatepass Qty</th>
+              <th className="px-3 py-3 text-right bg-amber-900 border-r border-slate-600">Remain Qty</th>
+              <th className="px-3 py-3 text-center border-r border-slate-700" title="Admin -> Store-In -> QC -> Production -> Gatepass">Pipeline Path</th>
+              <th className="px-3 py-3 text-left min-w-27.5">Delivery Progress</th>
             </tr>
           </thead>
           <tbody>
@@ -690,43 +761,43 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
               const extra = styleExtraData.get(s.styleNo) || { totalCutQty: 0, totalBundles: 0, totalInQty: 0 };
               return (
                 <>
-                  <tr key={s.styleNo} className="border-b border-slate-50 hover:bg-slate-50/60 cursor-pointer" onClick={() => setExpanded(isExp ? null : s.styleNo)}>
+                  <tr key={s.styleNo} className="border-b border-slate-50 hover:bg-blue-50/30 cursor-pointer transition-colors" onClick={() => setExpanded(isExp ? null : s.styleNo)}>
                     <td className="px-3 py-3">
                       {isExp ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
                     </td>
                     <td className="px-3 py-3 font-bold text-slate-800">{s.styleNo}</td>
                     <td className="px-3 py-3 text-slate-500 text-xs">{s.customerName}</td>
                     <td className="px-3 py-3 text-center"><StageBadge stage={s.stage} /></td>
-                    <td className="px-3 py-3 text-right font-semibold text-slate-700">{s.bulkQty.toLocaleString()}</td>
-                    <td className="px-3 py-3 text-right text-blue-600 font-semibold">{s.totalReceived > 0 ? s.totalReceived.toLocaleString() : <span className="text-slate-300">—</span>}</td>
-                    <td className="px-3 py-3 text-right text-indigo-600 font-semibold">{s.totalIssued > 0 ? s.totalIssued.toLocaleString() : <span className="text-slate-300">—</span>}</td>
-                    <td className="px-3 py-3 text-right text-teal-600 font-semibold">{s.totalDispatched > 0 ? s.totalDispatched.toLocaleString() : <span className="text-slate-300">—</span>}</td>
-                    <td className={`px-3 py-3 text-right font-semibold ${s.remainingBulk > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{s.remainingBulk.toLocaleString()}</td>
-                    <td className="px-3 py-3 text-center"><PipelineSteps style={s} /></td>
+                    <td className="px-3 py-3 text-right font-black text-slate-700 bg-slate-50/50">{s.bulkQty.toLocaleString()}</td>
+                    <td className="px-3 py-3 text-right text-blue-700 font-bold bg-blue-50/20">{s.totalReceived > 0 ? s.totalReceived.toLocaleString() : <span className="text-slate-300">—</span>}</td>
+                    <td className="px-3 py-3 text-right text-purple-700 font-bold bg-purple-50/20">{s.totalIssued > 0 ? s.totalIssued.toLocaleString() : <span className="text-slate-300">—</span>}</td>
+                    <td className="px-3 py-3 text-right text-teal-700 font-bold bg-teal-50/20">{s.totalDispatched > 0 ? s.totalDispatched.toLocaleString() : <span className="text-slate-300">—</span>}</td>
+                    <td className={`px-3 py-3 text-right font-black bg-amber-50/20 ${s.remainingBulk > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{s.remainingBulk.toLocaleString()}</td>
+                    <td className="px-3 py-3 text-center flex justify-center"><PipelineSteps style={s} /></td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
                           <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct)}%`, backgroundColor: pct >= 100 ? '#10b981' : pct >= 50 ? '#3b82f6' : '#f59e0b' }} />
                         </div>
-                        <span className="text-[11px] font-bold text-slate-600 w-8 text-right">{pct}%</span>
+                        <span className="text-[10px] font-bold text-slate-600 whitespace-nowrap">{s.totalDispatched.toLocaleString()} / {s.bulkQty.toLocaleString()}</span>
                       </div>
                     </td>
                   </tr>
                   {isExp && (
-                    <tr key={`${s.styleNo}-exp`} className="border-b border-slate-100 bg-slate-50/80">
+                    <tr key={`${s.styleNo}-exp`} className="border-b border-slate-100 bg-slate-100 inset-shadow-sm">
                       <td colSpan={11} className="px-6 py-4">
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 text-xs">
                           {[
                             { label: 'Schedule No',    value: s.scheduleNo || '—' },
-                            { label: 'Store-In Count', value: s.storeInCount },
-                            { label: 'Total Cuts',     value: s.totalCuts || '—' },
-                            { label: 'Cut Qty',        value: extra.totalCutQty > 0 ? extra.totalCutQty.toLocaleString() : '—' },
-                            { label: 'Bundles',        value: extra.totalBundles > 0 ? extra.totalBundles.toLocaleString() : '—' },
+                            { label: 'Store-In Entries', value: s.storeInCount },
+                            { label: 'Total Cuts Logged', value: s.totalCuts || '—' },
+                            { label: 'Total Cut Qty',  value: extra.totalCutQty > 0 ? extra.totalCutQty.toLocaleString() : '—' },
+                            { label: 'Total Bundles',  value: extra.totalBundles > 0 ? extra.totalBundles.toLocaleString() : '—' },
                             { label: 'Worker Output',  value: s.totalWorkerOutput.toLocaleString() },
                           ].map(({ label, value }) => (
-                            <div key={label} className="rounded-lg bg-white border border-slate-200 p-3 text-center">
-                              <p className="text-slate-400 font-medium mb-1">{label}</p>
-                              <p className="text-sm font-bold text-slate-700">{value}</p>
+                            <div key={label} className="rounded-lg bg-white border border-slate-200 p-3 text-center shadow-sm">
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">{label}</p>
+                              <p className="text-sm font-black text-slate-700">{value}</p>
                             </div>
                           ))}
                         </div>
@@ -736,6 +807,14 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
                 </>
               );
             })}
+            {slice.length === 0 && (
+              <tr>
+                <td colSpan={11} className="px-6 py-12 text-center text-slate-400">
+                  <TrendingUp className="mx-auto h-8 w-8 opacity-20 mb-2" />
+                  <p>No styles match the current filters.</p>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -804,7 +883,6 @@ export default function Dashboard() {
   const [adminTab, setAdminTab] = useState<RoleTab>('overview');
 
   useEffect(() => {
-    // fetch() is a no-op if data is still fresh (< 2 min old)
     fetchDashboard();
   }, []);
 
@@ -816,7 +894,6 @@ export default function Dashboard() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
-  // First load — no cached data yet, show full spinner
   if (loading && !data) return (
     <div className="flex flex-col items-center justify-center py-32 gap-3">
       <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -824,7 +901,6 @@ export default function Dashboard() {
     </div>
   );
 
-  // Hard error with no cached data to fall back on
   if (error && !data) return (
     <div className="rounded-xl border border-red-200 bg-red-50 p-6">
       <p className="font-semibold text-red-800">Failed to load dashboard</p>
@@ -835,7 +911,6 @@ export default function Dashboard() {
 
   if (!data) return null;
 
-  // Cached age label
   const cacheAge = lastFetched ? Math.round((Date.now() - lastFetched) / 1000) : null;
   const cacheLabel = cacheAge !== null
     ? cacheAge < 60 ? 'Just now' : `${Math.round(cacheAge / 60)}m ago`
@@ -844,7 +919,12 @@ export default function Dashboard() {
   const stageCount = styles.reduce((acc, s) => { acc[s.stage] = (acc[s.stage] || 0) + 1; return acc; }, {} as Record<string, number>);
   const totalWorkerToday = data.worker.todaySeating + data.worker.todayPrinting + data.worker.todayCuring +
     data.worker.todayChecking + data.worker.todayPacking + data.worker.todayDispatch;
-  const activeAlerts = (data.approvals.pending > 0 ? 1 : 0) + (data.qc.pending > 0 ? 1 : 0) + (data.worker.pendingDowntime > 0 ? 1 : 0);
+  
+  // FIX: Admin now tracks data.development.pendingSubmissions specifically to catch new submissions
+  const pendingApprovals = Number(data.development?.pendingSubmissions) || Number(data.approvals?.pending) || 0;
+  const pendingQC = Number(data.qc?.pending) || 0;
+  const pendingDowntime = Number(data.worker?.pendingDowntime) || 0;
+  const activeAlerts = pendingApprovals + pendingQC + pendingDowntime;
 
   // NON-ADMIN
   if (!isAdmin) {
@@ -864,7 +944,7 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
-        {role === 'Developer' && <DeveloperDashboard data={data} />}
+        {role === 'Developer' && <DeveloperDashboard data={data} styles={styles} />}
         {role === 'Stores'    && <StoresDashboard data={data} storeInRecords={storeInRecords} styles={styles} />}
         {role === 'QC'        && <QCDashboard data={data} styles={styles} />}
         {role === 'Gatepass'  && <GatepassDashboard data={data} styles={styles} />}
@@ -877,9 +957,8 @@ export default function Dashboard() {
   // ADMIN
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6 pb-12">
-      {/* Executive Header */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
-        className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 text-white shadow-lg">
+        className="relative overflow-hidden rounded-2xl bg-linear-to-br from-slate-900 via-slate-800 to-slate-900 p-6 text-white shadow-lg">
         <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-blue-500/10 blur-3xl" />
         <div className="absolute -bottom-12 -left-12 w-48 h-48 rounded-full bg-purple-500/10 blur-3xl" />
         <div className="relative flex items-start justify-between flex-wrap gap-4">
@@ -916,7 +995,6 @@ export default function Dashboard() {
       <AnimatePresence mode="wait">
         {adminTab === 'overview' && (
           <motion.div key="overview" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="space-y-6">
-            {/* Pipeline KPI Strip */}
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Gauge className="h-4 w-4 text-slate-400" />
@@ -924,16 +1002,15 @@ export default function Dashboard() {
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
                 <KpiCard icon={Code}           label="Dev Jobs"   value={data.development.totalJobs}                          color="slate"   href="/development"           delay={0.02} sub={`${data.development.totalSubmissions} subs`} />
-                <KpiCard icon={ClipboardCheck} label="Approved"   value={data.approvals.approved}                             color="emerald" href="/admin/approve"         delay={0.04} sub={`${data.approvals.pending} pending`} />
+                <KpiCard icon={ClipboardCheck} label="Approved"   value={data.approvals.approved}                             color="emerald" href="/admin/approve"         delay={0.04} sub={`${pendingApprovals} pending`} />
                 <KpiCard icon={PackageOpen}    label="Store-In"   value={data.stores.totalStoreIn}                            color="blue"    href="/inventory/in"          delay={0.06} sub={`${data.stores.totalInQty.toLocaleString()} pcs`} />
-                <KpiCard icon={CheckSquare}    label="QC Passed"  value={data.qc.passed}                                      color="emerald" href="/qc/cpi"                delay={0.08} sub={`${data.qc.pending} pending`} />
+                <KpiCard icon={CheckSquare}    label="QC Passed"  value={data.qc.passed}                                      color="emerald" href="/qc/cpi"                delay={0.08} sub={`${pendingQC} pending`} />
                 <KpiCard icon={Factory}        label="Production" value={data.stores.totalProductionRecords}                  color="purple"  href="/inventory/production"  delay={0.1}  sub={`${data.stores.totalIssuedQty.toLocaleString()} pcs`} />
                 <KpiCard icon={Truck}          label="Dispatched" value={data.gatepass.totalAdviceNotes}                      color="teal"    href="/gatepass/advicenote"   delay={0.12} sub={`${data.gatepass.totalDispatchedQty.toLocaleString()} pcs`} />
                 <KpiCard icon={Shield}         label="Audits"     value={data.audit.total}                                    color="indigo"  href="/audit"                 delay={0.14} sub={`${data.audit.passed} passed`} />
               </div>
             </div>
 
-            {/* Alerts */}
             {activeAlerts > 0 && (
               <div>
                 <div className="flex items-center gap-2 mb-3">
@@ -941,17 +1018,27 @@ export default function Dashboard() {
                   <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Needs Your Attention</h3>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <AlertCard icon={ClipboardCheck} label="Submissions awaiting approval" value={data.approvals.pending}      href="/admin/approve"   color="amber" />
-                  <AlertCard icon={CheckSquare}    label="QC inspections pending"        value={data.qc.pending}             href="/qc/cpi"          color="amber" />
-                  <AlertCard icon={Clock}          label="Downtime reports pending"      value={data.worker.pendingDowntime} href="/worker/downtime" color="red"   />
+                  <AlertCard icon={ClipboardCheck} label="Submissions awaiting approval" value={pendingApprovals}      href="/admin/approve"   color="amber" />
+                  <AlertCard icon={CheckSquare}    label="QC inspections pending"        value={pendingQC}             href="/qc/cpi"          color="amber" />
+                  <AlertCard icon={Clock}          label="Downtime reports pending"      value={pendingDowntime} href="/worker/downtime" color="red"   />
                 </div>
               </div>
             )}
 
-            {/* Pipeline Table */}
+            <Card title="Top 10 Recent Styles & Bulk Qty" icon={Layers}>
+              <SimpleTable
+                headers={['Style No', 'Customer', 'Current Stage', 'Bulk Qty']}
+                rows={styles.slice(0, 10).map((s) => [
+                  <span className="font-bold">{s.styleNo}</span>,
+                  <span className="text-slate-600">{s.customerName}</span>,
+                  <StageBadge stage={s.stage} />,
+                  <span className="font-bold text-slate-700">{s.bulkQty.toLocaleString()} pcs</span>
+                ])}
+              />
+            </Card>
+
             {styles.length > 0 && <PipelineTable styles={styles} storeInRecords={storeInRecords} />}
 
-            {/* Visual summary row */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <Card title="Bulk Balance" icon={Package}>
                 <div className="flex items-center gap-5">
@@ -968,15 +1055,14 @@ export default function Dashboard() {
                 <PieChart data={[
                   { label: 'Passed',  value: data.qc.passed,  color: '#10b981' },
                   { label: 'Failed',  value: data.qc.failed,  color: '#ef4444' },
-                  { label: 'Pending', value: data.qc.pending, color: '#f59e0b' },
-                ]} centerValue={String(data.qc.totalCpiReports)} centerLabel="Total" />
+                  { label: 'Pending', value: pendingQC, color: '#f59e0b' },
+                ]} centerValue={String(data.qc.passed)} centerLabel="Passed" />
               </Card>
               <Card title="Styles by Stage" icon={TrendingUp}>
                 <PieChart data={Object.entries(STAGE_META).sort((a,b) => b[1].order - a[1].order).map(([s, m]) => ({ label: s, value: stageCount[s] || 0, color: m.dot }))} centerValue={String(styles.length)} centerLabel="Styles" />
               </Card>
             </div>
 
-            {/* Today's activity */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <Card title="Activity Snapshot" icon={Activity}>
                 <div className="grid grid-cols-2 gap-3">
@@ -999,7 +1085,6 @@ export default function Dashboard() {
               </Card>
             </div>
 
-            {/* Recent dispatches */}
             {data.recent.dispatches.length > 0 && (
               <Card title="Recent Dispatches" icon={Truck}
                 action={<Link to="/gatepass/advicenote" className="text-[10px] font-bold text-blue-600 flex items-center gap-1">View all <ArrowRight className="h-3 w-3" /></Link>}>
@@ -1023,7 +1108,7 @@ export default function Dashboard() {
               <Eye className="h-4 w-4 text-blue-600" />
               <p className="text-xs font-bold text-blue-800">Viewing as Developer</p>
             </div>
-            <DeveloperDashboard data={data} />
+            <DeveloperDashboard data={data} styles={styles} />
           </motion.div>
         )}
         {adminTab === 'Stores' && (

@@ -1,8 +1,8 @@
 // src/pages/qc/CPISearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, ClipboardList, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
-import { useQCStore } from '../../store/qcStore';
+import { Search, ClipboardList, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock, CheckCircle2, XCircle, AlertCircle, Printer } from 'lucide-react';
+import { useQCStore, CPIReport } from '../../store/qcStore';
 
 const RECENT_LIMIT = 10;
 
@@ -66,6 +66,181 @@ export default function CPISearchPage() {
     return <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700"><AlertCircle className="h-3 w-3" />Pending</span>;
   };
 
+  // ── Print handler (Tauri Compatible) ──────────────────────────────────────
+  const printReport = (rep: CPIReport) => {
+    const DEFECTS = [
+      { code: 'F1', label: 'Panel Shrinkage' }, { code: 'F2', label: 'Fabric colour variation' },
+      { code: 'F3', label: 'Crush mark' }, { code: 'F4', label: 'Shape out panel' },
+      { code: 'F5', label: 'Dust mark' }, { code: 'F6', label: 'Stain marks / Oil marks' },
+      { code: 'F7', label: 'Cut holes' }, { code: 'F8', label: 'Needle marks' },
+      { code: 'F9', label: 'Incorrect part' }, { code: 'F10', label: 'Numbering stickers missing' },
+      { code: 'F11', label: 'Numbering stickers mixed-up' }, { code: 'F12', label: 'Size mixed-up' },
+      { code: 'F13', label: 'Wrong Cut Mark' }, { code: 'Other', label: 'Other' },
+    ];
+
+    const cuts = rep.cutInspections ?? [];
+    const totalSampleSize = cuts.reduce((s, c) => s + (c.defectRows?.reduce((ds, d) => ds + (parseFloat(String(d.defectedQty)) || 0), 0) ?? 0), 0);
+
+    const tableRows = cuts.map((cut, cutIdx) => {
+      return (cut.defectRows ?? []).map((def, defIdx) => {
+        const defInfo = DEFECTS[defIdx];
+        const isFirst = cutIdx === 0;
+        const isFirstRow = defIdx === 0;
+        const isLastDef = defIdx === (cut.defectRows?.length ?? 0) - 1;
+        const isLastCut = cutIdx === cuts.length - 1;
+        const border = isLastDef && !isLastCut ? 'border-bottom: 2px solid #333;' : '';
+        return `<tr style="${border}">
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;font-size:9px;color:#666;">${isFirst ? (defInfo?.code ?? '') : ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:left;">${isFirst ? (defInfo?.label ?? '') : ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${isFirstRow ? cut.cutNo : ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;font-weight:bold;">${isFirstRow ? cut.cutQty : ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${isFirstRow ? (cut.part ?? '') : ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${def.beforeLength ?? ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${def.beforeWidth ?? ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${def.afterLength ?? ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${def.afterWidth ?? ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;font-size:9px;"></td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${def.defectedQty > 0 ? Math.ceil(def.defectedQty * 0.1) : ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${def.defectedQty > 0 ? def.defectedQty : ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:center;">${def.percentage ?? ''}</td>
+          <td style="border:1px solid #ccc;padding:2px 4px;text-align:left;">${def.remarks ?? ''}</td>
+        </tr>`;
+      }).join('');
+    }).join('');
+
+    // Removed <html>, <head>, and <body> wrappers. Converted to injected div template.
+    const printContent = `
+      <style>
+        /* Hide main React app during printing */
+        @media print {
+          body > *:not(#cpi-search-print-root) { display: none !important; }
+          body { background: white !important; margin: 0 !important; padding: 0 !important; }
+        }
+        
+        #cpi-search-print-root {
+          font-family: Arial, sans-serif; 
+          font-size: 11px; 
+          padding: 10mm;
+          background: white;
+          color: black;
+          width: 100%;
+        }
+        
+        #cpi-search-print-root * { 
+          box-sizing: border-box; 
+          margin: 0; 
+          padding: 0; 
+          -webkit-print-color-adjust: exact !important; 
+          print-color-adjust: exact !important; 
+        }
+        
+        #cpi-search-print-root table { border-collapse: collapse; width: 100%; }
+        #cpi-search-print-root th { border: 1px solid #aaa; padding: 2px 4px; text-align: center; font-size: 10px; background: #f0f0f0; font-weight: bold; }
+        #cpi-search-print-root td { border: 1px solid #ccc; padding: 2px 4px; text-align: center; font-size: 10px; min-height: 16px; }
+        @page { size: A4 landscape; margin: 10mm; }
+      </style>
+
+      <div style="text-align:center;margin-bottom:6px;">
+        <div style="font-weight:bold;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>
+        <div style="font-size:11px;">Cut Panel Inspection Report (CP Chart No. 002)</div>
+      </div>
+      <table style="margin-bottom:6px;border:none;">
+        <tr>
+          <td style="border:none;width:12%;text-align:left;">Date:</td>
+          <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;text-align:left;">${rep.date}</td>
+          <td style="border:none;width:14%;text-align:left;">Schedule number:</td>
+          <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;text-align:left;">${rep.scheduleNo}</td>
+          <td style="border:none;width:12%;text-align:left;">Print colour:</td>
+          <td style="border:none;border-bottom:1px solid black;width:22%;text-align:left;">${rep.printColour}</td>
+        </tr>
+        <tr>
+          <td style="border:none;text-align:left;">Customer:</td>
+          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${rep.customer}</td>
+          <td style="border:none;text-align:left;">Cut number:</td>
+          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${cuts.map(c => c.cutNo).join(', ')}</td>
+          <td style="border:none;text-align:left;">Received Qty:</td>
+          <td style="border:none;border-bottom:1px solid black;text-align:left;">${rep.receivedQty}</td>
+        </tr>
+        <tr>
+          <td style="border:none;text-align:left;">Style number:</td>
+          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${rep.styleNo}</td>
+          <td style="border:none;text-align:left;">Body colour:</td>
+          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${rep.bodyColour}</td>
+          <td style="border:none;text-align:left;">CPI Qty:</td>
+          <td style="border:none;border-bottom:1px solid black;text-align:left;">${rep.cpiQty}</td>
+        </tr>
+      </table>
+      <table>
+        <thead>
+          <tr>
+            <th rowspan="2"></th>
+            <th rowspan="2" style="text-align:left;min-width:110px;">Defect</th>
+            <th rowspan="2">✓</th>
+            <th rowspan="2">Cut No.</th>
+            <th rowspan="2">Qty</th>
+            <th rowspan="2">Bundle No.</th>
+            <th rowspan="2">Component</th>
+            <th rowspan="2">Size</th>
+            <th colspan="4">Before Printing Process</th>
+            <th colspan="4">After Printing Process</th>
+            <th rowspan="2">No. Range</th>
+            <th rowspan="2">Sample Size 10%</th>
+            <th rowspan="2">Defected Qty</th>
+            <th rowspan="2">%</th>
+            <th rowspan="2">Remarks</th>
+          </tr>
+          <tr>
+            <th>L+</th><th>L-</th><th>W+</th><th>W-</th>
+            <th>L+</th><th>L-</th><th>W+</th><th>W-</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+          <tr style="background:#f5f5f5;font-weight:bold;">
+            <td colspan="2" style="text-align:left;border:1px solid #aaa;padding:2px 4px;">TOTALS</td>
+            <td style="border:1px solid #aaa;"></td>
+            <td style="border:1px solid #aaa;"></td>
+            <td style="border:1px solid #aaa;font-weight:bold;">${cuts.reduce((s,c) => s + c.cutQty, 0)}</td>
+            <td colspan="12" style="border:1px solid #aaa;"></td>
+            <td style="border:1px solid #aaa;font-weight:bold;">${totalSampleSize || ''}</td>
+            <td style="border:1px solid #aaa;font-weight:bold;">${cuts.reduce((s,c) => s + (c.totalDefectedQty ?? 0), 0) || ''}</td>
+            <td style="border:1px solid #aaa;"></td>
+            <td style="border:1px solid #aaa;"></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;display:flex;justify-content:space-between;font-size:11px;">
+        <div>CPI Auditor: <span style="display:inline-block;min-width:150px;border-bottom:1px solid black;">${rep.cpiAuditor ?? ''}</span></div>
+        <div style="font-size:10px;color:#555;">Total Cuts: ${cuts.length} | Total Qty: ${cuts.reduce((s,c) => s + c.cutQty, 0)}</div>
+      </div>
+    `;
+
+    // 1. Create a root element and attach it to the DOM
+    const printRoot = document.createElement('div');
+    printRoot.id = 'cpi-search-print-root';
+    printRoot.innerHTML = printContent;
+    document.body.appendChild(printRoot);
+
+    // 2. Wait a tick for the DOM to update, then call print
+    setTimeout(() => {
+      window.print();
+      
+      // 3. Remove the printable DOM node after the dialog resolves
+      setTimeout(() => {
+        if (document.body.contains(printRoot)) {
+          document.body.removeChild(printRoot);
+        }
+      }, 1000);
+    }, 150);
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-6xl space-y-6 pb-12">
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
@@ -127,10 +302,19 @@ export default function CPISearchPage() {
                         <div className="flex items-center gap-2 flex-wrap"><p className="font-bold text-slate-900">{rep.styleNo}</p>{statusBadge(rep.inspectionStatus)}<span className="text-xs text-slate-500">{rep.customer}</span></div>
                         <p className="text-xs text-slate-500 mt-0.5">Sch: <span className="font-medium text-slate-700">{rep.scheduleNo}</span> | Date: <span className="font-medium text-slate-700">{rep.date}</span> | Checked by: <span className="font-medium text-slate-700">{rep.checkedBy || '-'}</span></p>
                       </div>
-                      <div className="text-right space-y-0.5 shrink-0">
-                        <div className="text-xs">Received: <span className="font-bold text-orange-600">{rep.receivedQty}</span></div>
-                        <div className="text-xs">Checked: <span className="font-bold text-slate-700">{rep.checkedQty}</span></div>
-                        <div className="text-xs">Rej: <span className="font-bold text-red-600">{rep.rejDamageQty}</span> ({rep.rejectionPercentage || '0'}%)</div>
+                      <div className="text-right space-y-0.5 shrink-0 flex items-center gap-3">
+                        <div>
+                          <div className="text-xs">Received: <span className="font-bold text-orange-600">{rep.receivedQty}</span></div>
+                          <div className="text-xs">Checked: <span className="font-bold text-slate-700">{rep.checkedQty}</span></div>
+                          <div className="text-xs">Rej: <span className="font-bold text-red-600">{rep.rejDamageQty}</span> ({rep.rejectionPercentage || '0'}%)</div>
+                        </div>
+                        <button
+                          onClick={e => { e.stopPropagation(); printReport(rep); }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-teal-50 hover:border-teal-300 hover:text-teal-700 transition-colors"
+                          title="Print CPI Report">
+                          <Printer className="h-3.5 w-3.5" />
+                          Print
+                        </button>
                       </div>
                     </div>
                     <AnimatePresence>
