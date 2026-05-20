@@ -96,7 +96,13 @@ export default function DevelopmentSubmission() {
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
-  useEffect(() => { fetchStyles(); }, [fetchStyles]);
+  useEffect(() => {
+    // Force fetch so adminStatus is always current
+    fetchStyles(true);
+    // Poll every 30s so status updates (admin approves) appear without manual refresh
+    const interval = setInterval(() => fetchStyles(true), 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const readyStyles = useMemo(() =>
     styles.filter((s) => s.clientApproved && !s.submittedToAdmin), [styles]);
@@ -109,7 +115,11 @@ export default function DevelopmentSubmission() {
   const selected = useMemo(() =>
     styles.find((s) => s.id === selectedId) || null, [styles, selectedId]);
 
-  const imgUrl = selected?.imagePath ? `${API.BASE}${selected.imagePath}` : null;
+  const imgUrl = selected?.imagePath
+    ? selected.imagePath.startsWith('http')
+      ? selected.imagePath
+      : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(selected.imagePath)}`
+    : null;
 
   const handleSelect = (s: SampleStyle) => {
     setSelectedId(s.id);
@@ -215,7 +225,11 @@ export default function DevelopmentSubmission() {
               </div>
               <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                 {readyStyles.map((s) => {
-                  const thumbUrl = s.imagePath ? `${API.BASE}${s.imagePath}` : null;
+                  const thumbUrl = s.imagePath
+                    ? s.imagePath.startsWith('http')
+                      ? s.imagePath
+                      : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(s.imagePath)}`
+                    : null;
                   return (
                     <button key={s.id} onClick={() => handleSelect(s)}
                       className={`w-full rounded-xl border p-4 text-left transition ${
@@ -417,7 +431,11 @@ export default function DevelopmentSubmission() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {submittedStyles.map((s) => {
-                  const thumbUrl = s.imagePath ? `${API.BASE}${s.imagePath}` : null;
+                  const thumbUrl = s.imagePath
+                    ? s.imagePath.startsWith('http')
+                      ? s.imagePath
+                      : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(s.imagePath)}`
+                    : null;
                   return (
                     <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-5 py-3">

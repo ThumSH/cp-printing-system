@@ -6,8 +6,8 @@ import {
   CheckCircle2, AlertCircle, Send, Building2, Lock, Calendar,
   GitBranch, Image,
 } from 'lucide-react';
+import { API, getAuthHeaders } from '../../api/client';
 import { useSampleStyleStore, SampleStyle, SampleStyleRevision } from '../../store/sampleStyleStore';
-import { API } from '../../api/client';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(s?: string) {
@@ -67,13 +67,15 @@ export default function SampleStylePage() {
 
   // Filters
   const [showAll, setShowAll] = useState(false);
-  const [filterCustomer] = useState('');
-  const [filterStatus]     = useState('');
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterStatus, setFilterStatus]     = useState('');
 
   // Add revision
-  const [addingRevFor, setAddingRevFor] = useState<string | null>(null);
-  const [revComment, setRevComment]     = useState('');
-  const [isAddingRev, setIsAddingRev]   = useState(false);
+  const [addingRevFor, setAddingRevFor]     = useState<string | null>(null);
+  const [revComment, setRevComment]         = useState('');
+  const [revArtworkFile, setRevArtworkFile] = useState<File | null>(null);
+  const [revArtworkBlob, setRevArtworkBlob] = useState('');
+  const [isAddingRev, setIsAddingRev]       = useState(false);
 
   // Client approve modal
   const [approveModal, setApproveModal] = useState<SampleStyle | null>(null);
@@ -93,6 +95,7 @@ export default function SampleStylePage() {
   useEffect(() => { fetchStyles(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Unique customers for filter dropdown
+  const uniqueCustomers = useMemo(() => Array.from(new Set(styles.map(s => s.customer))).sort(), [styles]);
 
   // Group by styleNo + customer, apply filters, then slice top 10
   const allGrouped = useMemo(() => {
@@ -120,6 +123,7 @@ export default function SampleStylePage() {
     return list;
   }, [allGrouped, filterCustomer, filterStatus]);
 
+  const displayedGroups = showAll ? grouped : grouped.slice(0, 10);
   const hasMore = grouped.length > 10;
   const isFiltered = !!(filterCustomer || filterStatus);
 
@@ -128,10 +132,27 @@ export default function SampleStylePage() {
     if (!revComment.trim()) return;
     setIsAddingRev(true);
     try {
-      await addRevision(styleId, revComment.trim());
-      // Store's addRevision() already updates local state with the server response —
-      // no need to fetchStyles(). The revision appears immediately.
+      let artworkUrl: string | undefined;
+
+      // Upload revision artwork if provided
+      if (revArtworkFile) {
+        const fd = new FormData();
+        fd.append('file', revArtworkFile);
+        const headers = getAuthHeaders();
+        delete (headers as any)['Content-Type'];
+        const uploadRes = await fetch(`${API.BASE}/api/samplestyle/revisionimage`, {
+          method: 'POST', headers, body: fd,
+        });
+        if (uploadRes.ok) {
+          const data = await uploadRes.json();
+          artworkUrl = data.url;
+        }
+      }
+
+      await addRevision(styleId, revComment.trim(), artworkUrl);
       setRevComment('');
+      setRevArtworkFile(null);
+      setRevArtworkBlob('');
       setAddingRevFor(null);
       setSuccessMsg('Revision saved.');
       setTimeout(() => setSuccessMsg(''), 3000);
@@ -260,7 +281,11 @@ export default function SampleStylePage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-slate-800">{style.component || 'Component'}</span>
-                      <span className="text-xs text-slate-500">{style.bodyColour}</span>
+                      <div className="flex flex-wrap gap-1">
+                        {(style.bodyColour || '').split(',').map(c => c.trim()).filter(Boolean).map(c => (
+                          <span key={c} className="rounded-full bg-slate-100 border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600">{c}</span>
+                        ))}
+                      </div>
                       <StatusBadge style={style} />
                       {revisions.length > 0 && (
                         <span className="flex items-center gap-1 text-[10px] text-slate-400">
@@ -328,7 +353,6 @@ export default function SampleStylePage() {
                           )}
                           <div className="grid grid-cols-2 gap-2 flex-1 content-start">
                             {[
-                              ['Body Colour',   style.bodyColour],
                               ['Print Colour',  style.printColour],
                               ['Technique',     style.printingTechnique],
                               ['Season',        style.season],
@@ -340,6 +364,15 @@ export default function SampleStylePage() {
                                 <p className="text-xs font-semibold text-slate-700">{value || '—'}</p>
                               </div>
                             ))}
+                            {/* Body colour as chips */}
+                            <div className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 col-span-2">
+                              <p className="text-[9px] font-medium uppercase text-slate-400 mb-1">Body Colour</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(style.bodyColour || '').split(',').map(c => c.trim()).filter(Boolean).map(c => (
+                                  <span key={c} className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">{c}</span>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         </div>
 
@@ -362,11 +395,22 @@ export default function SampleStylePage() {
                             <div className="space-y-2">
                               {revisions.map((rev: SampleStyleRevision) => (
                                 <div key={rev.id} className="flex gap-3 items-start rounded-lg border border-slate-200 bg-white px-4 py-3">
-                                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-black text-indigo-700">
+                                  <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-black text-indigo-700">
                                     {rev.revisionNo}
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm text-slate-800 whitespace-pre-wrap">{rev.comment}</p>
+                                    {rev.artworkUrl && (
+                                      <div className="mt-2">
+                                        <p className="text-[10px] font-medium text-slate-400 mb-1">Revision Artwork:</p>
+                                        <img
+                                          src={rev.artworkUrl.startsWith('http') ? rev.artworkUrl : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(rev.artworkUrl)}`}
+                                          alt={`Rev ${rev.revisionNo} artwork`}
+                                          className="h-20 w-20 object-cover rounded-lg border border-slate-200 shadow-sm"
+                                          onError={e => { (e.target as HTMLImageElement).style.display='none'; }}
+                                        />
+                                      </div>
+                                    )}
                                     <p className="mt-1 text-[10px] text-slate-400">
                                       {fmtDate(rev.createdAt)} · {rev.createdBy}
                                     </p>
@@ -390,6 +434,30 @@ export default function SampleStylePage() {
                                 placeholder="Enter the client's feedback or revision request…"
                                 rows={3}
                                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+
+                              {/* Revision artwork upload */}
+                              <div>
+                                <p className="text-xs font-medium text-slate-500 mb-1.5">Replace artwork (optional)</p>
+                                <div className="flex items-center gap-3">
+                                  <label className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                                    <Plus className="h-3.5 w-3.5" />
+                                    {revArtworkFile ? revArtworkFile.name : 'Upload Revision Artwork'}
+                                    <input type="file" accept="image/*" className="hidden"
+                                      onChange={e => {
+                                        const f = e.target.files?.[0];
+                                        if (f) { setRevArtworkFile(f); setRevArtworkBlob(URL.createObjectURL(f)); }
+                                      }} />
+                                  </label>
+                                  {revArtworkBlob && (
+                                    <>
+                                      <img src={revArtworkBlob} alt="preview" className="h-10 w-10 object-cover rounded-lg border border-slate-200" />
+                                      <button type="button" onClick={() => { setRevArtworkFile(null); setRevArtworkBlob(''); }}
+                                        className="text-xs text-red-500 hover:underline">Remove</button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
                               <div className="flex gap-2">
                                 <button
                                   type="button"
@@ -401,7 +469,7 @@ export default function SampleStylePage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => { setAddingRevFor(null); setRevComment(''); }}
+                                  onClick={() => { setAddingRevFor(null); setRevComment(''); setRevArtworkFile(null); setRevArtworkBlob(''); }}
                                   className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
                                   Cancel
                                 </button>
@@ -583,7 +651,7 @@ export default function SampleStylePage() {
                     </p>
                     {submitModal.revisions.map((rev: SampleStyleRevision) => (
                       <div key={rev.id} className="flex gap-2 items-start">
-                        <span className="shrink-0 mt-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-black w-4 h-4 flex items-center justify-center">
+                        <span className="flex-shrink-0 mt-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-black w-4 h-4 flex items-center justify-center">
                           {rev.revisionNo}
                         </span>
                         <p className="text-xs text-slate-600">{rev.comment}</p>

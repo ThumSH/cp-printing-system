@@ -51,7 +51,7 @@ interface CutInspection {
   bundles: BundleRow[]; defects: DefectEntry[];
 }
 
-const makeDefects = (_cutQty: number): DefectEntry[] =>
+const makeDefects = (cutQty: number): DefectEntry[] =>
   DEFECTS.map(d => ({
     defectCode: d.code, check: '',
     beforeL_plus: '', beforeL_minus: '', beforeW_plus: '', beforeW_minus: '',
@@ -70,28 +70,6 @@ function Cell({ value, onChange, w = 'w-10', type = 'text', placeholder = '' }: 
       onChange={e => onChange(e.target.value)}
       className={`${w} rounded border border-slate-200 bg-white px-1 py-0.5 text-[11px] text-center outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-300 transition-colors`}
     />
-  );
-}
-
-// ── Check toggle cell ─────────────────────────────────────────────────────────
-function CheckCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const handleClick = () => {
-    // Cycle through: Empty -> Tick -> Cross -> Empty
-    if (value === '') onChange('✓');
-    else if (value === '✓') onChange('✗');
-    else onChange('');
-  };
-  
-  const textColor = value === '✓' ? 'text-emerald-600' : value === '✗' ? 'text-red-600' : 'text-slate-400';
-
-  return (
-    <button 
-      type="button" 
-      onClick={handleClick}
-      className={`w-6 h-5.5 mx-auto rounded border border-slate-200 bg-white flex items-center justify-center text-[12px] font-bold outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-300 transition-colors hover:bg-slate-50 ${textColor}`}
-    >
-      {value}
-    </button>
   );
 }
 
@@ -114,7 +92,7 @@ function CascadeSelect({ label, value, onChange, options, disabled = false }: {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function CPIPage() {
-  const { eligibleCpiItems, fetchEligibleCpiItems, addCPIReport, cpiReports } = useQCStore();
+  const { eligibleCpiItems, fetchEligibleCpiItems, addCPIReport, cpiReports, fetchReports } = useQCStore();
   const { storeInRecords, fetchRecords } = useInventoryStore();
 
   // Cascading selection
@@ -124,10 +102,10 @@ export default function CPIPage() {
   const [selComponent, setSelComponent] = useState('');
 
   // Header manual fields
-  const [date,         setDate]         = useState(new Date().toISOString().slice(0, 10));
+  const [date,        setDate]        = useState(new Date().toISOString().slice(0, 10));
   const [receivedQty, setReceivedQty] = useState('');
-  const [cpiQty,       setCpiQty]       = useState('');
-  const [auditor,      setAuditor]      = useState('');
+  const [cpiQty,      setCpiQty]      = useState('');
+  const [auditor,     setAuditor]     = useState('');
 
   // Cut data
   const [cuts, setCuts] = useState<CutInspection[]>([]);
@@ -176,10 +154,12 @@ export default function CPIPage() {
 
   // Component options — exclude StoreIn records that already have a CPI report
   const componentOptions = useMemo(() => {
+    // Get StoreIn IDs that already have a CPI report
     const existingCpiStoreInIds = new Set(cpiReports.map(r => r.storeInRecordId));
+
     const comps = new Set<string>();
-    
     matchedRecords.forEach(r => {
+      // Skip if this StoreIn already has a CPI report
       if (existingCpiStoreInIds.has(r.id)) return;
       r.cuts?.forEach(c => {
         const parts = c.cutNo.split(' Cut ');
@@ -213,7 +193,7 @@ export default function CPIPage() {
   // Auto-load cuts when component selected
   useEffect(() => {
     if (!selComponent || cutsForComp.length === 0) { setCuts([]); return; }
-    const loaded: CutInspection[] = cutsForComp.map(({ cut }) => ({
+    const loaded: CutInspection[] = cutsForComp.map(({ cut, storeIn }) => ({
       cutNo:     cut.cutNo,
       cutQty:    cut.cutQty,
       component: selComponent,
@@ -223,6 +203,7 @@ export default function CPIPage() {
       defects: makeDefects(cut.cutQty),
     }));
     setCuts(loaded);
+    // Auto-fill received qty from the selected component's StoreIn record
     if (selectedStoreIn?.inQty) setReceivedQty(selectedStoreIn.inQty.toString());
   }, [selComponent, cutsForComp.length]);
 
@@ -235,9 +216,13 @@ export default function CPIPage() {
       const defects = cut.defects.map((d, di) => {
         if (di !== defIdx) return d;
         const upd = { ...d, [field]: value };
-        if (field === 'defectedQty' && cut.cutQty > 0) {
-          const pct = ((parseFloat(value) || 0) / cut.cutQty * 100).toFixed(1);
-          upd.percentage = value && !isNaN(parseFloat(pct)) ? pct : '';
+        // Auto-calculate % = defectedQty / sampleSize * 100
+        if (field === 'defectedQty' || field === 'sampleSize') {
+          const defQty  = parseFloat(field === 'defectedQty' ? value : d.defectedQty) || 0;
+          const sampQty = parseFloat(field === 'sampleSize'  ? value : d.sampleSize)  || 0;
+          upd.percentage = sampQty > 0 && defQty >= 0
+            ? ((defQty / sampQty) * 100).toFixed(1)
+            : '';
         }
         return upd;
       });
@@ -245,6 +230,17 @@ export default function CPIPage() {
     }));
   }, []);
 
+  // ── Delete a bundle row from a cut ───────────────────────────────────────
+  const deleteBundle = useCallback((cutIdx: number, bundleIdx: number) => {
+    setCuts(prev => prev.map((cut, ci) => {
+      if (ci !== cutIdx) return cut;
+      const bundles = cut.bundles.filter((_, bi) => bi !== bundleIdx);
+      const defects = cut.defects.filter((_, di) => di !== bundleIdx);
+      return { ...cut, bundles, defects };
+    }));
+  }, []);
+
+  // ── Reset ─────────────────────────────────────────────────────────────────
   const handleReset = () => {
     setSelStyle(''); setSelCustomer(''); setSelSchedule(''); setSelComponent('');
     setDate(new Date().toISOString().slice(0, 10));
@@ -252,14 +248,17 @@ export default function CPIPage() {
     setCuts([]); setErrMsg(''); setSuccMsg('');
   };
 
+  // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!eligibleItem && matchedRecords.length === 0) { setErrMsg('No store-in record found.'); return; }
     if (cuts.length === 0) { setErrMsg('No cuts loaded.'); return; }
     if (!auditor.trim())  { setErrMsg('Auditor name is required.'); return; }
     const storeIn = selectedStoreIn ?? matchedRecords[0];
     setSaving(true); setErrMsg('');
-    
     try {
+      const passed = cuts.every(c =>
+        c.defects.every(d => !d.defectedQty || parseFloat(d.defectedQty) === 0)
+      );
       const totalDefected = cuts.reduce((s, c) =>
         s + c.defects.reduce((ds, d) => ds + (parseFloat(d.defectedQty) || 0), 0), 0);
       const totalCutQty = cuts.reduce((s, c) => s + c.cutQty, 0);
@@ -322,72 +321,83 @@ export default function CPIPage() {
     } finally { setSaving(false); }
   };
 
+  // Body/print colour from selected component's eligible item or StoreIn record
   const bodyColour  = eligibleItem?.bodyColour  || selectedStoreIn?.bodyColour  || '—';
   const printColour = eligibleItem?.printColour || selectedStoreIn?.printColour || '—';
   const isReady = selStyle && selCustomer && selSchedule && selComponent && cuts.length > 0;
 
-  // ── Print handler (Tauri Compatible) ──────────────────────────────────────
+
+  // ── Print handler ────────────────────────────────────────────────────────
   const handlePrint = () => {
+    const DEFECT_LIST = [
+      { code: 'F1', label: 'Panel Shrinkage' },
+      { code: 'F2', label: 'Fabric colour variation' },
+      { code: 'F3', label: 'Crush mark' },
+      { code: 'F4', label: 'Shape out panel' },
+      { code: 'F5', label: 'Dust mark' },
+      { code: 'F6', label: 'Stain marks / Oil marks' },
+      { code: 'F7', label: 'Cut holes' },
+      { code: 'F8', label: 'Needle marks' },
+      { code: 'F9', label: 'Incorrect part' },
+      { code: 'F10', label: 'Numbering stickers missing' },
+      { code: 'F11', label: 'Numbering stickers mixed-up' },
+      { code: 'F12', label: 'Size mixed-up' },
+      { code: 'F13', label: 'Wrong Cut Mark' },
+      { code: 'Other', label: 'Other' },
+    ];
+
     const td = (val: string | number, extra = '') =>
-      `<td style="border:1px solid #bbb;padding:2px 4px;text-align:center;font-size:10px;${extra}">${val ?? ''}</td>`;
-    
+      '<td style="border:1px solid #bbb;padding:2px 4px;text-align:center;font-size:10px;' + extra + '">' + (val ?? '') + '</td>';
     const tdL = (val: string | number) =>
-      `<td style="border:1px solid #bbb;padding:2px 4px;text-align:left;font-size:10px;">${val ?? ''}</td>`;
+      '<td style="border:1px solid #bbb;padding:2px 4px;text-align:left;font-size:10px;">' + (val ?? '') + '</td>';
 
     let rows = '';
     let totalSampleSize = 0;
     let totalDefectedQty = 0;
 
-    cuts.forEach((cut, cutIdx) => {
-      cut.defects.forEach((def, defIdx) => {
-        const defInfo = DEFECTS[defIdx];
-        const bundle = cut.bundles[defIdx];
-        const isFirst = cutIdx === 0;
-        const isFirstRow = defIdx === 0;
-        const isLastDef = defIdx === cut.defects.length - 1;
-        const isLastCut = cutIdx === cuts.length - 1;
-        const rowStyle = isLastDef && !isLastCut ? 'border-bottom:2px solid #555;' : '';
+    // Bundle-driven — matches screen exactly
+    cuts.forEach((cut) => {
+      cut.bundles.forEach((bundle, bi) => {
+        const def      = cut.defects[bi] ?? ({} as any);
+        const defInfo  = DEFECT_LIST[bi % DEFECT_LIST.length];
+        const isFirstRow = bi === 0;
 
-        const sampleNum = parseFloat(def.sampleSize) || 0;
-        const defectedNum = parseFloat(def.defectedQty) || 0;
-        totalSampleSize += sampleNum;
-        totalDefectedQty += defectedNum;
+        totalSampleSize  += parseFloat(def.sampleSize)  || 0;
+        totalDefectedQty += parseFloat(def.defectedQty) || 0;
 
-        // Make sure checked mark shows up colored in print as well
-        const checkValue = def.check === '✓' ? '<span style="color:green;font-weight:bold;">✓</span>' : 
-                           def.check === '✗' ? '<span style="color:red;font-weight:bold;">✗</span>' : '';
-
-        rows += `<tr style="${rowStyle}">`
-          + td(isFirst ? (defInfo?.code ?? '') : '', 'color:#666;font-family:monospace;')
-          + tdL(isFirst ? (defInfo?.label ?? '') : '')
-          + td(checkValue)
+        rows += '<tr>'
+          + td(defInfo?.code ?? '', 'color:#666;font-family:monospace;')
+          + tdL(defInfo?.label ?? '')
+          + td(def.check ?? '')
           + td(isFirstRow ? cut.cutNo : '')
           + td(isFirstRow ? cut.cutQty : '', 'font-weight:bold;')
-          + td(bundle?.bundleNo ?? '')
+          + td(bundle.bundleNo ?? '')
           + td(isFirstRow ? cut.component : '')
-          + td(bundle?.size ?? '')
-          + td(def.beforeL_plus)
-          + td(def.beforeL_minus)
-          + td(def.beforeW_plus)
-          + td(def.beforeW_minus)
-          + td(def.afterL_plus)
-          + td(def.afterL_minus)
-          + td(def.afterW_plus)
-          + td(def.afterW_minus)
-          + td(bundle?.numberRange ?? '', 'font-size:9px;')
-          + td(def.sampleSize)
-          + td(def.defectedQty)
-          + td(def.percentage)
-          + td(def.remarks, 'text-align:left;')
+          + td(bundle.size ?? '')
+          + td(def.beforeL_plus ?? '')
+          + td(def.beforeL_minus ?? '')
+          + td(def.beforeW_plus ?? '')
+          + td(def.beforeW_minus ?? '')
+          + td(def.afterL_plus ?? '')
+          + td(def.afterL_minus ?? '')
+          + td(def.afterW_plus ?? '')
+          + td(def.afterW_minus ?? '')
+          + td(bundle.numberRange ?? '', 'font-size:9px;')
+          + td(def.sampleSize ?? '')
+          + td(def.defectedQty ?? '')
+          + td(def.percentage ?? '')
+          + td(def.remarks ?? '', 'text-align:left;')
           + '</tr>';
       });
     });
 
+    // Blank rows
     const blankCount = Math.max(0, 2 - cuts.length);
     for (let i = 0; i < blankCount; i++) {
       rows += '<tr>' + Array(21).fill('<td style="border:1px solid #bbb;height:18px;"></td>').join('') + '</tr>';
     }
 
+    // Totals row
     rows += '<tr style="background:#f0f0f0;font-weight:bold;">'
       + td('TOTALS', 'text-align:left;') + td('') + td('') + td('')
       + td(cuts.reduce((s, c) => s + c.cutQty, 0), 'font-weight:bold;')
@@ -400,123 +410,109 @@ export default function CPIPage() {
       + td('') + td('')
       + '</tr>';
 
-    const printContent = `
-      <style>
-        /* This hides everything in your React app EXCEPT the print root */
-        @media print {
-          body > *:not(#cpi-print-root) { display: none !important; }
-          body { background: white !important; margin: 0 !important; padding: 0 !important; }
-        }
-        
-        #cpi-print-root {
-          font-family: Arial, sans-serif;
-          font-size: 11px;
-          padding: 10mm;
-          color: black;
-          background: white;
-          width: 100%;
-        }
-        
-        /* Force background colors to print in Tauri WebView */
-        #cpi-print-root * { 
-          box-sizing: border-box; 
-          margin: 0; 
-          padding: 0; 
-          -webkit-print-color-adjust: exact !important; 
-          print-color-adjust: exact !important; 
-        }
-        
-        #cpi-print-root table { border-collapse: collapse; width: 100%; }
-        #cpi-print-root th { border: 1px solid #999; padding: 2px 4px; text-align: center; font-size: 10px; background: #e8e8e8; font-weight: bold; }
-        @page { size: A4 landscape; margin: 10mm; }
-      </style>
-      
-      <div style="text-align:center;margin-bottom:6px;">
-        <div style="font-weight:bold;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>
-        <div style="font-size:11px;">Cut Panel Inspection Report (CP Chart No. 002)</div>
-      </div>
-      
-      <table style="border:none;margin-bottom:6px;">
-        <tr>
-          <td style="border:none;width:12%;text-align:left;">Date:</td>
-          <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;text-align:left;">${date}</td>
-          <td style="border:none;width:14%;text-align:left;">Schedule number:</td>
-          <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;text-align:left;">${selSchedule}</td>
-          <td style="border:none;width:12%;text-align:left;">Print colour:</td>
-          <td style="border:none;border-bottom:1px solid black;width:22%;text-align:left;">${printColour}</td>
-        </tr>
-        <tr>
-          <td style="border:none;text-align:left;">Customer:</td>
-          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${selCustomer}</td>
-          <td style="border:none;text-align:left;">Cut number:</td>
-          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${cuts.map(c => c.cutNo).join(', ')}</td>
-          <td style="border:none;text-align:left;">Received Qty:</td>
-          <td style="border:none;border-bottom:1px solid black;text-align:left;">${receivedQty}</td>
-        </tr>
-        <tr>
-          <td style="border:none;text-align:left;">Style number:</td>
-          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${selStyle}</td>
-          <td style="border:none;text-align:left;">Body colour:</td>
-          <td style="border:none;border-bottom:1px solid black;padding-right:8px;text-align:left;">${bodyColour}</td>
-          <td style="border:none;text-align:left;">CPI Qty:</td>
-          <td style="border:none;border-bottom:1px solid black;text-align:left;">${cpiQty}</td>
-        </tr>
-      </table>
-      
-      <table>
-        <thead>
-          <tr>
-            <th rowspan="2"></th>
-            <th rowspan="2" style="text-align:left;min-width:110px;">Defect</th>
-            <th rowspan="2">&#10003;</th>
-            <th rowspan="2">Cut No.</th>
-            <th rowspan="2">Qty</th>
-            <th rowspan="2">Bundle No.</th>
-            <th rowspan="2">Component</th>
-            <th rowspan="2">Size</th>
-            <th colspan="4" style="background:#ddeeff;">Before Printing Process</th>
-            <th colspan="4" style="background:#ddffd4;">After Printing Process</th>
-            <th rowspan="2">No. Range</th>
-            <th rowspan="2">Sample Size 10%</th>
-            <th rowspan="2">Defected Qty</th>
-            <th rowspan="2">%</th>
-            <th rowspan="2" style="min-width:60px;">Remarks</th>
-          </tr>
-          <tr>
-            <th style="background:#ddeeff;">L+</th><th style="background:#ddeeff;">L-</th>
-            <th style="background:#ddeeff;">W+</th><th style="background:#ddeeff;">W-</th>
-            <th style="background:#ddffd4;">L+</th><th style="background:#ddffd4;">L-</th>
-            <th style="background:#ddffd4;">W+</th><th style="background:#ddffd4;">W-</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-      
-      <div style="margin-top:12px;display:flex;justify-content:space-between;font-size:11px;">
-        <div>CPI Auditor: <span style="display:inline-block;min-width:150px;border-bottom:1px solid black;">${auditor}</span></div>
-        <div style="font-size:10px;color:#555;">Total Cuts: ${cuts.length} | Total Qty: ${cuts.reduce((s, c) => s + c.cutQty, 0)}</div>
-      </div>
-    `;
+    const html = '<!DOCTYPE html><html><head>'
+      + '<title>CPI Report - ' + selStyle + ' - ' + selSchedule + '</title>'
+      + '<style>'
+      + '* { box-sizing: border-box; margin: 0; padding: 0; }'
+      + 'body { font-family: Arial, sans-serif; font-size: 11px; padding: 10mm; }'
+      + 'table { border-collapse: collapse; width: 100%; }'
+      + 'th { border: 1px solid #999; padding: 2px 4px; text-align: center; font-size: 10px; background: #e8e8e8; font-weight: bold; }'
+      + '@page { size: A4 landscape; margin: 10mm; }'
+      + '</style></head><body>'
+      + '<div style="text-align:center;margin-bottom:6px;">'
+      + '<div style="font-weight:bold;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>'
+      + '<div style="font-size:11px;">Cut Panel Inspection Report (CP Chart No. 002)</div>'
+      + '</div>'
+      + '<table style="border:none;margin-bottom:6px;">'
+      + '<tr>'
+      + '<td style="border:none;width:12%;">Date:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;">' + date + '</td>'
+      + '<td style="border:none;width:14%;">Schedule number:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;">' + selSchedule + '</td>'
+      + '<td style="border:none;width:12%;">Print colour:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;width:22%;">' + printColour + '</td>'
+      + '</tr><tr>'
+      + '<td style="border:none;">Customer:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;padding-right:8px;">' + selCustomer + '</td>'
+      + '<td style="border:none;">Cut number:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;padding-right:8px;">' + cuts.map(c => c.cutNo).join(', ') + '</td>'
+      + '<td style="border:none;">Received Qty:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;">' + receivedQty + '</td>'
+      + '</tr><tr>'
+      + '<td style="border:none;">Style number:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;padding-right:8px;">' + selStyle + '</td>'
+      + '<td style="border:none;">Body colour:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;padding-right:8px;">' + bodyColour + '</td>'
+      + '<td style="border:none;">CPI Qty:</td>'
+      + '<td style="border:none;border-bottom:1px solid black;">' + cpiQty + '</td>'
+      + '</tr></table>'
+      + '<table><thead>'
+      + '<tr>'
+      + '<th rowspan="2"></th>'
+      + '<th rowspan="2" style="text-align:left;min-width:110px;">Defect</th>'
+      + '<th rowspan="2">&#10003;</th>'
+      + '<th rowspan="2">Cut No.</th>'
+      + '<th rowspan="2">Qty</th>'
+      + '<th rowspan="2">Bundle No.</th>'
+      + '<th rowspan="2">Component</th>'
+      + '<th rowspan="2">Size</th>'
+      + '<th colspan="4" style="background:#ddeeff;">Before Printing Process</th>'
+      + '<th colspan="4" style="background:#ddffd4;">After Printing Process</th>'
+      + '<th rowspan="2">No. Range</th>'
+      + '<th rowspan="2">Sample Size 10%</th>'
+      + '<th rowspan="2">Defected Qty</th>'
+      + '<th rowspan="2">%</th>'
+      + '<th rowspan="2" style="min-width:60px;">Remarks</th>'
+      + '</tr><tr>'
+      + '<th style="background:#ddeeff;">L+</th><th style="background:#ddeeff;">L-</th>'
+      + '<th style="background:#ddeeff;">W+</th><th style="background:#ddeeff;">W-</th>'
+      + '<th style="background:#ddffd4;">L+</th><th style="background:#ddffd4;">L-</th>'
+      + '<th style="background:#ddffd4;">W+</th><th style="background:#ddffd4;">W-</th>'
+      + '</tr></thead><tbody>'
+      + rows
+      + '</tbody></table>'
+      + '<div style="margin-top:12px;display:flex;justify-content:space-between;font-size:11px;">'
+      + '<div>CPI Auditor: <span style="display:inline-block;min-width:150px;border-bottom:1px solid black;">' + auditor + '</span></div>'
+      + '<div style="font-size:10px;color:#555;">Total Cuts: ' + cuts.length + ' | Total Qty: ' + cuts.reduce((s, c) => s + c.cutQty, 0) + '</div>'
+      + '</div>'
+      + '</body></html>';
 
-    // 1. Create a root element and attach it to the DOM
-    const printRoot = document.createElement('div');
-    printRoot.id = 'cpi-print-root';
-    printRoot.innerHTML = printContent;
-    document.body.appendChild(printRoot);
+    // Use iframe instead of window.open — works in Tauri (no popup blocker)
+    const existing = document.getElementById('cpi-print-iframe');
+    if (existing) existing.remove();
 
-    // 2. Wait a tick for the DOM to update, then call print
+    const iframe = document.createElement('iframe');
+    iframe.id = 'cpi-print-iframe';
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;border:none;visibility:hidden;';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) { alert('Could not open print frame.'); return; }
+    doc.open();
+    doc.write(html);
+    doc.close();
+
     setTimeout(() => {
-      window.print();
-      
-      // 3. Remove the printable DOM node after the dialog resolves
-      setTimeout(() => {
-        if (document.body.contains(printRoot)) {
-          document.body.removeChild(printRoot);
-        }
-      }, 1000);
-    }, 150);
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => iframe.remove(), 2000);
+    }, 600);
+  };
+
+  const thStyle: React.CSSProperties = {
+    border: '1px solid #aaa',
+    padding: '2px 4px',
+    textAlign: 'center',
+    fontWeight: 'bold',
+    backgroundColor: '#f0f0f0',
+    fontSize: '10px',
+  };
+  const tdStyle: React.CSSProperties = {
+    border: '1px solid #ccc',
+    padding: '2px 3px',
+    textAlign: 'center',
+    minHeight: '16px',
+    height: '16px',
   };
 
   // ==========================================
@@ -524,7 +520,7 @@ export default function CPIPage() {
   // ==========================================
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-      className="mx-auto max-w-375 space-y-6 pb-16">
+      className="mx-auto max-w-[1500px] space-y-6 pb-16">
 
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-200 pb-4">
@@ -579,7 +575,7 @@ export default function CPIPage() {
             options={componentOptions} disabled={!selSchedule} />
         </div>
 
-        {/* Auto-filled info */}
+        {/* Auto-filled info — shown only after component is selected */}
         {selComponent && (
           <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 md:grid-cols-4">
             {[
@@ -623,6 +619,7 @@ export default function CPIPage() {
       {/* ── Inspection Grid ──────────────────────────────────────────────── */}
       {cuts.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+
           {/* Company report header */}
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
             <div className="text-center mb-3">
@@ -648,8 +645,8 @@ export default function CPIPage() {
               <thead>
                 <tr className="bg-slate-100 text-slate-700 text-[11px]">
                   <th className="border border-slate-300 px-2 py-2 text-left font-bold w-8">#</th>
-                  <th className="border border-slate-300 px-2 py-2 text-left font-bold min-w-35">Defect</th>
-                  <th className="border border-slate-300 px-2 py-2 font-bold w-10">✓/✗</th>
+                  <th className="border border-slate-300 px-2 py-2 text-left font-bold min-w-[140px]">Defect</th>
+                  <th className="border border-slate-300 px-2 py-2 font-bold w-8">✓</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-20">Cut No</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-12">Qty</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-16">Bundle No</th>
@@ -662,67 +659,123 @@ export default function CPIPage() {
                   <th className="border border-slate-300 px-2 py-2 font-bold w-16">Defected Qty</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-10">%</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-28">Remarks</th>
+                  <th className="border border-slate-300 px-1 py-2 font-bold w-8"></th>
                 </tr>
                 <tr className="bg-slate-50 text-slate-500 text-[10px]">
                   <th colSpan={8} className="border border-slate-300 py-1" />
                   {['L+','L-','W+','W-'].map(h => <th key={`b${h}`} className="border border-slate-300 px-1 py-1 font-medium bg-blue-50/40 w-9">{h}</th>)}
                   {['L+','L-','W+','W-'].map(h => <th key={`a${h}`} className="border border-slate-300 px-1 py-1 font-medium bg-green-50/40 w-9">{h}</th>)}
-                  <th colSpan={5} className="border border-slate-300 py-1" />
+                  <th colSpan={6} className="border border-slate-300 py-1" />
                 </tr>
               </thead>
               <tbody>
                 {cuts.map((cut, cutIdx) =>
-                  cut.defects.map((def, defIdx) => {
-                    const bundle     = cut.bundles[defIdx] ?? null;
-                    const defInfo    = DEFECTS[defIdx];
-                    const isFirstCut = cutIdx === 0;
-                    const isFirstRow = defIdx === 0;
-                    const isLastCut  = cutIdx === cuts.length - 1;
-                    const isLastDef  = defIdx === cut.defects.length - 1;
-                    const showBorder = isLastDef && !isLastCut; 
+                  cut.bundles.length > 0
+                    ? cut.bundles.map((bundle, bundleIdx) => {
+                        const def        = cut.defects[bundleIdx] ?? cut.defects[0];
+                        const defIdx     = bundleIdx;
+                        const defInfo    = DEFECTS[bundleIdx % DEFECTS.length];
+                        const isFirstRow = bundleIdx === 0;
 
-                    return (
-                      <tr key={`${cutIdx}-${defIdx}`}
-                        className={`${defIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-teal-50/20 transition-colors ${showBorder ? 'border-b-2 border-teal-300' : ''}`}>
-                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-400 font-mono text-[10px]">{isFirstCut ? defInfo?.code : ''}</td>
-                        <td className="border border-slate-200 px-2 py-1 text-slate-700">{isFirstCut ? defInfo?.label : ''}</td>
+                        return (
+                          <tr key={`${cutIdx}-${bundleIdx}`}
+                            className={`${bundleIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-teal-50/20 transition-colors`}>
+
+                            {/* Code — always show */}
+                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-400 font-mono text-[10px]">
+                              {defInfo?.code ?? ''}
+                            </td>
+
+                            {/* Defect label — always show */}
+                            <td className="border border-slate-200 px-2 py-1 text-slate-700">
+                              {defInfo?.label ?? ''}
+                            </td>
+
+                        {/* Check mark */}
                         <td className="border border-slate-200 px-0.5 py-0.5 text-center">
-                          {/* Replaced <Cell /> with the new interactive <CheckCell /> */}
-                          <CheckCell value={def.check} onChange={v => updateDefect(cutIdx, defIdx, 'check', v)} />
+                          <Cell value={def.check} onChange={v => updateDefect(cutIdx, defIdx, 'check', v)} w="w-6" />
                         </td>
-                        <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-700">{isFirstRow ? cut.cutNo : ''}</td>
-                        <td className="border border-slate-200 px-1 py-1 text-center font-bold text-slate-800">{isFirstRow ? cut.cutQty : ''}</td>
-                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">{bundle?.bundleNo ?? ''}</td>
-                        <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-indigo-700">{isFirstRow ? cut.component : ''}</td>
-                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">{bundle?.size ?? ''}</td>
-                        
+
+                        {/* Cut No — first row of cut only */}
+                        <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-700">
+                          {isFirstRow ? cut.cutNo : ''}
+                        </td>
+
+                        {/* Qty — first row of cut only */}
+                        <td className="border border-slate-200 px-1 py-1 text-center font-bold text-slate-800">
+                          {isFirstRow ? cut.cutQty : ''}
+                        </td>
+
+                        {/* Bundle No — from StoreIn */}
+                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">
+                          {bundle?.bundleNo ?? ''}
+                        </td>
+
+                        {/* Component — first row of cut only */}
+                        <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-indigo-700">
+                          {isFirstRow ? cut.component : ''}
+                        </td>
+
+                        {/* Size — from StoreIn */}
+                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">
+                          {bundle?.size ?? ''}
+                        </td>
+
+                        {/* Before printing — manual */}
                         {(['beforeL_plus','beforeL_minus','beforeW_plus','beforeW_minus'] as const).map(f => (
                           <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-blue-50/20">
                             <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
                           </td>
                         ))}
+
+                        {/* After printing — manual */}
                         {(['afterL_plus','afterL_minus','afterW_plus','afterW_minus'] as const).map(f => (
                           <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-green-50/20">
                             <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
                           </td>
                         ))}
-                        
-                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-500 text-[10px]">{bundle?.numberRange ?? ''}</td>
+
+                        {/* No. Range — from StoreIn */}
+                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-500 text-[10px]">
+                          {bundle?.numberRange ?? ''}
+                        </td>
+
+                        {/* Sample Size 10% — auto, editable */}
                         <td className="border border-slate-200 px-0.5 py-0.5">
                           <Cell value={def.sampleSize} onChange={v => updateDefect(cutIdx, defIdx, 'sampleSize', v)} w="w-12" type="number" />
                         </td>
+
+                        {/* Defected Qty — manual */}
                         <td className="border border-slate-200 px-0.5 py-0.5">
                           <Cell value={def.defectedQty} onChange={v => updateDefect(cutIdx, defIdx, 'defectedQty', v)} w="w-12" type="number" />
                         </td>
+
+                        {/* % — auto-calculated, editable */}
                         <td className={`border border-slate-200 px-0.5 py-0.5 ${parseFloat(def.percentage) > 0 ? 'bg-red-50/40' : ''}`}>
                           <Cell value={def.percentage} onChange={v => updateDefect(cutIdx, defIdx, 'percentage', v)} w="w-10" />
                         </td>
+
+                        {/* Remarks */}
                         <td className="border border-slate-200 px-0.5 py-0.5">
                           <Cell value={def.remarks} onChange={v => updateDefect(cutIdx, defIdx, 'remarks', v)} w="w-24" placeholder="…" />
                         </td>
+
+                        {/* Delete bundle row */}
+                        <td className="border border-slate-200 px-0.5 py-0.5 text-center">
+                          {cut.bundles.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => deleteBundle(cutIdx, bundleIdx)}
+                              title="Remove this bundle row"
+                              className="rounded p-0.5 text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                            </button>
+                          )}
+                        </td>
                       </tr>
-                    );
-                  })
+                        );
+                      })
+                    : null
                 )}
                 {/* Screen totals row */}
                 <tr className="bg-slate-100 font-bold text-[11px]">
@@ -771,6 +824,8 @@ export default function CPIPage() {
           <p className="text-xs text-slate-300 mt-1">Ensure the Store-In record exists and cuts are assigned to this component.</p>
         </div>
       )}
+
+
     </motion.div>
   );
 }

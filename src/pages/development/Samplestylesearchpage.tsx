@@ -68,7 +68,15 @@ function DetailPanel({ style }: { style: SampleStyle }) {
 
       {/* Print details */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-        <div><p className="text-xs text-slate-500 font-medium">Component</p>
+        <div>
+        <p className="text-xs text-slate-500 font-medium mb-1">Body Colour</p>
+        <div className="flex flex-wrap gap-1">
+          {(style.bodyColour || '').split(',').map(c => c.trim()).filter(Boolean).map(c => (
+            <span key={c} className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">{c}</span>
+          ))}
+        </div>
+      </div>
+      <div><p className="text-xs text-slate-500 font-medium">Component</p>
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">
             {style.component || '—'}
           </span>
@@ -88,11 +96,23 @@ function DetailPanel({ style }: { style: SampleStyle }) {
           <div className="space-y-1.5">
             {style.revisions.map((rev) => (
               <div key={rev.id} className="flex gap-3 items-start rounded-lg border border-slate-200 bg-white px-3 py-2">
-                <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center">
+                <span className="flex-shrink-0 mt-0.5 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center">
                   {rev.revisionNo}
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-slate-700">{rev.comment}</p>
+                  {rev.artworkUrl && (
+                    <div className="mt-1.5">
+                      <p className="text-[10px] text-slate-400 mb-1">Revision artwork:</p>
+                      <img
+                        src={rev.artworkUrl.startsWith('http') ? rev.artworkUrl
+                          : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(rev.artworkUrl)}`}
+                        alt={`Rev ${rev.revisionNo}`}
+                        className="h-16 w-16 object-cover rounded border border-slate-200"
+                        onError={e => { (e.target as HTMLImageElement).style.display='none'; }}
+                      />
+                    </div>
+                  )}
                   <p className="text-[10px] text-slate-400 mt-0.5">{rev.createdAt} · {rev.createdBy}</p>
                 </div>
               </div>
@@ -158,7 +178,14 @@ function StyleRow({ style }: { style: SampleStyle }) {
           <p className="text-xs text-slate-500">{style.customer}</p>
           <p className="text-xs text-slate-400">{style.season}</p>
         </td>
-        <td className="px-4 py-3 text-sm text-slate-700">{style.bodyColour || '—'}</td>
+        <td className="px-4 py-3">
+          <div className="flex flex-wrap gap-1">
+            {(style.bodyColour || '').split(',').map(c => c.trim()).filter(Boolean).map(c => (
+              <span key={c} className="rounded-full bg-slate-100 border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">{c}</span>
+            ))}
+            {!style.bodyColour && <span className="text-slate-400 text-xs">—</span>}
+          </div>
+        </td>
         <td className="px-4 py-3 text-xs text-slate-500">{style.createdAt?.slice(0, 10) || '—'}</td>
         <td className="px-4 py-3"><StatusBadge style={style} /></td>
         <td className="px-4 py-3">
@@ -206,7 +233,7 @@ export default function SampleStyleSearchPage() {
       // Field filters
       if (filters.styleNo && s.styleNo !== filters.styleNo) return false;
       if (filters.customer && s.customer !== filters.customer) return false;
-      if (filters.bodyColour && s.bodyColour !== filters.bodyColour) return false;
+      if (filters.bodyColour && !s.bodyColour?.toLowerCase().includes(filters.bodyColour.toLowerCase())) return false;
       if (filters.date && s.createdAt?.slice(0, 10) !== filters.date) return false;
 
       return true;

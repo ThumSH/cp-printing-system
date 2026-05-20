@@ -49,6 +49,9 @@ const INITIAL_FORM_STATE: Omit<DevelopmentForm, 'id'> = {
 };
 
 // ── Colour Master Select ──────────────────────────────────────────────────────
+// Multi-select body colour picker
+// value: comma-separated string e.g. "R-1-Red, BK-1-Black"
+// Pipeline treats this as one record with combined colours — bulk qty applies to the whole component.
 function ColourMasterSelect({
   value, onChange, error,
 }: { value: string; onChange: (val: string) => void; error?: string }) {
@@ -61,12 +64,30 @@ function ColourMasterSelect({
 
   useEffect(() => { fetchColours(); }, [fetchColours]);
 
+  // Parse comma-separated string into array
+  const selected: string[] = value
+    ? value.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+
+  const toggleColour = (name: string) => {
+    const next = selected.includes(name)
+      ? selected.filter(s => s !== name)
+      : [...selected, name];
+    onChange(next.join(', '));
+  };
+
+  const removeColour = (name: string) => {
+    onChange(selected.filter(s => s !== name).join(', '));
+  };
+
   const handleAddNew = async () => {
     if (!newName.trim()) { setAddError('Name is required'); return; }
     setAdding(true); setAddError('');
     try {
       const saved = await addColour(newName.trim(), newHex.trim() || undefined);
-      onChange(saved.name);
+      // Auto-select the newly added colour
+      const next = [...selected, saved.name];
+      onChange(next.join(', '));
       setNewName(''); setNewHex(''); setShowAddNew(false);
     } catch (e) {
       setAddError(e instanceof Error ? e.message : 'Failed to add colour');
@@ -75,30 +96,57 @@ function ColourMasterSelect({
 
   return (
     <div className="space-y-2">
+      {/* Selected colour chips */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map(name => {
+            const hex = colours.find(c => c.name === name)?.hexCode;
+            return (
+              <span key={name}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+                {hex && (
+                  <span className="w-3 h-3 rounded-full border border-slate-300 shrink-0"
+                    style={{ backgroundColor: hex }} />
+                )}
+                {name}
+                <button type="button" onClick={() => removeColour(name)}
+                  className="ml-0.5 text-slate-400 hover:text-red-500 transition-colors">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Dropdown */}
       <div className="flex-1 relative">
-        {value && colours.find(c => c.name === value)?.hexCode && (
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border border-slate-300 shrink-0 z-10"
-            style={{ backgroundColor: colours.find(c => c.name === value)?.hexCode || undefined }} />
-        )}
-        <select value={value}
+        <select
+          value=""
           onChange={(e) => {
-            if (e.target.value === '__add_new__') { setShowAddNew(true); }
-            else { onChange(e.target.value); setShowAddNew(false); }
+            if (e.target.value === '__add_new__') { setShowAddNew(true); e.target.value = ''; }
+            else if (e.target.value) { toggleColour(e.target.value); e.target.value = ''; }
           }}
-          className={`w-full px-3 py-2 border rounded-lg outline-none transition-all sm:text-sm ${
-            value && colours.find(c => c.name === value)?.hexCode ? 'pl-9' : ''
-          } ${error ? 'border-red-400 focus:ring-2 focus:ring-red-200 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600'}`}
+          className={`w-full px-3 py-2 border rounded-lg outline-none transition-all sm:text-sm
+            ${error ? 'border-red-400 focus:ring-2 focus:ring-red-200 bg-red-50'
+                    : 'border-slate-300 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600'}`}
         >
-          <option value="">Select body colour...</option>
+          <option value="">{selected.length > 0 ? '+ Add another colour...' : 'Select body colour(s)...'}</option>
           {loading && <option disabled>Loading colours...</option>}
-          {colours.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+          {colours.map((c) => (
+            <option key={c.id} value={c.name}
+              disabled={selected.includes(c.name)}>
+              {selected.includes(c.name) ? '✓ ' : ''}{c.name}
+            </option>
+          ))}
           <option value="__add_new__">＋ Add new colour...</option>
         </select>
       </div>
 
       <AnimatePresence>
         {showAddNew && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
             <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
               <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide">Add New Colour</p>
               <div className="flex gap-2">
@@ -291,12 +339,20 @@ export default function DevelopmentPage() {
       id: editingId ?? Math.random().toString(36).substr(2, 9),
     };
 
-    if (editingId) {
-      await updateJob(editingId, jobData as any);
-      setEditingId(null);
-    } else {
-      await addJob(jobData as any);
+    try {
+      if (editingId) {
+        await updateJob(editingId, jobData as any);
+        setEditingId(null);
+      } else {
+        await addJob(jobData as any);
+      }
+    } catch (e) {
+      setErrors(prev => ({ ...prev, submit: e instanceof Error ? e.message : 'Failed to save.' }));
+      return;
     }
+
+    // Force-refresh sampleStyles so thumbnails + lock state update immediately
+    await fetchStyles(true);
 
     setFormData(INITIAL_FORM_STATE);
     setArtworkFile(null);
@@ -371,6 +427,7 @@ export default function DevelopmentPage() {
   const isFiltered = !!(filterCustomer || filterStyle || filterComponent);
 
   // Unique customers and components for dropdowns
+  const uniqueCustomers = useMemo(() => Array.from(new Set(submissions.map(s => s.customer))).sort(), [submissions]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12">
@@ -693,7 +750,11 @@ export default function DevelopmentPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="text-sm text-slate-900 font-medium">{sub.bodyColour}</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(sub.bodyColour || '').split(',').map(c => c.trim()).filter(Boolean).map(c => (
+                              <span key={c} className="inline-flex items-center rounded-full bg-slate-100 border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">{c}</span>
+                            ))}
+                          </div>
                           <p className="text-xs text-slate-500 mt-0.5">Wash: {sub.washingStandard}</p>
                         </td>
                         <td className="px-6 py-4">

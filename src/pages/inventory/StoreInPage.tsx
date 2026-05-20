@@ -96,6 +96,7 @@ export default function StoreInPage() {
   const [activeSubmissionId, setActiveSubmissionId] = useState('');
   const [activeCutBundles, setActiveCutBundles] = useState<BundleFormRow[]>([makeBundleRow(1)]);
   const [activeCutQty, setActiveCutQty] = useState('');
+  const [cutQtyConfirmed, setCutQtyConfirmed] = useState(false);
   const [editingCutTempId, setEditingCutTempId] = useState<string | null>(null);
   const [savedCuts, setSavedCuts] = useState<SavedCut[]>([]);
 
@@ -113,7 +114,7 @@ export default function StoreInPage() {
   const [isSavingToDb, setIsSavingToDb] = useState(false);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, { isLocked: boolean }>>({});
-  const [, setSystemStyleSchedules] = useState<StyleScheduleOption[]>([]);
+  const [systemStyleSchedules, setSystemStyleSchedules] = useState<StyleScheduleOption[]>([]);
   const [searchText, setSearchText] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
@@ -182,6 +183,8 @@ export default function StoreInPage() {
   const isComponentConfirmed = (subId: string) => !!confirmedInQty[subId];
 
   const anyComponentConfirmed = styleComponents.some(c => isComponentConfirmed(c.submissionId));
+  const allComponentsConfirmed = styleComponents.length > 0 &&
+    styleComponents.every(c => isComponentConfirmed(c.submissionId));
 
   const confirmComponentInQty = (subId: string) => {
     if (getComponentInQty(subId) <= 0) return;
@@ -402,6 +405,58 @@ export default function StoreInPage() {
   };
 
   // ── Save to staging (one entry per confirmed component) ───────────────────
+  const handleSaveToTable = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    const confirmedComps = styleComponents.filter(c => isComponentConfirmed(c.submissionId));
+    const newEntries: StagedEntry[] = confirmedComps
+      .filter(comp => savedCuts.some(c => c.submissionId === comp.submissionId))
+      .map(comp => {
+        const compCuts  = savedCuts.filter(c => c.submissionId === comp.submissionId);
+        const compInQty = getComponentInQty(comp.submissionId);
+        return {
+          tempId:       crypto.randomUUID(),
+          styleNo:      selectedStyleNo,
+          customerName: selectedCustomer,
+          components:   comp.components,
+          scheduleNo:   scheduleNo.trim(),
+          cutInDate,
+          inQty:        compInQty,
+          cuts: compCuts.map(c => ({
+            cutNo:        c.cutNo,
+            cutQty:       c.cutQty,
+            submissionId: c.submissionId,
+            bundles:      c.bundles,
+          })),
+        };
+      });
+
+    if (newEntries.length === 0) return;
+
+    setStagedEntries(prev => [...prev, ...newEntries]);
+    setSuccessMsg('Added ' + newEntries.length + ' component record(s) to staging.');
+    setTimeout(() => setSuccessMsg(''), 4000);
+
+    // Clear only confirmed components; keep unconfirmed ones
+    const confirmedSubIds = new Set(confirmedComps.map(c => c.submissionId));
+    setSavedCuts(prev => prev.filter(c => !confirmedSubIds.has(c.submissionId)));
+    setConfirmedInQty(prev => {
+      const next = { ...prev };
+      confirmedSubIds.forEach(id => delete next[id]);
+      return next;
+    });
+    setComponentInQty(prev => {
+      const next = { ...prev };
+      confirmedSubIds.forEach(id => delete next[id]);
+      return next;
+    });
+    setActiveCutBundles([makeBundleRow(1)]);
+    setActiveCutQty('');
+    setActiveSubmissionId('');
+    setErrors({});
+    setPageError('');
+  };
 
   // ── Stage a single component ─────────────────────────────────────────────
   const stageComponent = (comp: EligibleStoreInItem) => {
@@ -860,19 +915,46 @@ export default function StoreInPage() {
                                 </span>
                                 <div className="space-y-0.5">
                                   <label className="block text-[10px] font-medium text-slate-500">Cut Qty <span className="text-red-500">*</span></label>
-                                  <input
-                                    type="text" inputMode="numeric" pattern="[0-9]*"
-                                    value={activeCutQty}
-                                    onChange={e => { setActiveCutQty(e.target.value.replace(/[^0-9]/g, '')); if (cutErrors.cutQty) setCutErrors(p => ({ ...p, cutQty: '' })); }}
-                                    placeholder="e.g. 100" autoFocus
-                                    className={'w-28 rounded-lg border px-3 py-1.5 text-sm font-bold outline-none ' + (cutErrors.cutQty ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-indigo-500')} />
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text" inputMode="numeric" pattern="[0-9]*"
+                                      value={activeCutQty}
+                                      onChange={e => {
+                                        setActiveCutQty(e.target.value.replace(/[^0-9]/g, ''));
+                                        setCutQtyConfirmed(false); // reset confirmation if qty changes
+                                        if (cutErrors.cutQty) setCutErrors(p => ({ ...p, cutQty: '' }));
+                                      }}
+                                      placeholder="e.g. 100" autoFocus
+                                      disabled={cutQtyConfirmed}
+                                      className={'w-28 rounded-lg border px-3 py-1.5 text-sm font-bold outline-none ' + (cutQtyConfirmed ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : cutErrors.cutQty ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-indigo-500')} />
+                                    {!cutQtyConfirmed ? (
+                                      <button type="button"
+                                        onClick={() => {
+                                          if (!activeCutQty || parseInt(activeCutQty) <= 0) {
+                                            setCutErrors(p => ({ ...p, cutQty: 'Cut Qty must be > 0' }));
+                                            return;
+                                          }
+                                          setCutQtyConfirmed(true);
+                                          setCutErrors(p => ({ ...p, cutQty: '' }));
+                                        }}
+                                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">
+                                        Confirm Qty →
+                                      </button>
+                                    ) : (
+                                      <button type="button"
+                                        onClick={() => setCutQtyConfirmed(false)}
+                                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50">
+                                        Edit
+                                      </button>
+                                    )}
+                                  </div>
                                   {cutErrors.cutQty && <p className="text-[10px] text-red-600">{cutErrors.cutQty}</p>}
                                 </div>
                               </div>
 
-                              {cutErrors.bundles && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{cutErrors.bundles}</p>}
+                              {cutQtyConfirmed && cutErrors.bundles && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{cutErrors.bundles}</p>}
 
-                              <div className="space-y-2">
+                              {cutQtyConfirmed && <div className="space-y-2">
                                 <div className="grid grid-cols-12 gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-400 px-1">
                                   <div className="col-span-3">Bundle No <span className="text-red-400">*</span></div>
                                   <div className="col-span-2">Qty <span className="text-red-400">*</span></div>
@@ -921,11 +1003,12 @@ export default function StoreInPage() {
                                   className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 mt-1">
                                   <Plus className="h-3 w-3" /> Add Bundle
                                 </button>
-                              </div>
+                              </div>}
 
                               <div className="flex gap-2 pt-2 border-t border-slate-200">
                                 <button type="button" onClick={handleSaveCut}
-                                  className={'inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-bold text-white ' + (editingCutTempId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700')}>
+                                  disabled={!cutQtyConfirmed}
+                                  className={'inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed ' + (editingCutTempId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700')}>
                                   <Save className="h-3.5 w-3.5" />
                                   {editingCutTempId ? 'Update Cut' : 'Save Cut'}
                                 </button>

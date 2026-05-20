@@ -123,10 +123,23 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
       body: JSON.stringify(job),
     });
 
-    if (res.ok) {
-      const savedJob = await res.json();
-      set((state) => ({ jobs: [savedJob, ...state.jobs] }));
-    }
+    if (!res.ok) throw new Error(await res.text());
+
+    // Controller returns { job, sampleStyle } — extract just the job
+    const data = await res.json();
+    const savedJob: DevelopmentJob = data.job ?? data;
+
+    set((state) => ({ jobs: [savedJob, ...state.jobs] }));
+
+    // Also refresh from server to ensure SampleStyles store is in sync
+    // (controller auto-creates a linked SampleStyle on job creation)
+    try {
+      const jobsRes = await fetch(`${API_URL}/jobs`, { headers: getHeaders() });
+      if (jobsRes.ok) {
+        const jobs = await jobsRes.json();
+        set({ jobs });
+      }
+    } catch { /* non-fatal */ }
   },
 
   updateJob: async (id, updatedJob) => {
@@ -136,11 +149,11 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
       body: JSON.stringify(updatedJob),
     });
 
-    if (res.ok) {
-      set((state) => ({
-        jobs: state.jobs.map((job) => (job.id === id ? updatedJob : job)),
-      }));
-    }
+    if (!res.ok) throw new Error(await res.text());
+
+    set((state) => ({
+      jobs: state.jobs.map((job) => (job.id === id ? updatedJob : job)),
+    }));
   },
 
   deleteJob: async (id) => {

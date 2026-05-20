@@ -7,6 +7,7 @@ export interface SampleStyleRevision {
   id: string;
   revisionNo: number;
   comment: string;
+  artworkUrl?: string;   // artwork at time of this revision
   createdAt: string;
   createdBy: string;
 }
@@ -62,7 +63,7 @@ interface SampleStyleStore {
 
   fetchStyles: (force?: boolean) => Promise<void>;
   uploadImage: (id: string, file: File) => Promise<SampleStyle>;
-  addRevision: (id: string, comment: string) => Promise<SampleStyle>;
+  addRevision: (id: string, comment: string, artworkUrl?: string) => Promise<SampleStyle>;
   toggleClientApprove: (id: string) => Promise<SampleStyle>;
   submitToAdmin: (id: string, data: {
     rcMeetingDate: string;
@@ -74,6 +75,7 @@ interface SampleStyleStore {
 }
 
 const BASE      = `${API.BASE}/api/samplestyle`;
+const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
 export const useSampleStyleStore = create<SampleStyleStore>((set, get) => ({
   styles:        [],
@@ -129,11 +131,11 @@ export const useSampleStyleStore = create<SampleStyleStore>((set, get) => ({
   },
 
   // ── Add revision comment ────────────────────────────────────────────────────
-  addRevision: async (id, comment) => {
+  addRevision: async (id, comment, artworkUrl) => {
     const res = await fetch(`${BASE}/${id}/revisions`, {
       method:  'POST',
       headers: getAuthHeaders(),
-      body:    JSON.stringify({ comment }),
+      body:    JSON.stringify({ comment, artworkUrl: artworkUrl ?? null }),
     });
     if (!res.ok) throw new Error(await res.text());
     const updated: SampleStyle = await res.json();
