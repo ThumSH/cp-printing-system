@@ -2,6 +2,16 @@
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
 
+// ── Revision entry ────────────────────────────────────────────────────────────
+export interface SampleStyleRevision {
+  id: string;
+  revisionNo: number;
+  comment: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+// ── Sample style ──────────────────────────────────────────────────────────────
 export interface SampleStyle {
   id: string;
   developmentJobId: string;
@@ -13,15 +23,24 @@ export interface SampleStyle {
   printColour: string;
   printColourQty: string;
   washingStandard: string;
-  component: string;  // single component: Front, Back, Sleeve, etc.
+  component: string;          // "Front" | "Back" | "Sleeve" etc.
   imagePath?: string;
+
+  // Revision thread
+  revisions: SampleStyleRevision[];
+
+  // Developer workflow
   clientApproved: boolean;
   clientApprovedAt?: string;
   clientApprovedBy?: string;
+
+  // Admin approval
   adminStatus: 'Pending' | 'Approved';
   adminRemarks?: string;
   adminActionAt?: string;
   adminActionBy?: string;
+
+  // Submission details
   rcMeetingDate?: string;
   acNumber?: string;
   boardSet?: string;
@@ -29,134 +48,138 @@ export interface SampleStyle {
   developerComments?: string;
   submittedToAdmin: boolean;
   submittedAt?: string;
+
   createdAt: string;
   updatedAt: string;
 }
 
+// ── Store interface ───────────────────────────────────────────────────────────
 interface SampleStyleStore {
   styles: SampleStyle[];
   loading: boolean;
   refreshing: boolean;
-  error: string | null;
   lastFetchedAt: number | null;
 
   fetchStyles: (force?: boolean) => Promise<void>;
-  addStyle: (style: SampleStyle) => void;
   uploadImage: (id: string, file: File) => Promise<SampleStyle>;
+  addRevision: (id: string, comment: string) => Promise<SampleStyle>;
   toggleClientApprove: (id: string) => Promise<SampleStyle>;
   submitToAdmin: (id: string, data: {
     rcMeetingDate: string;
-    acNumber?: string;
     boardSet?: string;
     bulkQty: string;
     developerComments?: string;
   }) => Promise<SampleStyle>;
   adminAction: (id: string, status: 'Approved' | 'Pending', remarks?: string) => Promise<SampleStyle>;
-  reviseStyle: (id: string, data: {
-    extraBulkQty: string;
-    rcMeetingDate?: string;
-    acNumber?: string;
-    boardSet?: string;
-    comments?: string;
-  }) => Promise<SampleStyle>;
 }
 
-const BASE = `${API.BASE}/api/samplestyle`;
-const CACHE_TTL = 30 * 1000; // 30 seconds — keeps UI snappy without hammering the server
+const BASE      = `${API.BASE}/api/samplestyle`;
 
 export const useSampleStyleStore = create<SampleStyleStore>((set, get) => ({
-  styles: [],
-  loading: false,
-  refreshing: false,
-  error: null,
+  styles:        [],
+  loading:       false,
+  refreshing:    false,
   lastFetchedAt: null,
 
+  // ── Fetch all ───────────────────────────────────────────────────────────────
   fetchStyles: async (force = false) => {
     const { loading, refreshing, lastFetchedAt, styles } = get();
     if (loading || refreshing) return;
 
-    const fresh = lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL;
+    // Only skip if not forced AND cache is fresh (30 seconds max — short enough
+    // that navigating away and back always gets the latest revisions from the server)
+    const CACHE_TTL_SHORT = 30 * 1000;
+    const fresh = lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_SHORT;
     if (!force && fresh) return;
 
     const hasData = styles.length > 0;
-    set(hasData ? { refreshing: true, error: null } : { loading: true, error: null });
+    set(hasData ? { refreshing: true } : { loading: true });
 
     try {
       const res = await fetch(BASE, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
+      if (!res.ok) throw new Error(await res.text());
       const data: SampleStyle[] = await res.json();
-      set({ styles: data, lastFetchedAt: Date.now(), loading: false, refreshing: false, error: null });
+      // Ensure revisions is always an array
+      const normalized = data.map(s => ({ ...s, revisions: s.revisions ?? [] }));
+      set({ styles: normalized, lastFetchedAt: Date.now() });
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to load styles';
-      console.error('sampleStyleStore.fetchStyles:', message);
-      set({ loading: false, refreshing: false, error: message });
+      console.error('Failed to fetch sample styles:', e);
+    } finally {
+      set({ loading: false, refreshing: false });
     }
   },
 
-  addStyle: (style: SampleStyle) => {
-    set((state) => ({ styles: [style, ...state.styles] }));
-  },
-
+  // ── Upload image ────────────────────────────────────────────────────────────
   uploadImage: async (id, file) => {
     const formData = new FormData();
     formData.append('file', file);
     const headers = getAuthHeaders();
     delete (headers as any)['Content-Type'];
-    const res = await fetch(`${BASE}/${id}/image`, { method: 'POST', headers, body: formData });
+
+    const res = await fetch(`${BASE}/${id}/image`, {
+      method: 'POST',
+      headers,
+      body:   formData,
+    });
     if (!res.ok) throw new Error(await res.text());
     const updated: SampleStyle = await res.json();
-    set((state) => ({ styles: state.styles.map((s) => (s.id === id ? updated : s)) }));
+    updated.revisions = updated.revisions ?? [];
+    set(state => ({ styles: state.styles.map(s => s.id === id ? updated : s) }));
     return updated;
   },
 
+  // ── Add revision comment ────────────────────────────────────────────────────
+  addRevision: async (id, comment) => {
+    const res = await fetch(`${BASE}/${id}/revisions`, {
+      method:  'POST',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify({ comment }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const updated: SampleStyle = await res.json();
+    updated.revisions = updated.revisions ?? [];
+    set(state => ({ styles: state.styles.map(s => s.id === id ? updated : s) }));
+    return updated;
+  },
+
+  // ── Toggle client approve ───────────────────────────────────────────────────
   toggleClientApprove: async (id) => {
-    const res = await fetch(`${BASE}/${id}/clientapprove`, { method: 'PATCH', headers: getAuthHeaders() });
+    const res = await fetch(`${BASE}/${id}/clientapprove`, {
+      method:  'PATCH',
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(await res.text());
     const updated: SampleStyle = await res.json();
-    set((state) => ({ styles: state.styles.map((s) => (s.id === id ? updated : s)) }));
+    updated.revisions = updated.revisions ?? [];
+    set(state => ({ styles: state.styles.map(s => s.id === id ? updated : s) }));
     return updated;
   },
 
+  // ── Submit to admin ─────────────────────────────────────────────────────────
   submitToAdmin: async (id, data) => {
     const res = await fetch(`${BASE}/${id}/submit`, {
-      method: 'PATCH',
+      method:  'PATCH',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data),
+      body:    JSON.stringify(data),
     });
     if (!res.ok) throw new Error(await res.text());
     const updated: SampleStyle = await res.json();
-    set((state) => ({ styles: state.styles.map((s) => (s.id === id ? updated : s)) }));
+    updated.revisions = updated.revisions ?? [];
+    set(state => ({ styles: state.styles.map(s => s.id === id ? updated : s) }));
     return updated;
   },
 
-  reviseStyle: async (id, data) => {
-    const res = await fetch(`${BASE}/${id}/revise`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({
-        extraBulkQty: data.extraBulkQty,
-        rcMeetingDate: data.rcMeetingDate,
-        acNumber: data.acNumber,
-        boardSet: data.boardSet,
-        comments: data.comments,
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const newStyle: SampleStyle = await res.json();
-    // Add the new revision to the store
-    set((state) => ({ styles: [newStyle, ...state.styles] }));
-    return newStyle;
-  },
-
+  // ── Admin action ────────────────────────────────────────────────────────────
   adminAction: async (id, status, remarks) => {
     const res = await fetch(`${BASE}/${id}/adminaction`, {
-      method: 'PATCH',
+      method:  'PATCH',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ status, remarks }),
+      body:    JSON.stringify({ status, remarks }),
     });
     if (!res.ok) throw new Error(await res.text());
     const updated: SampleStyle = await res.json();
-    set((state) => ({ styles: state.styles.map((s) => (s.id === id ? updated : s)) }));
+    updated.revisions = updated.revisions ?? [];
+    set(state => ({ styles: state.styles.map(s => s.id === id ? updated : s) }));
     return updated;
   },
 }));

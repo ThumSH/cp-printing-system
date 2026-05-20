@@ -9,6 +9,7 @@ import {
   Image as ImageIcon, AlertCircle, Loader2, X, Copy,
 } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
+import { useSampleStyleStore } from '../../store/sampleStyleStore';
 import { useColourMasterStore } from '../../store/colourMasterStore';
 import { API, getAuthHeaders } from '../../api/client';
 
@@ -142,8 +143,15 @@ function ColourMasterSelect({
 export default function DevelopmentPage() {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const { jobs: submissions, addJob, updateJob, deleteJob, fetchData } = useDevelopmentStore();
+  const { styles: sampleStyles, fetchStyles } = useSampleStyleStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Table filter/pagination
+  const [showAllJobs, setShowAllJobs] = useState(false);
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterStyle, setFilterStyle] = useState('');
+  const [filterComponent, setFilterComponent] = useState('');
 
   // Copy-from feature
   const [copyFromId, setCopyFromId] = useState('');
@@ -153,7 +161,7 @@ export default function DevelopmentPage() {
   const [artworkBlobUrl, setArtworkBlobUrl] = useState('');
   const [uploadingArtwork, setUploadingArtwork] = useState(false);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); fetchStyles(true); }, []);
 
   // Unique styles for the copy-from dropdown
   // Group by StyleNo + Customer to avoid duplicates
@@ -194,7 +202,11 @@ export default function DevelopmentPage() {
     });
 
     // Restore artwork preview from server URL
-    setArtworkBlobUrl(source.artworkPreviewUrl ? `${API.BASE}${source.artworkPreviewUrl}` : '');
+    setArtworkBlobUrl(source.artworkPreviewUrl
+      ? source.artworkPreviewUrl.startsWith('http')
+        ? source.artworkPreviewUrl
+        : `${API.BASE}/api/development/image?path=${encodeURIComponent(source.artworkPreviewUrl)}`
+      : '');
     setArtworkFile(null);
     setCopyApplied(true);
     setErrors({});
@@ -229,7 +241,8 @@ export default function DevelopmentPage() {
     const res = await fetch(`${API.BASE}/api/development/artwork`, { method: 'POST', headers, body: formData });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    return data.url;
+    // Store full URL so it works as a plain <img src> everywhere
+    return data.url.startsWith('http') ? data.url : `${API.BASE}${data.url}`;
   };
 
   const validateForm = (): boolean => {
@@ -296,15 +309,24 @@ export default function DevelopmentPage() {
     setFormData(submission);
     setEditingId(submission.id);
     setArtworkFile(null);
-    setArtworkBlobUrl(submission.artworkPreviewUrl ? `${API.BASE}${submission.artworkPreviewUrl}` : '');
+    setArtworkBlobUrl(submission.artworkPreviewUrl
+      ? submission.artworkPreviewUrl.startsWith('http')
+        ? submission.artworkPreviewUrl
+        : `${API.BASE}/api/development/image?path=${encodeURIComponent(submission.artworkPreviewUrl)}`
+      : '');
     setCopyFromId('');
     setCopyApplied(false);
     setErrors({});
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('Delete this development record?')) deleteJob(id);
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Delete this development job? This cannot be undone.')) return;
+    try {
+      await deleteJob(id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to delete job.');
+    }
   };
 
   const resetForm = () => {
@@ -317,10 +339,38 @@ export default function DevelopmentPage() {
     setErrors({});
   };
 
-  const previewUrl = artworkBlobUrl || (formData.artworkPreviewUrl ? `${API.BASE}${formData.artworkPreviewUrl}` : '');
+  // Build image URL — full URLs used directly; relative paths go through image endpoint
+  const buildImageUrl = (path?: string) => {
+    if (!path) return '';
+    if (path.startsWith('http')) return path;
+    return `${API.BASE}/api/development/image?path=${encodeURIComponent(path)}`;
+  };
+  const previewUrl = artworkBlobUrl || buildImageUrl(formData.artworkPreviewUrl);
+
+  // A job is locked if any of its linked SampleStyles are client-approved or submitted to admin
+  const isJobLocked = (jobId: string): boolean => {
+    return sampleStyles.some(
+      s => s.developmentJobId === jobId && (s.clientApproved || s.submittedToAdmin)
+    );
+  };
 
   // Fields that are locked when copied (shared across components of same style)
   const lockedFields = copyApplied && !editingId;
+
+  // Filter + paginate jobs table
+  const filteredJobs = useMemo(() => {
+    let list = [...submissions];
+    if (filterCustomer) list = list.filter(s => s.customer.toLowerCase().includes(filterCustomer.toLowerCase()));
+    if (filterStyle)    list = list.filter(s => s.styleNo.toLowerCase().includes(filterStyle.toLowerCase()));
+    if (filterComponent) list = list.filter(s => ((s as any).component || '').toLowerCase() === filterComponent.toLowerCase());
+    return list;
+  }, [submissions, filterCustomer, filterStyle, filterComponent]);
+
+  const displayedJobs = showAllJobs ? filteredJobs : filteredJobs.slice(0, 10);
+  const hasMore = filteredJobs.length > 10;
+  const isFiltered = !!(filterCustomer || filterStyle || filterComponent);
+
+  // Unique customers and components for dropdowns
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12">
@@ -387,7 +437,13 @@ export default function DevelopmentPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} noValidate className="space-y-8">
+        <form onSubmit={handleSubmit} noValidate className="space-y-8"
+          onKeyDown={(e) => {
+            // Prevent Enter key from submitting — avoids accidental duplication
+            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'BUTTON') {
+              e.preventDefault();
+            }
+          }}>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
             {[
@@ -559,9 +615,38 @@ export default function DevelopmentPage() {
       {/* ── JOBS TABLE ───────────────────────────────────────────────────────── */}
       {submissions.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-8">
-          <div className="p-6 border-b border-slate-200">
-            <h3 className="text-lg font-semibold text-slate-800">Development Jobs</h3>
-            <p className="text-xs text-slate-400 mt-1">Each row = one component of a style. Same Style No may appear multiple times with different components.</p>
+          <div className="p-6 border-b border-slate-200 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">Development Jobs</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Each row = one component of a style. Same Style No may appear multiple times with different components.</p>
+              </div>
+              <span className="text-xs text-slate-400">{filteredJobs.length} record{filteredJobs.length !== 1 ? 's' : ''}</span>
+            </div>
+            {/* Filters */}
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="text" value={filterCustomer} onChange={e => { setFilterCustomer(e.target.value); setShowAllJobs(false); }}
+                placeholder="Filter by customer…"
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400 w-40"
+              />
+              <input
+                type="text" value={filterStyle} onChange={e => { setFilterStyle(e.target.value); setShowAllJobs(false); }}
+                placeholder="Filter by style no…"
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400 w-40"
+              />
+              <select value={filterComponent} onChange={e => { setFilterComponent(e.target.value); setShowAllJobs(false); }}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400">
+                <option value="">All components</option>
+                {COMPONENT_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              {isFiltered && (
+                <button onClick={() => { setFilterCustomer(''); setFilterStyle(''); setFilterComponent(''); setShowAllJobs(false); }}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap min-w-max">
@@ -578,8 +663,12 @@ export default function DevelopmentPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 <AnimatePresence>
-                  {submissions.map((sub) => {
-                    const thumbUrl = sub.artworkPreviewUrl ? `${API.BASE}${sub.artworkPreviewUrl}` : '';
+                  {displayedJobs.map((sub) => {
+                    const thumbUrl = sub.artworkPreviewUrl
+                      ? sub.artworkPreviewUrl.startsWith('http')
+                        ? sub.artworkPreviewUrl
+                        : `${API.BASE}/api/development/image?path=${encodeURIComponent(sub.artworkPreviewUrl)}`
+                      : '';
                     return (
                       <motion.tr key={sub.id}
                         initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
@@ -617,8 +706,19 @@ export default function DevelopmentPage() {
                           <p>Del: <span className="font-medium text-slate-900">{sub.sampleDeliveryDate}</span></p>
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
-                          <button onClick={() => handleEdit(sub as any)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>
-                          <button onClick={() => handleDelete(sub.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                          <button onClick={() => handleEdit(sub as any)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>
+                          {isJobLocked(sub.id) ? (
+                            <span title="Locked: sample style is client-approved or submitted to admin"
+                              className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-400 cursor-not-allowed">
+                              🔒 Locked
+                            </span>
+                          ) : (
+                            <button onClick={() => handleDelete(sub.id)}
+                              className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                              title="Delete this job">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </td>
                       </motion.tr>
                     );
@@ -627,6 +727,25 @@ export default function DevelopmentPage() {
               </tbody>
             </table>
           </div>
+          {/* Show more / show less */}
+          {!showAllJobs && hasMore && (
+            <div className="border-t border-slate-100 px-6 py-3 flex items-center justify-between bg-slate-50/50">
+              <span className="text-xs text-slate-400">Showing 10 of {filteredJobs.length} jobs</span>
+              <button onClick={() => setShowAllJobs(true)}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline">
+                Show all {filteredJobs.length} →
+              </button>
+            </div>
+          )}
+          {showAllJobs && filteredJobs.length > 10 && (
+            <div className="border-t border-slate-100 px-6 py-3 flex items-center justify-between bg-slate-50/50">
+              <span className="text-xs text-slate-400">Showing all {filteredJobs.length} jobs</span>
+              <button onClick={() => setShowAllJobs(false)}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-700 hover:underline">
+                ↑ Show recent 10
+              </button>
+            </div>
+          )}
         </div>
       )}
     </motion.div>

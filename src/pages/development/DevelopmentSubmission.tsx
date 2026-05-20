@@ -139,7 +139,6 @@ export default function DevelopmentSubmission() {
     try {
       await submitToAdmin(selected.id, {
         rcMeetingDate: form.rcMeetingDate,
-        acNumber: form.acNumber || undefined,
         boardSet: form.boardSet || undefined,
         bulkQty: form.bulkQty,
         developerComments: form.developerComments || undefined,

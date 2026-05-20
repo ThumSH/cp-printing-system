@@ -63,39 +63,70 @@ function StatusBadge({ style }: { style: SampleStyle }) {
 
 // ── expandable detail panel ───────────────────────────────────────────────────
 function DetailPanel({ style }: { style: SampleStyle }) {
-  const component = (style as any).component || '';
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-sm">
-      <div><p className="text-xs text-slate-500 font-medium">Print Colour</p><p className="font-semibold text-slate-800">{style.printColour || '—'}</p></div>
-      <div><p className="text-xs text-slate-500 font-medium">Print Colour Qty</p><p className="font-semibold text-slate-800">{style.printColourQty || '—'}</p></div>
-      <div><p className="text-xs text-slate-500 font-medium">Washing Standard</p><p className="font-semibold text-slate-800">{style.washingStandard || '—'}</p></div>
-      <div><p className="text-xs text-slate-500 font-medium">Technique</p><p className="font-semibold text-slate-800">{style.printingTechnique || '—'}</p></div>
-      {component && (
-        <div className="col-span-2 md:col-span-4">
-          <p className="text-xs text-slate-500 font-medium mb-1">Component</p>
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">{component}</span>
+    <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+
+      {/* Print details */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div><p className="text-xs text-slate-500 font-medium">Component</p>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">
+            {style.component || '—'}
+          </span>
+        </div>
+        <div><p className="text-xs text-slate-500 font-medium">Print Colour</p><p className="font-semibold text-slate-800">{style.printColour || '—'}</p></div>
+        <div><p className="text-xs text-slate-500 font-medium">Print Qty</p><p className="font-semibold text-slate-800">{style.printColourQty || '—'}</p></div>
+        <div><p className="text-xs text-slate-500 font-medium">Washing</p><p className="font-semibold text-slate-800">{style.washingStandard || '—'}</p></div>
+        <div><p className="text-xs text-slate-500 font-medium">Technique</p><p className="font-semibold text-slate-800">{style.printingTechnique || '—'}</p></div>
+      </div>
+
+      {/* Revision history */}
+      {style.revisions && style.revisions.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
+            Revision History ({style.revisions.length})
+          </p>
+          <div className="space-y-1.5">
+            {style.revisions.map((rev) => (
+              <div key={rev.id} className="flex gap-3 items-start rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black flex items-center justify-center">
+                  {rev.revisionNo}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-slate-700">{rev.comment}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{rev.createdAt} · {rev.createdBy}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
+
+      {/* Submission details */}
       {style.submittedToAdmin && (
-        <>
-          <div><p className="text-xs text-slate-500 font-medium">RC Meeting Date</p><p className="font-semibold text-slate-800">{style.rcMeetingDate || '—'}</p></div>
-          <div><p className="text-xs text-slate-500 font-medium">AC Number</p><p className="font-semibold text-slate-800">{style.acNumber || '—'}</p></div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+          <div><p className="text-xs text-slate-500 font-medium">RA Meeting Date</p><p className="font-semibold text-slate-800">{style.rcMeetingDate || '—'}</p></div>
           <div><p className="text-xs text-slate-500 font-medium">Board Set</p><p className="font-semibold text-slate-800">{style.boardSet || '—'}</p></div>
           <div><p className="text-xs text-slate-500 font-medium">Bulk Qty</p><p className="font-semibold text-slate-800">{style.bulkQty || '—'}</p></div>
           <div><p className="text-xs text-slate-500 font-medium">Submitted At</p><p className="font-semibold text-slate-800">{style.submittedAt?.slice(0, 10) || '—'}</p></div>
-        </>
-      )}
-      {style.adminStatus === 'Approved' && (
-        <>
-          <div><p className="text-xs text-slate-500 font-medium">Admin Action By</p><p className="font-semibold text-slate-800">{style.adminActionBy || '—'}</p></div>
-          <div><p className="text-xs text-slate-500 font-medium">Admin Action At</p><p className="font-semibold text-slate-800">{style.adminActionAt?.slice(0, 10) || '—'}</p></div>
-          {style.adminRemarks && (
-            <div className="col-span-2 md:col-span-4">
-              <p className="text-xs text-slate-500 font-medium">Admin Remarks</p>
-              <p className="font-semibold text-slate-800">{style.adminRemarks}</p>
+          {style.developerComments && (
+            <div className="col-span-2 md:col-span-3">
+              <p className="text-xs text-slate-500 font-medium">Developer Comments</p>
+              <p className="font-semibold text-slate-800">{style.developerComments}</p>
             </div>
           )}
-        </>
+        </div>
+      )}
+
+      {/* Admin action */}
+      {style.adminStatus === 'Approved' && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm space-y-1">
+          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Admin Approved</p>
+          <div className="flex gap-4 text-xs text-slate-600">
+            <span>By: <span className="font-semibold">{style.adminActionBy || '—'}</span></span>
+            <span>At: <span className="font-semibold">{style.adminActionAt?.slice(0, 10) || '—'}</span></span>
+          </div>
+          {style.adminRemarks && <p className="text-xs text-slate-600">Remarks: <span className="font-semibold">{style.adminRemarks}</span></p>}
+        </div>
       )}
     </div>
   );
@@ -104,7 +135,11 @@ function DetailPanel({ style }: { style: SampleStyle }) {
 // ── row ───────────────────────────────────────────────────────────────────────
 function StyleRow({ style }: { style: SampleStyle }) {
   const [expanded, setExpanded] = useState(false);
-  const imgUrl = style.imagePath ? `${API.BASE}${style.imagePath}` : null;
+  const imgUrl = style.imagePath
+    ? style.imagePath.startsWith('http')
+      ? style.imagePath
+      : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(style.imagePath)}`
+    : null;
 
   return (
     <>

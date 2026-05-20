@@ -1,7 +1,6 @@
 // src/store/developmentStore.ts
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
-import { useSampleStyleStore } from './sampleStyleStore';
 
 export interface DevelopmentJob {
   id: string;
@@ -17,7 +16,7 @@ export interface DevelopmentJob {
   printColourQty: string;
   sampleOrderedDate: string;
   sampleDeliveryDate: string;
-  component: string;  // single component: Front, Back, Sleeve, etc.
+  component: string;
 }
 
 export interface SubmissionForm {
@@ -125,19 +124,8 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
     });
 
     if (res.ok) {
-      // Backend returns { job, sampleStyle } — unwrap both
-      const data = await res.json();
-      const savedJob   = data.job   ?? data;   // fallback if shape differs
-      const sampleStyle = data.sampleStyle;
-
-      // Update jobs list immediately
+      const savedJob = await res.json();
       set((state) => ({ jobs: [savedJob, ...state.jobs] }));
-
-      // Push the auto-created SampleStyle into sampleStyleStore immediately
-      // so Sample Styles page shows it without needing a manual refresh
-      if (sampleStyle) {
-        useSampleStyleStore.getState().addStyle(sampleStyle);
-      }
     }
   },
 
@@ -161,11 +149,15 @@ export const useDevelopmentStore = create<DevelopmentStore>((set, get) => ({
       headers: getHeaders(),
     });
 
-    if (res.ok) {
-      set((state) => ({
-        jobs: state.jobs.filter((job) => job.id !== id),
-      }));
+    if (!res.ok) {
+      const text = await res.text();
+      // Surface the "LOCKED" message from the backend clearly
+      throw new Error(text.includes('LOCKED') ? text.replace('LOCKED: ', '') : 'Failed to delete job.');
     }
+
+    set((state) => ({
+      jobs: state.jobs.filter((job) => job.id !== id),
+    }));
   },
 
   addSubmission: async (sub) => {
