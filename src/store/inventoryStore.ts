@@ -1,4 +1,10 @@
 // src/store/inventoryStore.ts
+// FIXES:
+//   - addStoreInRecord:    now re-fetches eligibleStoreInItems after success (stale data fix)
+//   - deleteStoreInRecord: now re-fetches eligibleStoreInItems after success
+//   - deleteProductionRecord: now re-fetches eligibleProductionItems after success
+//   - batchAddProductionRecords: now re-fetches eligibleProductionItems after success
+
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
 
@@ -20,7 +26,7 @@ export interface EligibleStoreInItem {
   season: string;
   components: string;
   approvedBulkQty: number;
-  remainingBulkQty: number; // NEW: global bulk balance
+  remainingBulkQty: number;
 }
 
 export interface BundleResponse {
@@ -35,6 +41,7 @@ export interface CutResponse {
   id: string;
   cutNo: string;
   cutQty: number;
+  submissionId: string;
   bundles: BundleResponse[];
 }
 
@@ -63,6 +70,8 @@ export interface BulkBalance {
   submissionId: string;
   styleNo: string;
   customerName: string;
+  component: string;
+  bodyColour: string;
   approvedBulkQty: number;
   totalInQty: number;
   remainingBulkQty: number;
@@ -83,6 +92,7 @@ export interface CreateBundleInput {
 export interface CreateCutInput {
   cutNo: string;
   cutQty: number;
+  submissionId: string;
   bundles: CreateBundleInput[];
 }
 
@@ -95,14 +105,13 @@ export interface CreateStoreInInput {
 }
 
 // ==========================================
-// PRODUCTION types (unchanged)
+// PRODUCTION types
 // ==========================================
 
 export interface ProductionCutInfo {
   cutRecordId: string;
   cutNo: string;
   cutQty: number;
-  /** The component (Part) locked in by the CPI inspection for this cut. */
   part: string;
   alreadyIssued: number;
   availableQty: number;
@@ -170,43 +179,40 @@ interface InventoryStore {
 }
 
 const API_BASE = API.INVENTORY;
- 
-const getHeaders = getAuthHeaders;
 
-const sortByDateAndRevision = (records: StoreInRecord[]) => {
-  return [...records].sort((a, b) => {
-    const bTime = new Date(b.cutInDate).getTime();
-    const aTime = new Date(a.cutInDate).getTime();
-    if (bTime !== aTime) return bTime - aTime;
+const sortByDateAndRevision = (records: StoreInRecord[]) =>
+  [...records].sort((a, b) => {
+    // Safe lexicographic sort on yyyy-MM-dd strings
+    const dateDiff = b.cutInDate.localeCompare(a.cutInDate);
+    if (dateDiff !== 0) return dateDiff;
     return b.revisionNo - a.revisionNo;
   });
-};
 
-export const useInventoryStore = create<InventoryStore>((set) => ({
-  storeInRecords: [],
-  eligibleStoreInItems: [],
-  bulkBalances: [],
-  productionRecords: [],
+export const useInventoryStore = create<InventoryStore>((set, get) => ({
+  storeInRecords:          [],
+  eligibleStoreInItems:    [],
+  bulkBalances:            [],
+  productionRecords:       [],
   eligibleProductionItems: [],
 
-  // --- STORE IN ---
+  // ── STORE IN ──────────────────────────────────────────────────────────────
 
   fetchRecords: async () => {
-    const res = await fetch(`${API_BASE}/store-in`, { headers: getHeaders() });
+    const res = await fetch(`${API_BASE}/store-in`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await res.text() || 'Failed to fetch store-in records');
     const data: StoreInRecord[] = await res.json();
     set({ storeInRecords: sortByDateAndRevision(data) });
   },
 
   fetchEligibleStoreInItems: async () => {
-    const res = await fetch(`${API_BASE}/eligible-store-in`, { headers: getHeaders() });
+    const res = await fetch(`${API_BASE}/eligible-store-in`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await res.text() || 'Failed to fetch eligible store-in items');
     const data: EligibleStoreInItem[] = await res.json();
     set({ eligibleStoreInItems: data });
   },
 
   fetchBulkBalances: async () => {
-    const res = await fetch(`${API_BASE}/bulk-balance`, { headers: getHeaders() });
+    const res = await fetch(`${API_BASE}/bulk-balance`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await res.text() || 'Failed to fetch bulk balances');
     const data: BulkBalance[] = await res.json();
     set({ bulkBalances: data });
@@ -214,59 +220,65 @@ export const useInventoryStore = create<InventoryStore>((set) => ({
 
   addStoreInRecord: async (input) => {
     const res = await fetch(`${API_BASE}/store-in`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(input),
+      method:  'POST',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify(input),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to create store-in record');
     const saved: StoreInRecord = await res.json();
     set((state) => ({
       storeInRecords: sortByDateAndRevision([saved, ...state.storeInRecords]),
     }));
+    // FIX: Re-fetch eligible list so saved item no longer appears as available
+    get().fetchEligibleStoreInItems().catch(console.error);
     return saved;
   },
 
   updateStoreInRecord: async (id, input) => {
     const res = await fetch(`${API_BASE}/store-in/${id}`, {
-      method: 'PUT',
-      headers: getHeaders(),
-      body: JSON.stringify(input),
+      method:  'PUT',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify(input),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to update store-in record');
-    // Re-fetch to get updated children
-    const detailRes = await fetch(`${API_BASE}/store-in/${id}`, { headers: getHeaders() });
+    // Re-fetch the single updated record to get fresh server-computed fields
+    const detailRes = await fetch(`${API_BASE}/store-in/${id}`, { headers: getAuthHeaders() });
     if (detailRes.ok) {
       const updated: StoreInRecord = await detailRes.json();
       set((state) => ({
         storeInRecords: sortByDateAndRevision(
-          state.storeInRecords.map((rec) => (rec.id === id ? updated : rec))
+          state.storeInRecords.map(r => r.id === id ? updated : r)
         ),
       }));
     }
+    // Eligible list may have changed due to qty updates
+    get().fetchEligibleStoreInItems().catch(console.error);
   },
 
   deleteStoreInRecord: async (id) => {
     const res = await fetch(`${API_BASE}/store-in/${id}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
+      method:  'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to delete store-in record');
     set((state) => ({
-      storeInRecords: state.storeInRecords.filter((rec) => rec.id !== id),
+      storeInRecords: state.storeInRecords.filter(r => r.id !== id),
     }));
+    // FIX: Re-fetch eligible list so deleted item reappears as available
+    get().fetchEligibleStoreInItems().catch(console.error);
   },
 
-  // --- PRODUCTION ---
+  // ── PRODUCTION ────────────────────────────────────────────────────────────
 
   fetchProductionRecords: async () => {
-    const res = await fetch(`${API_BASE}/production`, { headers: getHeaders() });
+    const res = await fetch(`${API_BASE}/production`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await res.text() || 'Failed to fetch production records');
     const data: StoreProductionRecord[] = await res.json();
     set({ productionRecords: data });
   },
 
   fetchEligibleProductionItems: async () => {
-    const res = await fetch(`${API_BASE}/eligible-production`, { headers: getHeaders() });
+    const res = await fetch(`${API_BASE}/eligible-production`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await res.text() || 'Failed to fetch eligible production items');
     const data: EligibleProductionItem[] = await res.json();
     set({ eligibleProductionItems: data });
@@ -274,52 +286,56 @@ export const useInventoryStore = create<InventoryStore>((set) => ({
 
   addProductionRecord: async (record) => {
     const res = await fetch(`${API_BASE}/production`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(record),
+      method:  'POST',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify(record),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to create production record');
     const saved: StoreProductionRecord = await res.json();
-    set((state) => ({
-      productionRecords: [saved, ...state.productionRecords],
-    }));
+    set((state) => ({ productionRecords: [saved, ...state.productionRecords] }));
+    // Re-fetch eligible so available qty updates
+    get().fetchEligibleProductionItems().catch(console.error);
     return saved;
   },
 
   batchAddProductionRecords: async (records) => {
     const res = await fetch(`${API_BASE}/production/batch`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(records),
+      method:  'POST',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify(records),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to create production records');
     const saved: StoreProductionRecord[] = await res.json();
-    set((state) => ({
-      productionRecords: [...saved, ...state.productionRecords],
-    }));
+    set((state) => ({ productionRecords: [...saved, ...state.productionRecords] }));
+    // FIX: Re-fetch eligible so issued cuts no longer appear as available
+    get().fetchEligibleProductionItems().catch(console.error);
     return saved;
   },
 
   updateProductionRecord: async (id, record) => {
     const res = await fetch(`${API_BASE}/production/${id}`, {
-      method: 'PUT',
-      headers: getHeaders(),
-      body: JSON.stringify(record),
+      method:  'PUT',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify(record),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to update production record');
     set((state) => ({
-      productionRecords: state.productionRecords.map((r) => (r.id === id ? record : r)),
+      productionRecords: state.productionRecords.map(r => r.id === id ? record : r),
     }));
+    // Available qty changed — refresh eligible
+    get().fetchEligibleProductionItems().catch(console.error);
   },
 
   deleteProductionRecord: async (id) => {
     const res = await fetch(`${API_BASE}/production/${id}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
+      method:  'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to delete production record');
     set((state) => ({
-      productionRecords: state.productionRecords.filter((r) => r.id !== id),
+      productionRecords: state.productionRecords.filter(r => r.id !== id),
     }));
+    // FIX: Re-fetch eligible so qty returns to available pool
+    get().fetchEligibleProductionItems().catch(console.error);
   },
 }));

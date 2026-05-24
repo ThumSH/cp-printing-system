@@ -1,16 +1,16 @@
 // src/pages/development/DevelopmentPage.tsx
 // One DevelopmentJob = one style + one component + one body colour.
-// Use "Copy from existing style" to pre-fill shared fields when adding a
-// second component (e.g. Back) to a style that already has Front.
+// "Copy from existing style" pre-fills shared fields when adding a second component.
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Code, Upload, Plus, Trash2, Edit2, CheckCircle2,
-  Image as ImageIcon, AlertCircle, Loader2, X, Copy,
+  Image as ImageIcon, AlertCircle, Loader2, X, Copy, Lock,
 } from 'lucide-react';
 import { useDevelopmentStore } from '../../store/developmentStore';
 import { useSampleStyleStore } from '../../store/sampleStyleStore';
 import { useColourMasterStore } from '../../store/colourMasterStore';
+import { useInventoryStore } from '../../store/inventoryStore';
 import { API, getAuthHeaders } from '../../api/client';
 
 const COMPONENT_OPTIONS = ['Front', 'Back', 'Sleeve', 'Pocket', 'Waistband', 'Other'];
@@ -49,9 +49,6 @@ const INITIAL_FORM_STATE: Omit<DevelopmentForm, 'id'> = {
 };
 
 // ── Colour Master Select ──────────────────────────────────────────────────────
-// Multi-select body colour picker
-// value: comma-separated string e.g. "R-1-Red, BK-1-Black"
-// Pipeline treats this as one record with combined colours — bulk qty applies to the whole component.
 function ColourMasterSelect({
   value, onChange, error,
 }: { value: string; onChange: (val: string) => void; error?: string }) {
@@ -64,7 +61,6 @@ function ColourMasterSelect({
 
   useEffect(() => { fetchColours(); }, [fetchColours]);
 
-  // Parse comma-separated string into array
   const selected: string[] = value
     ? value.split(',').map(s => s.trim()).filter(Boolean)
     : [];
@@ -85,7 +81,6 @@ function ColourMasterSelect({
     setAdding(true); setAddError('');
     try {
       const saved = await addColour(newName.trim(), newHex.trim() || undefined);
-      // Auto-select the newly added colour
       const next = [...selected, saved.name];
       onChange(next.join(', '));
       setNewName(''); setNewHex(''); setShowAddNew(false);
@@ -96,7 +91,6 @@ function ColourMasterSelect({
 
   return (
     <div className="space-y-2">
-      {/* Selected colour chips */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {selected.map(name => {
@@ -119,7 +113,6 @@ function ColourMasterSelect({
         </div>
       )}
 
-      {/* Dropdown */}
       <div className="flex-1 relative">
         <select
           value=""
@@ -134,8 +127,7 @@ function ColourMasterSelect({
           <option value="">{selected.length > 0 ? '+ Add another colour...' : 'Select body colour(s)...'}</option>
           {loading && <option disabled>Loading colours...</option>}
           {colours.map((c) => (
-            <option key={c.id} value={c.name}
-              disabled={selected.includes(c.name)}>
+            <option key={c.id} value={c.name} disabled={selected.includes(c.name)}>
               {selected.includes(c.name) ? '✓ ' : ''}{c.name}
             </option>
           ))}
@@ -192,16 +184,15 @@ export default function DevelopmentPage() {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const { jobs: submissions, addJob, updateJob, deleteJob, fetchData } = useDevelopmentStore();
   const { styles: sampleStyles, fetchStyles } = useSampleStyleStore();
+  const { storeInRecords, fetchRecords: fetchStoreIn } = useInventoryStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Table filter/pagination
   const [showAllJobs, setShowAllJobs] = useState(false);
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterStyle, setFilterStyle] = useState('');
   const [filterComponent, setFilterComponent] = useState('');
 
-  // Copy-from feature
   const [copyFromId, setCopyFromId] = useState('');
   const [copyApplied, setCopyApplied] = useState(false);
 
@@ -209,10 +200,12 @@ export default function DevelopmentPage() {
   const [artworkBlobUrl, setArtworkBlobUrl] = useState('');
   const [uploadingArtwork, setUploadingArtwork] = useState(false);
 
-  useEffect(() => { fetchData(); fetchStyles(true); }, []);
+  useEffect(() => {
+    fetchData();
+    fetchStyles(true);
+    fetchStoreIn(); // FIX: fetch store-in records to determine lock state
+  }, []);
 
-  // Unique styles for the copy-from dropdown
-  // Group by StyleNo + Customer to avoid duplicates
   const uniqueStyleOptions = useMemo(() => {
     const seen = new Set<string>();
     return submissions.filter(s => {
@@ -223,6 +216,37 @@ export default function DevelopmentPage() {
     });
   }, [submissions]);
 
+  // ==========================================
+  // FIX: isJobLocked now checks THREE conditions:
+  //   1. SampleStyle is client-approved (prevents dev edits during approval flow)
+  //   2. SampleStyle is submitted to admin (prevents further dev edits)
+  //   3. A StoreIn record exists for this job's submission (physical goods received — hard lock)
+  // ==========================================
+  const isJobLocked = (jobId: string): { locked: boolean; reason: string } => {
+    const linkedStyles = sampleStyles.filter(s => s.developmentJobId === jobId);
+
+    // Check StoreIn records — hardest lock, physical goods already in warehouse
+    for (const style of linkedStyles) {
+      const hasStoreIn = storeInRecords.some(si => si.submissionId === style.id);
+      if (hasStoreIn) {
+        return { locked: true, reason: 'Store-In received — goods in warehouse' };
+      }
+    }
+
+    // Check workflow locks
+    const isApproved = linkedStyles.some(s => s.clientApproved);
+    if (isApproved) {
+      return { locked: true, reason: 'Client approved — submit to admin first' };
+    }
+
+    const isSubmitted = linkedStyles.some(s => s.submittedToAdmin);
+    if (isSubmitted) {
+      return { locked: true, reason: 'Submitted to admin for approval' };
+    }
+
+    return { locked: false, reason: '' };
+  };
+
   const handleCopyFrom = (jobId: string) => {
     setCopyFromId(jobId);
     if (!jobId) { setCopyApplied(false); return; }
@@ -230,26 +254,23 @@ export default function DevelopmentPage() {
     const source = submissions.find(s => s.id === jobId);
     if (!source) return;
 
-    // Copy all shared fields — leave component and bodyColour blank for user to fill
     setFormData({
       ...INITIAL_FORM_STATE,
-      customer:          source.customer,
-      styleNo:           source.styleNo,
-      season:            source.season,
-      printingTechnique: source.printingTechnique,
-      washingStandard:   source.washingStandard,
-      printColour:       source.printColour,
-      printColourQty:    source.printColourQty,
-      sampleOrderedDate: source.sampleOrderedDate,
+      customer:           source.customer,
+      styleNo:            source.styleNo,
+      season:             source.season,
+      printingTechnique:  source.printingTechnique,
+      washingStandard:    source.washingStandard,
+      printColour:        source.printColour,
+      printColourQty:     source.printColourQty,
+      sampleOrderedDate:  source.sampleOrderedDate,
       sampleDeliveryDate: source.sampleDeliveryDate,
-      artworkFileName:   source.artworkFileName,
-      artworkPreviewUrl: source.artworkPreviewUrl,
-      // bodyColour and component intentionally left blank
+      artworkFileName:    source.artworkFileName,
+      artworkPreviewUrl:  source.artworkPreviewUrl,
       bodyColour: '',
       component:  '',
     });
 
-    // Restore artwork preview from server URL
     setArtworkBlobUrl(source.artworkPreviewUrl
       ? source.artworkPreviewUrl.startsWith('http')
         ? source.artworkPreviewUrl
@@ -289,7 +310,6 @@ export default function DevelopmentPage() {
     const res = await fetch(`${API.BASE}/api/development/artwork`, { method: 'POST', headers, body: formData });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    // Store full URL so it works as a plain <img src> everywhere
     return data.url.startsWith('http') ? data.url : `${API.BASE}${data.url}`;
   };
 
@@ -351,7 +371,6 @@ export default function DevelopmentPage() {
       return;
     }
 
-    // Force-refresh sampleStyles so thumbnails + lock state update immediately
     await fetchStyles(true);
 
     setFormData(INITIAL_FORM_STATE);
@@ -362,6 +381,13 @@ export default function DevelopmentPage() {
   };
 
   const handleEdit = (submission: DevelopmentForm) => {
+    // Double-check lock before allowing edit
+    const { locked, reason } = isJobLocked(submission.id);
+    if (locked) {
+      alert(`This job cannot be edited: ${reason}`);
+      return;
+    }
+
     setFormData(submission);
     setEditingId(submission.id);
     setArtworkFile(null);
@@ -395,25 +421,14 @@ export default function DevelopmentPage() {
     setErrors({});
   };
 
-  // Build image URL — full URLs used directly; relative paths go through image endpoint
   const buildImageUrl = (path?: string) => {
     if (!path) return '';
     if (path.startsWith('http')) return path;
     return `${API.BASE}/api/development/image?path=${encodeURIComponent(path)}`;
   };
   const previewUrl = artworkBlobUrl || buildImageUrl(formData.artworkPreviewUrl);
-
-  // A job is locked if any of its linked SampleStyles are client-approved or submitted to admin
-  const isJobLocked = (jobId: string): boolean => {
-    return sampleStyles.some(
-      s => s.developmentJobId === jobId && (s.clientApproved || s.submittedToAdmin)
-    );
-  };
-
-  // Fields that are locked when copied (shared across components of same style)
   const lockedFields = copyApplied && !editingId;
 
-  // Filter + paginate jobs table
   const filteredJobs = useMemo(() => {
     let list = [...submissions];
     if (filterCustomer) list = list.filter(s => s.customer.toLowerCase().includes(filterCustomer.toLowerCase()));
@@ -425,9 +440,6 @@ export default function DevelopmentPage() {
   const displayedJobs = showAllJobs ? filteredJobs : filteredJobs.slice(0, 10);
   const hasMore = filteredJobs.length > 10;
   const isFiltered = !!(filterCustomer || filterStyle || filterComponent);
-
-  // Unique customers and components for dropdowns
-  const uniqueCustomers = useMemo(() => Array.from(new Set(submissions.map(s => s.customer))).sort(), [submissions]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-12">
@@ -462,8 +474,7 @@ export default function DevelopmentPage() {
               </p>
             </div>
             <p className="text-xs text-slate-500 mb-3">
-              Select an existing job to copy all shared fields (Style No, Customer, Season, Technique, Dates, Artwork).
-              Then just pick the new <strong>Component</strong> and <strong>Body Colour</strong>.
+              Select an existing job to copy all shared fields. Then just pick the new <strong>Component</strong> and <strong>Body Colour</strong>.
             </p>
             <div className="flex items-center gap-3 flex-wrap">
               <select
@@ -496,44 +507,51 @@ export default function DevelopmentPage() {
 
         <form onSubmit={handleSubmit} noValidate className="space-y-8"
           onKeyDown={(e) => {
-            // Prevent Enter key from submitting — avoids accidental duplication
-            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'BUTTON') {
-              e.preventDefault();
-            }
+            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'BUTTON') e.preventDefault();
           }}>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-
             {[
               { label: 'Customer', name: 'customer', type: 'text', placeholder: 'e.g. Boss' },
               { label: 'Style No', name: 'styleNo', type: 'text', placeholder: 'e.g. BO-9090' },
               { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. SS26' },
               { label: 'Printing Technique', name: 'printingTechnique', type: 'text', placeholder: 'e.g. High Density' },
               { label: 'Washing Standard', name: 'washingStandard', type: 'text', placeholder: 'e.g. 40°C Machine Wash' },
-              { label: 'Print Colour', name: 'printColour', type: 'text', placeholder: 'e.g. White & Red' },
-              { label: 'Print Colour QTY', name: 'printColourQty', type: 'number', placeholder: 'e.g. 2' },
+              // alwaysEditable: true — print colour/qty can differ per component (Front vs Back)
+              // so they stay editable even when copying from an existing style
+              { label: 'Print Colour', name: 'printColour', type: 'text', placeholder: 'e.g. White & Red', alwaysEditable: true },
+              { label: 'Print Colour QTY', name: 'printColourQty', type: 'number', placeholder: 'e.g. 2', alwaysEditable: true },
               { label: 'Sample Ordered Date', name: 'sampleOrderedDate', type: 'date' },
               { label: 'Sample Delivery', name: 'sampleDeliveryDate', type: 'date' },
-            ].map((field) => (
+            ].map((field) => {
+              // Field is read-only only when copy mode is active AND it isn't flagged alwaysEditable
+              const isReadOnly = lockedFields && !(field as any).alwaysEditable;
+              return (
               <div key={field.name} className="space-y-1">
                 <label className="block text-sm font-medium text-slate-700">
                   {field.label} <span className="text-red-500">*</span>
+                  {/* Show "Editable" hint badge for editable-while-copied fields */}
+                  {lockedFields && (field as any).alwaysEditable && (
+                    <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                      Editable
+                    </span>
+                  )}
                 </label>
                 <div className="relative">
                   <input type={field.type} name={field.name}
                     value={(formData as any)[field.name]}
                     onChange={handleInputChange}
                     placeholder={field.placeholder}
-                    readOnly={lockedFields}
+                    readOnly={isReadOnly}
                     className={`w-full px-3 py-2 border rounded-lg outline-none transition-all sm:text-sm ${
                       errors[field.name]
                         ? 'border-red-400 focus:ring-2 focus:ring-red-200 bg-red-50'
-                        : lockedFields
+                        : isReadOnly
                           ? 'border-slate-200 bg-slate-50 text-slate-600 cursor-not-allowed'
                           : 'border-slate-300 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600'
                     }`}
                   />
-                  {lockedFields && (
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300" title="Copied from existing style">
+                  {isReadOnly && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300">
                       <Copy className="h-3.5 w-3.5" />
                     </div>
                   )}
@@ -544,9 +562,9 @@ export default function DevelopmentPage() {
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
 
-            {/* Body Colour — always editable (changes per component) */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-slate-700">
                 Body Colour <span className="text-red-500">*</span>
@@ -555,12 +573,11 @@ export default function DevelopmentPage() {
               <ColourMasterSelect value={formData.bodyColour} onChange={handleBodyColourChange} error={errors.bodyColour} />
             </div>
 
-            {/* Artwork — locked if copied (reuses existing artwork) */}
             <div className="space-y-1 lg:col-span-2">
               <label className="block text-sm font-medium text-slate-700">
                 Artwork Attachment <span className="text-red-500">*</span>
                 {lockedFields && previewUrl && (
-                  <span className="ml-2 text-[10px] font-normal text-slate-400">Copied from existing job —
+                  <span className="ml-2 text-[10px] font-normal text-slate-400">Copied —
                     <button type="button" onClick={() => { setArtworkFile(null); setArtworkBlobUrl(''); setFormData(p => ({ ...p, artworkFileName: '', artworkPreviewUrl: '' })); }}
                       className="ml-1 text-indigo-600 hover:underline">change</button>
                   </span>
@@ -613,11 +630,6 @@ export default function DevelopmentPage() {
                   Pick the new component for this job
                 </span>
               )}
-              {!copyApplied && (
-                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
-                  One component per job — create a separate job for each additional component
-                </span>
-              )}
               {errors.component && (
                 <span className="flex items-center text-[12px] text-red-600 font-medium bg-red-50 px-2 py-0.5 rounded border border-red-100">
                   <AlertCircle className="w-3 h-3 mr-1" /> {errors.component}
@@ -633,7 +645,7 @@ export default function DevelopmentPage() {
                   }}
                   className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all ${
                     formData.component === opt
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/20'
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                       : 'bg-white text-slate-700 border-slate-300 hover:border-indigo-400 hover:text-indigo-600'
                   }`}
                 >
@@ -642,11 +654,6 @@ export default function DevelopmentPage() {
                 </button>
               ))}
             </div>
-            {formData.component && (
-              <p className="mt-2 text-xs text-slate-500">
-                This job covers the <span className="font-bold text-indigo-700">{formData.component}</span> component only.
-              </p>
-            )}
           </div>
 
           <div className="flex justify-end pt-4 space-x-3">
@@ -676,11 +683,10 @@ export default function DevelopmentPage() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h3 className="text-lg font-semibold text-slate-800">Development Jobs</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Each row = one component of a style. Same Style No may appear multiple times with different components.</p>
+                <p className="text-xs text-slate-400 mt-0.5">Each row = one component. Same Style No may appear multiple times with different components.</p>
               </div>
               <span className="text-xs text-slate-400">{filteredJobs.length} record{filteredJobs.length !== 1 ? 's' : ''}</span>
             </div>
-            {/* Filters */}
             <div className="flex flex-wrap gap-2">
               <input
                 type="text" value={filterCustomer} onChange={e => { setFilterCustomer(e.target.value); setShowAllJobs(false); }}
@@ -726,6 +732,7 @@ export default function DevelopmentPage() {
                         ? sub.artworkPreviewUrl
                         : `${API.BASE}/api/development/image?path=${encodeURIComponent(sub.artworkPreviewUrl)}`
                       : '';
+                    const { locked, reason } = isJobLocked(sub.id);
                     return (
                       <motion.tr key={sub.id}
                         initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
@@ -767,18 +774,22 @@ export default function DevelopmentPage() {
                           <p>Del: <span className="font-medium text-slate-900">{sub.sampleDeliveryDate}</span></p>
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
-                          <button onClick={() => handleEdit(sub as any)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>
-                          {isJobLocked(sub.id) ? (
-                            <span title="Locked: sample style is client-approved or submitted to admin"
+                          {locked ? (
+                            // FIX: Show specific lock reason as tooltip
+                            <span title={reason}
                               className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-400 cursor-not-allowed">
-                              🔒 Locked
+                              <Lock className="h-3 w-3" /> Locked
                             </span>
                           ) : (
-                            <button onClick={() => handleDelete(sub.id)}
-                              className="p-1.5 text-red-500 hover:bg-red-50 rounded"
-                              title="Delete this job">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <>
+                              <button onClick={() => handleEdit(sub as any)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete(sub.id)}
+                                className="p-1.5 text-red-500 hover:bg-red-50 rounded" title="Delete">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
                           )}
                         </td>
                       </motion.tr>
@@ -788,7 +799,7 @@ export default function DevelopmentPage() {
               </tbody>
             </table>
           </div>
-          {/* Show more / show less */}
+          {/* FIX: Show more / show less — default 10, expand on demand */}
           {!showAllJobs && hasMore && (
             <div className="border-t border-slate-100 px-6 py-3 flex items-center justify-between bg-slate-50/50">
               <span className="text-xs text-slate-400">Showing 10 of {filteredJobs.length} jobs</span>

@@ -1,4 +1,11 @@
 // src/store/adviceNoteStore.ts
+// FIXES:
+//   - addAdviceNote:    now re-fetches eligibleDispatchItems so remaining qty updates in UI
+//   - deleteAdviceNote: now re-fetches eligibleDispatchItems so item reappears as dispatchable
+//   - updateAdviceNote: now re-fetches the note from server after PUT (204 NoContent)
+//                       to ensure backend-computed balanceQty/scheduleNo are current
+//   - sortAdviceNotes:  uses safe string comparison instead of new Date() (timezone safe)
+
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
 
@@ -12,7 +19,6 @@ export interface AdviceNoteRow {
   bundleNo: string;
   size: string;
   cutForm: string;
-  /** The component (Part) chosen by QC for this cut. Stored per row. */
   component: string;
   totalPcs: number;
   pd: number;
@@ -30,7 +36,6 @@ export interface GatepassBundleInfo {
 export interface GatepassCutInfo {
   cutNo: string;
   cutQty: number;
-  /** The component (Part) locked in by QC for this cut. */
   part: string;
   bundles: GatepassBundleInfo[];
 }
@@ -48,12 +53,10 @@ export interface EligibleGatepassItem {
   lineNo: string;
   issueQty: number;
   remainingDispatchQty: number;
-  // Enriched from Store-In
   scheduleNo: string;
   bodyColour: string;
   printColour: string;
   season: string;
-  // Cuts and bundles
   cuts: GatepassCutInfo[];
 }
 
@@ -88,6 +91,9 @@ export interface AdviceNoteRecord {
 interface AdviceNoteStore {
   adviceNotes: AdviceNoteRecord[];
   eligibleDispatchItems: EligibleGatepassItem[];
+  loading: boolean;
+  error: string;
+
   fetchAdviceNotes: () => Promise<void>;
   fetchEligibleDispatchItems: () => Promise<void>;
   addAdviceNote: (note: Partial<AdviceNoteRecord>) => Promise<AdviceNoteRecord>;
@@ -96,66 +102,98 @@ interface AdviceNoteStore {
 }
 
 const API_BASE = API.GATEPASS;
- 
-const getHeaders = getAuthHeaders;
 
-const sortAdviceNotes = (notes: AdviceNoteRecord[]) => {
-  return [...notes].sort((a, b) => {
-    const bTime = new Date(b.deliveryDate).getTime();
-    const aTime = new Date(a.deliveryDate).getTime();
-    if (bTime !== aTime) return bTime - aTime;
+// FIX: Use string comparison instead of new Date() to avoid timezone-shifted dates
+// yyyy-MM-dd strings sort correctly lexicographically
+const sortAdviceNotes = (notes: AdviceNoteRecord[]) =>
+  [...notes].sort((a, b) => {
+    const dateDiff = b.deliveryDate.localeCompare(a.deliveryDate);
+    if (dateDiff !== 0) return dateDiff;
     return b.revisionNo - a.revisionNo;
   });
-};
 
-export const useAdviceNoteStore = create<AdviceNoteStore>((set) => ({
-  adviceNotes: [],
+export const useAdviceNoteStore = create<AdviceNoteStore>((set, get) => ({
+  adviceNotes:           [],
   eligibleDispatchItems: [],
+  loading:               false,
+  error:                 '',
 
   fetchAdviceNotes: async () => {
-    const res = await fetch(`${API_BASE}/advicenotes`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(await res.text() || 'Failed to fetch advice notes');
-    const data: AdviceNoteRecord[] = await res.json();
-    set({ adviceNotes: sortAdviceNotes(data) });
+    set({ loading: true, error: '' });
+    try {
+      const res = await fetch(`${API_BASE}/advicenotes`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      const data: AdviceNoteRecord[] = await res.json();
+      set({ adviceNotes: sortAdviceNotes(data) });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to fetch advice notes';
+      set({ error: msg });
+      throw e;
+    } finally {
+      set({ loading: false });
+    }
   },
 
   fetchEligibleDispatchItems: async () => {
-    const res = await fetch(`${API_BASE}/eligible-dispatch`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(await res.text() || 'Failed to fetch eligible dispatch items');
-    const data: EligibleGatepassItem[] = await res.json();
-    set({ eligibleDispatchItems: data });
+    set({ loading: true, error: '' });
+    try {
+      const res = await fetch(`${API_BASE}/eligible-dispatch`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      const data: EligibleGatepassItem[] = await res.json();
+      set({ eligibleDispatchItems: data });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to fetch eligible dispatch items';
+      set({ error: msg });
+      throw e;
+    } finally {
+      set({ loading: false });
+    }
   },
 
   addAdviceNote: async (note) => {
     const res = await fetch(`${API_BASE}/advicenotes`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(note),
+      method:  'POST',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify(note),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to create advice note');
     const saved: AdviceNoteRecord = await res.json();
     set((state) => ({ adviceNotes: sortAdviceNotes([saved, ...state.adviceNotes]) }));
+    // FIX: Re-fetch eligible dispatch items so remaining qty updates immediately
+    get().fetchEligibleDispatchItems().catch(console.error);
     return saved;
   },
 
   updateAdviceNote: async (id, updatedNote) => {
     const res = await fetch(`${API_BASE}/advicenotes/${id}`, {
-      method: 'PUT',
-      headers: getHeaders(),
-      body: JSON.stringify(updatedNote),
+      method:  'PUT',
+      headers: getAuthHeaders(),
+      body:    JSON.stringify(updatedNote),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to update advice note');
-    set((state) => ({
-      adviceNotes: sortAdviceNotes(state.adviceNotes.map((n) => (n.id === id ? updatedNote : n))),
-    }));
+    // Backend PUT returns 204 NoContent — re-fetch all notes to get server-computed balanceQty
+    const allRes = await fetch(`${API_BASE}/advicenotes`, { headers: getAuthHeaders() });
+    if (allRes.ok) {
+      const data: AdviceNoteRecord[] = await allRes.json();
+      set({ adviceNotes: sortAdviceNotes(data) });
+    } else {
+      // Fallback: optimistic update with sent data
+      set((state) => ({
+        adviceNotes: sortAdviceNotes(state.adviceNotes.map(n => n.id === id ? updatedNote : n)),
+      }));
+    }
+    // Eligible dispatch may have changed
+    get().fetchEligibleDispatchItems().catch(console.error);
   },
 
   deleteAdviceNote: async (id) => {
     const res = await fetch(`${API_BASE}/advicenotes/${id}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
+      method:  'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to delete advice note');
-    set((state) => ({ adviceNotes: state.adviceNotes.filter((n) => n.id !== id) }));
+    set((state) => ({ adviceNotes: state.adviceNotes.filter(n => n.id !== id) }));
+    // FIX: Re-fetch eligible so dispatch qty becomes available again
+    get().fetchEligibleDispatchItems().catch(console.error);
   },
 }));

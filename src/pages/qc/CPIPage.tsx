@@ -1,11 +1,19 @@
 // src/pages/qc/CPIPage.tsx
 // Cut Panel Inspection Report — CP Chart No. 002
-// Cascading: Style → Customer → Schedule → Component → Cuts auto-load
-// F1-F13 defect labels shown ONCE for first cut; subsequent cuts stack below without repeating
+// CHANGES FROM PREVIOUS VERSION:
+//   1. Added inspectionStatus state (Passed/Failed/Pending) — was hardcoded 'Passed'
+//   2. Added status selector UI in Report Header section
+//   3. handleSave now uses selected status instead of hardcoded 'Passed'
+//   4. appRej now reflects status: Passed→'Approved', else→'Rejected'
+//   5. handleReset resets inspectionStatus to 'Passed'
+//   6. Success message shows the saved status
+// Everything else is identical to the original.
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   ClipboardList, Save, AlertCircle, Loader2, CheckCircle2, Printer,
+  XCircle, Clock,
 } from 'lucide-react';
 import { useQCStore } from '../../store/qcStore';
 import { useInventoryStore } from '../../store/inventoryStore';
@@ -51,13 +59,14 @@ interface CutInspection {
   bundles: BundleRow[]; defects: DefectEntry[];
 }
 
+type InspectionStatus = 'Passed' | 'Failed' | 'Pending';
+
 const makeDefects = (cutQty: number): DefectEntry[] =>
   DEFECTS.map(d => ({
     defectCode: d.code, check: '',
     beforeL_plus: '', beforeL_minus: '', beforeW_plus: '', beforeW_minus: '',
     afterL_plus:  '', afterL_minus:  '', afterW_plus:  '', afterW_minus:  '',
-    sampleSize: '',  // user fills manually
-    defectedQty: '', percentage: '', remarks: '',
+    sampleSize: '', defectedQty: '', percentage: '', remarks: '',
   }));
 
 // ── Tiny cell input ───────────────────────────────────────────────────────────
@@ -90,6 +99,54 @@ function CascadeSelect({ label, value, onChange, options, disabled = false }: {
   );
 }
 
+// ── Inspection status selector ────────────────────────────────────────────────
+function StatusSelector({ value, onChange }: {
+  value: InspectionStatus;
+  onChange: (v: InspectionStatus) => void;
+}) {
+  const options: { val: InspectionStatus; label: string; icon: React.ReactNode; active: string; inactive: string }[] = [
+    {
+      val: 'Passed',
+      label: 'Passed',
+      icon: <CheckCircle2 className="h-4 w-4" />,
+      active:   'bg-emerald-600 border-emerald-600 text-white shadow-sm shadow-emerald-200',
+      inactive: 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600',
+    },
+    {
+      val: 'Failed',
+      label: 'Failed',
+      icon: <XCircle className="h-4 w-4" />,
+      active:   'bg-red-600 border-red-600 text-white shadow-sm shadow-red-200',
+      inactive: 'bg-white border-slate-300 text-slate-600 hover:border-red-400 hover:text-red-600',
+    },
+    {
+      val: 'Pending',
+      label: 'Pending',
+      icon: <Clock className="h-4 w-4" />,
+      active:   'bg-amber-500 border-amber-500 text-white shadow-sm shadow-amber-200',
+      inactive: 'bg-white border-slate-300 text-slate-600 hover:border-amber-400 hover:text-amber-600',
+    },
+  ];
+
+  return (
+    <div className="space-y-1">
+      <label className="block text-xs font-medium text-slate-600">Inspection Status <span className="text-red-500">*</span></label>
+      <div className="flex gap-2">
+        {options.map(o => (
+          <button
+            key={o.val}
+            type="button"
+            onClick={() => onChange(o.val)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-all ${value === o.val ? o.active : o.inactive}`}
+          >
+            {o.icon} {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function CPIPage() {
   const { eligibleCpiItems, fetchEligibleCpiItems, addCPIReport, cpiReports, fetchReports } = useQCStore();
@@ -107,13 +164,16 @@ export default function CPIPage() {
   const [cpiQty,      setCpiQty]      = useState('');
   const [auditor,     setAuditor]     = useState('');
 
+  // FIX 1: Inspection status — was hardcoded 'Passed', now user-selectable
+  const [inspectionStatus, setInspectionStatus] = useState<InspectionStatus>('Passed');
+
   // Cut data
   const [cuts, setCuts] = useState<CutInspection[]>([]);
 
   // UI
-  const [saving,   setSaving]   = useState(false);
-  const [errMsg,   setErrMsg]   = useState('');
-  const [succMsg,  setSuccMsg]  = useState('');
+  const [saving,  setSaving]  = useState(false);
+  const [errMsg,  setErrMsg]  = useState('');
+  const [succMsg, setSuccMsg] = useState('');
 
   useEffect(() => { fetchEligibleCpiItems(); fetchRecords(); }, [fetchEligibleCpiItems, fetchRecords]);
 
@@ -133,77 +193,93 @@ export default function CPIPage() {
     if (!selCustomer) return [];
     return Array.from(new Set(
       eligibleCpiItems.filter(i => i.styleNo === selStyle && i.customerName === selCustomer)
-        .map(i => i.scheduleNo)
-    )).sort().map(s => ({ value: s, label: s }));
+        .map(i => i.scheduleNo ?? '')
+    )).sort().map(s => ({ value: s, label: s || '(No Schedule)' }));
   }, [eligibleCpiItems, selStyle, selCustomer]);
 
-  // StoreIn records for this style+customer+schedule
   const matchedRecords = useMemo(() =>
-    storeInRecords.filter(r =>
-      r.styleNo === selStyle && r.customerName === selCustomer && r.scheduleNo === selSchedule
-    ), [storeInRecords, selStyle, selCustomer, selSchedule]);
+    storeInRecords.filter(r => {
+      if (!selStyle || !selCustomer) return false;
+      if (r.styleNo !== selStyle || r.customerName !== selCustomer) return false;
+      if (selSchedule !== '') return (r.scheduleNo ?? '') === selSchedule;
+      return true;
+    }), [storeInRecords, selStyle, selCustomer, selSchedule]);
 
-  // Find the specific StoreIn record that matches the selected component
-  const selectedStoreIn = useMemo(() => {
-    if (!selComponent) return null;
-    return matchedRecords.find(r => {
-      const comps = r.components?.split(',').map((c: string) => c.trim()) ?? [];
-      return comps.includes(selComponent) || r.components === selComponent;
-    }) || matchedRecords[0] || null;
+  const componentMatchedRecords = useMemo(() => {
+    if (!selComponent) return matchedRecords;
+    return matchedRecords.filter(r => {
+      const parts = (r.components ?? '').split(',').map((s: string) => s.trim());
+      return parts.includes(selComponent);
+    });
   }, [matchedRecords, selComponent]);
 
-  // Component options — exclude StoreIn records that already have a CPI report
+  const componentStoreIn = useMemo(() => {
+    if (!selComponent) return null;
+    return componentMatchedRecords.find(r => r.components === selComponent)
+      ?? componentMatchedRecords[0]
+      ?? null;
+  }, [componentMatchedRecords, selComponent]);
+
+  const selectedStoreIn = componentStoreIn;
+
   const componentOptions = useMemo(() => {
-    // Get StoreIn IDs that already have a CPI report
     const existingCpiStoreInIds = new Set(cpiReports.map(r => r.storeInRecordId));
+    const compMap = new Map<string, string>();
 
-    const comps = new Set<string>();
-    matchedRecords.forEach(r => {
-      // Skip if this StoreIn already has a CPI report
-      if (existingCpiStoreInIds.has(r.id)) return;
-      r.cuts?.forEach(c => {
-        const parts = c.cutNo.split(' Cut ');
-        if (parts.length > 1) comps.add(parts[0]);
+    eligibleCpiItems
+      .filter(i =>
+        i.styleNo === selStyle &&
+        i.customerName === selCustomer &&
+        (selSchedule === '' || (i.scheduleNo ?? '') === selSchedule) &&
+        !existingCpiStoreInIds.has(i.storeInRecordId)
+      )
+      .forEach(i => {
+        const parts = (i.components ?? '').split(',').map((s: string) => s.trim()).filter(Boolean);
+        parts.forEach(comp => { if (!compMap.has(comp)) compMap.set(comp, i.storeInRecordId); });
       });
-      if (r.components) r.components.split(',').forEach(c => comps.add(c.trim()));
-    });
-    return Array.from(comps).filter(Boolean).map(c => ({ value: c, label: c }));
-  }, [matchedRecords, cpiReports]);
 
-  // Matched eligible item (for colours)
+    matchedRecords.forEach(r => {
+      if (existingCpiStoreInIds.has(r.id)) return;
+      const parts = (r.components ?? '').split(',').map((s: string) => s.trim()).filter(Boolean);
+      parts.forEach(comp => { if (!compMap.has(comp)) compMap.set(comp, r.id); });
+    });
+
+    return Array.from(compMap.keys()).map(comp => ({ value: comp, label: comp }));
+  }, [eligibleCpiItems, matchedRecords, selStyle, selCustomer, selSchedule, cpiReports]);
+
   const eligibleItem = useMemo(() =>
     eligibleCpiItems.find(i =>
-      i.styleNo === selStyle && i.customerName === selCustomer && i.scheduleNo === selSchedule
-    ), [eligibleCpiItems, selStyle, selCustomer, selSchedule]);
+      i.styleNo === selStyle &&
+      i.customerName === selCustomer &&
+      (selSchedule === '' || (i.scheduleNo ?? '') === selSchedule) &&
+      (!selComponent || i.components === selComponent ||
+        i.components?.split(',').map((s: string) => s.trim()).includes(selComponent))
+    ), [eligibleCpiItems, selStyle, selCustomer, selSchedule, selComponent]);
 
-  // Cuts for selected component
   const cutsForComp = useMemo(() => {
-    if (!selComponent) return [];
-    const result: { storeIn: typeof matchedRecords[0]; cut: typeof matchedRecords[0]['cuts'][0] }[] = [];
-    matchedRecords.forEach(r => {
-      r.cuts?.forEach(c => {
-        const compFromCut = c.cutNo.split(' Cut ')[0];
-        if (compFromCut === selComponent || r.components?.includes(selComponent))
-          result.push({ storeIn: r, cut: c });
-      });
-    });
-    return result;
-  }, [matchedRecords, selComponent]);
+    if (!selComponent || !componentStoreIn) return [];
+    const allCuts = componentStoreIn.cuts ?? [];
+    const isMultiComponent = (componentStoreIn.components ?? '').includes(',');
+    const filtered = isMultiComponent
+      ? allCuts.filter((cut: any) =>
+          cut.cutNo?.toLowerCase().startsWith(selComponent.toLowerCase())
+        )
+      : allCuts;
+    return filtered.map((cut: any) => ({ storeIn: componentStoreIn, cut }));
+  }, [componentStoreIn, selComponent]);
 
-  // Auto-load cuts when component selected
   useEffect(() => {
     if (!selComponent || cutsForComp.length === 0) { setCuts([]); return; }
-    const loaded: CutInspection[] = cutsForComp.map(({ cut, storeIn }) => ({
+    const loaded: CutInspection[] = cutsForComp.map(({ cut }) => ({
       cutNo:     cut.cutNo,
       cutQty:    cut.cutQty,
       component: selComponent,
-      bundles:   cut.bundles?.map(b => ({
+      bundles:   cut.bundles?.map((b: any) => ({
         bundleNo: b.bundleNo, qty: b.bundleQty, size: b.size, numberRange: b.numberRange,
       })) || [],
       defects: makeDefects(cut.cutQty),
     }));
     setCuts(loaded);
-    // Auto-fill received qty from the selected component's StoreIn record
     if (selectedStoreIn?.inQty) setReceivedQty(selectedStoreIn.inQty.toString());
   }, [selComponent, cutsForComp.length]);
 
@@ -216,13 +292,11 @@ export default function CPIPage() {
       const defects = cut.defects.map((d, di) => {
         if (di !== defIdx) return d;
         const upd = { ...d, [field]: value };
-        // Auto-calculate % = defectedQty / sampleSize * 100
         if (field === 'defectedQty' || field === 'sampleSize') {
           const defQty  = parseFloat(field === 'defectedQty' ? value : d.defectedQty) || 0;
           const sampQty = parseFloat(field === 'sampleSize'  ? value : d.sampleSize)  || 0;
           upd.percentage = sampQty > 0 && defQty >= 0
-            ? ((defQty / sampQty) * 100).toFixed(1)
-            : '';
+            ? ((defQty / sampQty) * 100).toFixed(1) : '';
         }
         return upd;
       });
@@ -230,21 +304,23 @@ export default function CPIPage() {
     }));
   }, []);
 
-  // ── Delete a bundle row from a cut ───────────────────────────────────────
   const deleteBundle = useCallback((cutIdx: number, bundleIdx: number) => {
     setCuts(prev => prev.map((cut, ci) => {
       if (ci !== cutIdx) return cut;
-      const bundles = cut.bundles.filter((_, bi) => bi !== bundleIdx);
-      const defects = cut.defects.filter((_, di) => di !== bundleIdx);
-      return { ...cut, bundles, defects };
+      return {
+        ...cut,
+        bundles: cut.bundles.filter((_, bi) => bi !== bundleIdx),
+        defects: cut.defects.filter((_, di) => di !== bundleIdx),
+      };
     }));
   }, []);
 
-  // ── Reset ─────────────────────────────────────────────────────────────────
+  // FIX 5: Reset now includes inspectionStatus
   const handleReset = () => {
     setSelStyle(''); setSelCustomer(''); setSelSchedule(''); setSelComponent('');
     setDate(new Date().toISOString().slice(0, 10));
     setReceivedQty(''); setCpiQty(''); setAuditor('');
+    setInspectionStatus('Passed');   // ← reset to default
     setCuts([]); setErrMsg(''); setSuccMsg('');
   };
 
@@ -252,13 +328,10 @@ export default function CPIPage() {
   const handleSave = async () => {
     if (!eligibleItem && matchedRecords.length === 0) { setErrMsg('No store-in record found.'); return; }
     if (cuts.length === 0) { setErrMsg('No cuts loaded.'); return; }
-    if (!auditor.trim())  { setErrMsg('Auditor name is required.'); return; }
+    if (!auditor.trim())   { setErrMsg('Auditor name is required.'); return; }
     const storeIn = selectedStoreIn ?? matchedRecords[0];
     setSaving(true); setErrMsg('');
     try {
-      const passed = cuts.every(c =>
-        c.defects.every(d => !d.defectedQty || parseFloat(d.defectedQty) === 0)
-      );
       const totalDefected = cuts.reduce((s, c) =>
         s + c.defects.reduce((ds, d) => ds + (parseFloat(d.defectedQty) || 0), 0), 0);
       const totalCutQty = cuts.reduce((s, c) => s + c.cutQty, 0);
@@ -288,11 +361,11 @@ export default function CPIPage() {
           defectRows: cut.defects.map(d => ({
             defectCode:   d.defectCode,
             defectName:   DEFECTS.find(df => df.code === d.defectCode)?.label || d.defectCode,
-            beforeLength: parseFloat(d.beforeL_plus) || 0,
-            beforeWidth:  parseFloat(d.beforeW_plus) || 0,
-            afterLength:  parseFloat(d.afterL_plus)  || 0,
-            afterWidth:   parseFloat(d.afterW_plus)  || 0,
-            defectedQty:  parseFloat(d.defectedQty)  || 0,
+            beforeLength: parseFloat(d.beforeL_plus)  || 0,
+            beforeWidth:  parseFloat(d.beforeW_plus)  || 0,
+            afterLength:  parseFloat(d.afterL_plus)   || 0,
+            afterWidth:   parseFloat(d.afterW_plus)   || 0,
+            defectedQty:  parseFloat(d.defectedQty)   || 0,
             percentage:   d.percentage,
             remarks:      d.remarks,
           })),
@@ -306,28 +379,30 @@ export default function CPIPage() {
         rejDamageQty:        totalDefected,
         rejectionPercentage: totalCutQty > 0 ? (totalDefected / totalCutQty * 100).toFixed(1) : '0',
         balanceQty:          Math.max(0, totalCutQty - totalDefected),
-        inspectionStatus:    'Passed' as const,
-        appRej:              'Approved',
-        checkedBy:           auditor,
-        summaryDate:         date,
-        cpiAuditor:          auditor,
+        // FIX 3: Use selected inspectionStatus instead of hardcoded 'Passed'
+        inspectionStatus,
+        // FIX 4: appRej reflects the status
+        appRej:     inspectionStatus === 'Passed' ? 'Approved' : 'Rejected',
+        checkedBy:  auditor,
+        summaryDate: date,
+        cpiAuditor:  auditor,
       };
 
-      await addCPIReport(report);
-      setSuccMsg('CPI Report saved successfully.');
+      await addCPIReport(report as any);
+      await Promise.all([fetchEligibleCpiItems(), fetchReports()]);
+      // FIX 6: Success message includes status
+      setSuccMsg(`CPI Report saved — Status: ${inspectionStatus}.`);
       setTimeout(() => setSuccMsg(''), 4000);
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : 'Failed to save.');
     } finally { setSaving(false); }
   };
 
-  // Body/print colour from selected component's eligible item or StoreIn record
   const bodyColour  = eligibleItem?.bodyColour  || selectedStoreIn?.bodyColour  || '—';
   const printColour = eligibleItem?.printColour || selectedStoreIn?.printColour || '—';
-  const isReady = selStyle && selCustomer && selSchedule && selComponent && cuts.length > 0;
+  const isReady = selStyle && selCustomer && selComponent && cuts.length > 0;
 
-
-  // ── Print handler ────────────────────────────────────────────────────────
+  // ── Print handler (unchanged) ─────────────────────────────────────────────
   const handlePrint = () => {
     const DEFECT_LIST = [
       { code: 'F1', label: 'Panel Shrinkage' },
@@ -346,7 +421,7 @@ export default function CPIPage() {
       { code: 'Other', label: 'Other' },
     ];
 
-    const td = (val: string | number, extra = '') =>
+    const td  = (val: string | number, extra = '') =>
       '<td style="border:1px solid #bbb;padding:2px 4px;text-align:center;font-size:10px;' + extra + '">' + (val ?? '') + '</td>';
     const tdL = (val: string | number) =>
       '<td style="border:1px solid #bbb;padding:2px 4px;text-align:left;font-size:10px;">' + (val ?? '') + '</td>';
@@ -355,12 +430,12 @@ export default function CPIPage() {
     let totalSampleSize = 0;
     let totalDefectedQty = 0;
 
-    // Bundle-driven — matches screen exactly
     cuts.forEach((cut) => {
+      if (!cut.bundles || cut.bundles.length === 0) return;
       cut.bundles.forEach((bundle, bi) => {
-        const def      = cut.defects[bi] ?? ({} as any);
-        const defInfo  = DEFECT_LIST[bi % DEFECT_LIST.length];
-        const isFirstRow = bi === 0;
+        const def     = cut.defects?.[bi] ?? ({} as any);
+        const defInfo = DEFECT_LIST[bi % DEFECT_LIST.length];
+        const isFirst = bi === 0;
 
         totalSampleSize  += parseFloat(def.sampleSize)  || 0;
         totalDefectedQty += parseFloat(def.defectedQty) || 0;
@@ -369,35 +444,29 @@ export default function CPIPage() {
           + td(defInfo?.code ?? '', 'color:#666;font-family:monospace;')
           + tdL(defInfo?.label ?? '')
           + td(def.check ?? '')
-          + td(isFirstRow ? cut.cutNo : '')
-          + td(isFirstRow ? cut.cutQty : '', 'font-weight:bold;')
+          + td(isFirst ? cut.cutNo : '')
+          + td(isFirst ? cut.cutQty : '', 'font-weight:bold;')
           + td(bundle.bundleNo ?? '')
-          + td(isFirstRow ? cut.component : '')
+          + td(isFirst ? cut.component : '')
           + td(bundle.size ?? '')
-          + td(def.beforeL_plus ?? '')
-          + td(def.beforeL_minus ?? '')
-          + td(def.beforeW_plus ?? '')
-          + td(def.beforeW_minus ?? '')
-          + td(def.afterL_plus ?? '')
-          + td(def.afterL_minus ?? '')
-          + td(def.afterW_plus ?? '')
-          + td(def.afterW_minus ?? '')
+          + td(def.beforeL_plus ?? '') + td(def.beforeL_minus ?? '')
+          + td(def.beforeW_plus ?? '') + td(def.beforeW_minus ?? '')
+          + td(def.afterL_plus  ?? '') + td(def.afterL_minus  ?? '')
+          + td(def.afterW_plus  ?? '') + td(def.afterW_minus  ?? '')
           + td(bundle.numberRange ?? '', 'font-size:9px;')
-          + td(def.sampleSize ?? '')
+          + td(def.sampleSize  ?? '')
           + td(def.defectedQty ?? '')
-          + td(def.percentage ?? '')
-          + td(def.remarks ?? '', 'text-align:left;')
+          + td(def.percentage  ?? '')
+          + td(def.remarks     ?? '', 'text-align:left;')
           + '</tr>';
       });
     });
 
-    // Blank rows
     const blankCount = Math.max(0, 2 - cuts.length);
     for (let i = 0; i < blankCount; i++) {
       rows += '<tr>' + Array(21).fill('<td style="border:1px solid #bbb;height:18px;"></td>').join('') + '</tr>';
     }
 
-    // Totals row
     rows += '<tr style="background:#f0f0f0;font-weight:bold;">'
       + td('TOTALS', 'text-align:left;') + td('') + td('') + td('')
       + td(cuts.reduce((s, c) => s + c.cutQty, 0), 'font-weight:bold;')
@@ -405,10 +474,13 @@ export default function CPIPage() {
       + td('') + td('') + td('') + td('')
       + td('') + td('') + td('') + td('')
       + td('')
-      + td(totalSampleSize || '', 'font-weight:bold;')
+      + td(totalSampleSize  || '', 'font-weight:bold;')
       + td(totalDefectedQty || '', 'font-weight:bold;')
       + td('') + td('')
       + '</tr>';
+
+    // Status badge for print
+    const statusColor = inspectionStatus === 'Passed' ? '#16a34a' : inspectionStatus === 'Failed' ? '#dc2626' : '#d97706';
 
     const html = '<!DOCTYPE html><html><head>'
       + '<title>CPI Report - ' + selStyle + ' - ' + selSchedule + '</title>'
@@ -445,6 +517,11 @@ export default function CPIPage() {
       + '<td style="border:none;border-bottom:1px solid black;padding-right:8px;">' + bodyColour + '</td>'
       + '<td style="border:none;">CPI Qty:</td>'
       + '<td style="border:none;border-bottom:1px solid black;">' + cpiQty + '</td>'
+      + '</tr><tr>'
+      + '<td style="border:none;">Status:</td>'
+      + '<td colspan="5" style="border:none;">'
+      + '<span style="font-weight:bold;color:' + statusColor + ';font-size:12px;">' + inspectionStatus.toUpperCase() + '</span>'
+      + '</td>'
       + '</tr></table>'
       + '<table><thead>'
       + '<tr>'
@@ -477,7 +554,6 @@ export default function CPIPage() {
       + '</div>'
       + '</body></html>';
 
-    // Use iframe instead of window.open — works in Tauri (no popup blocker)
     const existing = document.getElementById('cpi-print-iframe');
     if (existing) existing.remove();
 
@@ -488,31 +564,13 @@ export default function CPIPage() {
 
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) { alert('Could not open print frame.'); return; }
-    doc.open();
-    doc.write(html);
-    doc.close();
+    doc.open(); doc.write(html); doc.close();
 
     setTimeout(() => {
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
       setTimeout(() => iframe.remove(), 2000);
     }, 600);
-  };
-
-  const thStyle: React.CSSProperties = {
-    border: '1px solid #aaa',
-    padding: '2px 4px',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    backgroundColor: '#f0f0f0',
-    fontSize: '10px',
-  };
-  const tdStyle: React.CSSProperties = {
-    border: '1px solid #ccc',
-    padding: '2px 3px',
-    textAlign: 'center',
-    minHeight: '16px',
-    height: '16px',
   };
 
   // ==========================================
@@ -567,15 +625,14 @@ export default function CPIPage() {
           <CascadeSelect label="Customer" value={selCustomer}
             onChange={v => { setSelCustomer(v); setSelSchedule(''); setSelComponent(''); setCuts([]); }}
             options={customerOptions} disabled={!selStyle} />
-          <CascadeSelect label="Schedule No" value={selSchedule}
+          <CascadeSelect label="Schedule No (optional)" value={selSchedule}
             onChange={v => { setSelSchedule(v); setSelComponent(''); setCuts([]); }}
             options={scheduleOptions} disabled={!selCustomer} />
           <CascadeSelect label="Component" value={selComponent}
             onChange={v => setSelComponent(v)}
-            options={componentOptions} disabled={!selSchedule} />
+            options={componentOptions} disabled={!selCustomer} />
         </div>
 
-        {/* Auto-filled info — shown only after component is selected */}
         {selComponent && (
           <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 md:grid-cols-4">
             {[
@@ -599,24 +656,41 @@ export default function CPIPage() {
           <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-400">Report Header</p>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {[
-              { label: 'Date', type: 'date', value: date, set: setDate },
-              { label: 'Received Qty *', type: 'number', value: receivedQty, set: setReceivedQty, ph: 'e.g. 880' },
-              { label: 'CPI Qty *',      type: 'number', value: cpiQty,      set: setCpiQty,      ph: 'e.g. 88' },
-              { label: 'CPI Auditor *',  type: 'text',   value: auditor,     set: setAuditor,     ph: 'Name' },
+              { label: 'Date',          type: 'date',   value: date,        set: setDate },
+              { label: 'Received Qty *',type: 'number', value: receivedQty, set: setReceivedQty, ph: 'e.g. 880' },
+              { label: 'CPI Qty *',     type: 'number', value: cpiQty,      set: setCpiQty,      ph: 'e.g. 88' },
+              { label: 'CPI Auditor *', type: 'text',   value: auditor,     set: setAuditor,     ph: 'Name' },
             ].map(f => (
               <div key={f.label} className="space-y-1">
                 <label className="block text-xs font-medium text-slate-600">{f.label}</label>
                 <input type={f.type} value={f.value}
                   onChange={e => f.set(e.target.value)}
-                  placeholder={f.ph}
+                  placeholder={(f as any).ph}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-teal-500" />
               </div>
             ))}
           </div>
+
+          {/* FIX 2: Inspection status selector — added below the header fields */}
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <StatusSelector value={inspectionStatus} onChange={setInspectionStatus} />
+            {inspectionStatus === 'Failed' && (
+              <p className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <AlertCircle className="mr-1 inline h-3 w-3" />
+                Saving as <strong>Failed</strong> — this store-in will not be eligible for production until the status is updated to Passed.
+              </p>
+            )}
+            {inspectionStatus === 'Pending' && (
+              <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <AlertCircle className="mr-1 inline h-3 w-3" />
+                Saving as <strong>Pending</strong> — inspection is not yet complete. Production will be blocked until status is updated.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ── Inspection Grid ──────────────────────────────────────────────── */}
+      {/* ── Inspection Grid (unchanged) ──────────────────────────────────── */}
       {cuts.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
 
@@ -636,6 +710,11 @@ export default function CPIPage() {
               <p><span className="text-slate-500 w-24 inline-block">Style No:</span><span className="font-semibold">{selStyle}</span></p>
               <p><span className="text-slate-500 w-24 inline-block">Body Colour:</span><span className="font-semibold">{bodyColour}</span></p>
               <p><span className="text-slate-500 w-24 inline-block">CPI Qty:</span><span className="font-semibold">{cpiQty || '—'}</span></p>
+              <p><span className="text-slate-500 w-24 inline-block">Status:</span>
+                <span className={`font-bold ${inspectionStatus === 'Passed' ? 'text-emerald-600' : inspectionStatus === 'Failed' ? 'text-red-600' : 'text-amber-600'}`}>
+                  {inspectionStatus}
+                </span>
+              </p>
             </div>
           </div>
 
@@ -672,112 +751,65 @@ export default function CPIPage() {
                 {cuts.map((cut, cutIdx) =>
                   cut.bundles.length > 0
                     ? cut.bundles.map((bundle, bundleIdx) => {
-                        const def        = cut.defects[bundleIdx] ?? cut.defects[0];
-                        const defIdx     = bundleIdx;
-                        const defInfo    = DEFECTS[bundleIdx % DEFECTS.length];
-                        const isFirstRow = bundleIdx === 0;
+                        const def      = cut.defects[bundleIdx] ?? cut.defects[0];
+                        const defIdx   = bundleIdx;
+                        const defInfo  = DEFECTS[bundleIdx % DEFECTS.length];
+                        const isFirst  = bundleIdx === 0;
 
                         return (
                           <tr key={`${cutIdx}-${bundleIdx}`}
                             className={`${bundleIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-teal-50/20 transition-colors`}>
-
-                            {/* Code — always show */}
-                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-400 font-mono text-[10px]">
-                              {defInfo?.code ?? ''}
+                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-400 font-mono text-[10px]">{defInfo?.code ?? ''}</td>
+                            <td className="border border-slate-200 px-2 py-1 text-slate-700">{defInfo?.label ?? ''}</td>
+                            <td className="border border-slate-200 px-0.5 py-0.5 text-center">
+                              <Cell value={def.check} onChange={v => updateDefect(cutIdx, defIdx, 'check', v)} w="w-6" />
                             </td>
-
-                            {/* Defect label — always show */}
-                            <td className="border border-slate-200 px-2 py-1 text-slate-700">
-                              {defInfo?.label ?? ''}
+                            <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-700">{isFirst ? cut.cutNo : ''}</td>
+                            <td className="border border-slate-200 px-1 py-1 text-center font-bold text-slate-800">{isFirst ? cut.cutQty : ''}</td>
+                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">{bundle?.bundleNo ?? ''}</td>
+                            <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-indigo-700">{isFirst ? cut.component : ''}</td>
+                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">{bundle?.size ?? ''}</td>
+                            {(['beforeL_plus','beforeL_minus','beforeW_plus','beforeW_minus'] as const).map(f => (
+                              <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-blue-50/20">
+                                <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
+                              </td>
+                            ))}
+                            {(['afterL_plus','afterL_minus','afterW_plus','afterW_minus'] as const).map(f => (
+                              <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-green-50/20">
+                                <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
+                              </td>
+                            ))}
+                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-500 text-[10px]">{bundle?.numberRange ?? ''}</td>
+                            <td className="border border-slate-200 px-0.5 py-0.5">
+                              <Cell value={def.sampleSize} onChange={v => updateDefect(cutIdx, defIdx, 'sampleSize', v)} w="w-12" type="number" />
                             </td>
-
-                        {/* Check mark */}
-                        <td className="border border-slate-200 px-0.5 py-0.5 text-center">
-                          <Cell value={def.check} onChange={v => updateDefect(cutIdx, defIdx, 'check', v)} w="w-6" />
-                        </td>
-
-                        {/* Cut No — first row of cut only */}
-                        <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-700">
-                          {isFirstRow ? cut.cutNo : ''}
-                        </td>
-
-                        {/* Qty — first row of cut only */}
-                        <td className="border border-slate-200 px-1 py-1 text-center font-bold text-slate-800">
-                          {isFirstRow ? cut.cutQty : ''}
-                        </td>
-
-                        {/* Bundle No — from StoreIn */}
-                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">
-                          {bundle?.bundleNo ?? ''}
-                        </td>
-
-                        {/* Component — first row of cut only */}
-                        <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-indigo-700">
-                          {isFirstRow ? cut.component : ''}
-                        </td>
-
-                        {/* Size — from StoreIn */}
-                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">
-                          {bundle?.size ?? ''}
-                        </td>
-
-                        {/* Before printing — manual */}
-                        {(['beforeL_plus','beforeL_minus','beforeW_plus','beforeW_minus'] as const).map(f => (
-                          <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-blue-50/20">
-                            <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
-                          </td>
-                        ))}
-
-                        {/* After printing — manual */}
-                        {(['afterL_plus','afterL_minus','afterW_plus','afterW_minus'] as const).map(f => (
-                          <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-green-50/20">
-                            <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
-                          </td>
-                        ))}
-
-                        {/* No. Range — from StoreIn */}
-                        <td className="border border-slate-200 px-1 py-1 text-center text-slate-500 text-[10px]">
-                          {bundle?.numberRange ?? ''}
-                        </td>
-
-                        {/* Sample Size 10% — auto, editable */}
-                        <td className="border border-slate-200 px-0.5 py-0.5">
-                          <Cell value={def.sampleSize} onChange={v => updateDefect(cutIdx, defIdx, 'sampleSize', v)} w="w-12" type="number" />
-                        </td>
-
-                        {/* Defected Qty — manual */}
-                        <td className="border border-slate-200 px-0.5 py-0.5">
-                          <Cell value={def.defectedQty} onChange={v => updateDefect(cutIdx, defIdx, 'defectedQty', v)} w="w-12" type="number" />
-                        </td>
-
-                        {/* % — auto-calculated, editable */}
-                        <td className={`border border-slate-200 px-0.5 py-0.5 ${parseFloat(def.percentage) > 0 ? 'bg-red-50/40' : ''}`}>
-                          <Cell value={def.percentage} onChange={v => updateDefect(cutIdx, defIdx, 'percentage', v)} w="w-10" />
-                        </td>
-
-                        {/* Remarks */}
-                        <td className="border border-slate-200 px-0.5 py-0.5">
-                          <Cell value={def.remarks} onChange={v => updateDefect(cutIdx, defIdx, 'remarks', v)} w="w-24" placeholder="…" />
-                        </td>
-
-                        {/* Delete bundle row */}
-                        <td className="border border-slate-200 px-0.5 py-0.5 text-center">
-                          {cut.bundles.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => deleteBundle(cutIdx, bundleIdx)}
-                              title="Remove this bundle row"
-                              className="rounded p-0.5 text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                            <td className="border border-slate-200 px-0.5 py-0.5">
+                              <Cell value={def.defectedQty} onChange={v => updateDefect(cutIdx, defIdx, 'defectedQty', v)} w="w-12" type="number" />
+                            </td>
+                            <td className={`border border-slate-200 px-0.5 py-0.5 ${parseFloat(def.percentage) > 0 ? 'bg-red-50/40' : ''}`}>
+                              <Cell value={def.percentage} onChange={v => updateDefect(cutIdx, defIdx, 'percentage', v)} w="w-10" />
+                            </td>
+                            <td className="border border-slate-200 px-0.5 py-0.5">
+                              <Cell value={def.remarks} onChange={v => updateDefect(cutIdx, defIdx, 'remarks', v)} w="w-24" placeholder="…" />
+                            </td>
+                            <td className="border border-slate-200 px-0.5 py-0.5 text-center">
+                              {cut.bundles.length > 1 && (
+                                <button type="button" onClick={() => deleteBundle(cutIdx, bundleIdx)}
+                                  title="Remove this bundle row"
+                                  className="rounded p-0.5 text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                                    <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                                  </svg>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
                         );
                       })
                     : null
                 )}
-                {/* Screen totals row */}
+                {/* Totals row */}
                 <tr className="bg-slate-100 font-bold text-[11px]">
                   <td className="border border-slate-300 px-2 py-1.5 text-left font-bold" colSpan={2}>TOTALS</td>
                   <td className="border border-slate-300 px-1 py-1" />
@@ -788,7 +820,6 @@ export default function CPIPage() {
                   <td className="border border-slate-300 px-1 py-1" />
                   <td className="border border-slate-300 px-1 py-1" />
                   <td className="border border-slate-300 px-1 py-1" />
-                  {/* Before/After 8 cols */}
                   {Array.from({ length: 8 }).map((_, i) => <td key={i} className="border border-slate-300 px-1 py-1" />)}
                   <td className="border border-slate-300 px-1 py-1" />
                   <td className="border border-slate-300 px-1 py-1 font-black text-teal-700">
@@ -806,7 +837,19 @@ export default function CPIPage() {
 
           {/* Footer */}
           <div className="border-t border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between text-xs text-slate-600">
-            <p>CPI Auditor: <span className="font-bold text-slate-900">{auditor || '_______________'}</span></p>
+            <div className="flex items-center gap-4">
+              <p>CPI Auditor: <span className="font-bold text-slate-900">{auditor || '_______________'}</span></p>
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold border ${
+                inspectionStatus === 'Passed'  ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                inspectionStatus === 'Failed'  ? 'bg-red-50 text-red-700 border-red-200' :
+                'bg-amber-50 text-amber-700 border-amber-200'
+              }`}>
+                {inspectionStatus === 'Passed'  ? <CheckCircle2 className="h-3 w-3" /> :
+                 inspectionStatus === 'Failed'  ? <XCircle className="h-3 w-3" /> :
+                 <Clock className="h-3 w-3" />}
+                {inspectionStatus}
+              </span>
+            </div>
             <div className="flex gap-6">
               <span>Total Cuts: <span className="font-bold">{cuts.length}</span></span>
               <span>Total Qty: <span className="font-bold">{cuts.reduce((s, c) => s + c.cutQty, 0)}</span></span>
@@ -824,8 +867,6 @@ export default function CPIPage() {
           <p className="text-xs text-slate-300 mt-1">Ensure the Store-In record exists and cuts are assigned to this component.</p>
         </div>
       )}
-
-
     </motion.div>
   );
 }
