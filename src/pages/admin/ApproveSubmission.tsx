@@ -56,7 +56,6 @@ export default function ApproveSubmission() {
     const loadPageData = async () => {
       try {
         await Promise.all([fetchData(), fetchApprovals()]);
-        // Fetch store-in records to determine which approvals are locked
         try {
           const storeInRes = await fetch(
             `${API.INVENTORY}/store-in`,
@@ -71,10 +70,7 @@ export default function ApproveSubmission() {
       } catch (error) {
         console.error('Failed to load approval page data:', error);
         setErrors({
-          submission:
-            error instanceof Error
-              ? error.message
-              : 'Failed to load submissions or approvals.',
+          submission: error instanceof Error ? error.message : 'Failed to load submissions or approvals.',
         });
       }
     };
@@ -84,27 +80,54 @@ export default function ApproveSubmission() {
   }, [fetchData, fetchApprovals]);
 
   const enrichedSubmissions = useMemo(() => {
-    return submissions.map((sub) => {
-      const matchingJob = jobs.find(
-        (job) =>
-          job.styleNo?.trim().toLowerCase() === sub.styleNo?.trim().toLowerCase() &&
-          job.customer?.trim().toLowerCase() === sub.customerName?.trim().toLowerCase()
-      );
-
-      // SampleStyle shares the same Id as the Submission (set in the bridge)
+    const enriched = submissions.map((sub) => {
       const matchingSampleStyle = sampleStyles.find((s) => s.id === sub.id);
+      const matchingJob = jobs.find((job) => {
+        const baseMatch = 
+          job.styleNo?.trim().toLowerCase() === sub.styleNo?.trim().toLowerCase() &&
+          job.customer?.trim().toLowerCase() === sub.customerName?.trim().toLowerCase();
+        
+        if (!baseMatch) return false;
+
+        if (matchingSampleStyle?.component && job.component) {
+          return job.component.trim().toLowerCase() === matchingSampleStyle.component.trim().toLowerCase();
+        }
+        return true; 
+      });
 
       const approval = approvals.find((a) => a.submissionId === sub.id);
+      const componentName = matchingSampleStyle?.component || matchingJob?.component || 'Unknown';
 
       return {
         ...sub,
         job: matchingJob || null,
         sampleStyle: matchingSampleStyle || null,
         approval: approval || null,
+        componentName,
         currentStatus: (approval?.status || 'Pending') as ApprovalStatus,
       };
     });
-  }, [submissions, jobs, approvals]);
+
+    // FIX: Calculate the latest revision per COMPONENT, not just per Style
+    const latestRevisionsMap = new Map<string, number>();
+    enriched.forEach((sub) => {
+      const key = `${sub.styleNo}_${sub.customerName}_${sub.componentName}`.toLowerCase();
+      const currentMax = latestRevisionsMap.get(key) || 0;
+      if (sub.revisionNo > currentMax) {
+        latestRevisionsMap.set(key, sub.revisionNo);
+      }
+    });
+
+    return enriched.map((sub) => {
+      const key = `${sub.styleNo}_${sub.customerName}_${sub.componentName}`.toLowerCase();
+      const isLatestForComponent = sub.revisionNo === latestRevisionsMap.get(key);
+
+      return {
+        ...sub,
+        isLatestForComponent,
+      };
+    });
+  }, [submissions, jobs, approvals, sampleStyles]);
 
   const filteredSubmissions = useMemo(() => {
     const customerFilter = searchCustomer.trim().toLowerCase();
@@ -112,22 +135,16 @@ export default function ApproveSubmission() {
 
     return enrichedSubmissions
       .filter((sub) => {
-        const matchesCustomer = !customerFilter
-          ? true
-          : sub.customerName.toLowerCase().includes(customerFilter);
-
-        const matchesStyle = !styleFilter
-          ? true
-          : sub.styleNo.toLowerCase().includes(styleFilter);
-
-        const matchesHistory = showHistory ? true : sub.isLatestRevision;
+        const matchesCustomer = !customerFilter ? true : sub.customerName.toLowerCase().includes(customerFilter);
+        const matchesStyle = !styleFilter ? true : sub.styleNo.toLowerCase().includes(styleFilter);
+        // FIX: Use isLatestForComponent instead of the backend's flawed isLatestRevision
+        const matchesHistory = showHistory ? true : sub.isLatestForComponent;
 
         return matchesCustomer && matchesStyle && matchesHistory;
       })
       .sort((a, b) => {
         const bTime = new Date(b.submissionDate).getTime();
         const aTime = new Date(a.submissionDate).getTime();
-
         if (bTime !== aTime) return bTime - aTime;
         return b.revisionNo - a.revisionNo;
       });
@@ -137,11 +154,9 @@ export default function ApproveSubmission() {
     return enrichedSubmissions.find((sub) => sub.id === selectedSubmissionId) || null;
   }, [enrichedSubmissions, selectedSubmissionId]);
 
-  const isLockedOldRevision = selectedSubmission
-    ? !selectedSubmission.isLatestRevision
-    : false;
+  // FIX: Validate locks against component logic
+  const isLockedOldRevision = selectedSubmission ? !selectedSubmission.isLatestForComponent : false;
 
-  // Lock if store-in records exist for this submission (approved and already in use)
   const isLockedByStoreIn = selectedSubmission
     ? storeInSubmissionIds.has(selectedSubmission.id) && selectedSubmission.currentStatus === 'Approved'
     : false;
@@ -153,56 +168,28 @@ export default function ApproveSubmission() {
     }
 
     if (selectedSubmission.approval) {
-      setFormData({
-        status: selectedSubmission.approval.status,
-        remarks: '',
-      });
+      setFormData({ status: selectedSubmission.approval.status, remarks: '' });
     } else {
       setFormData(INITIAL_FORM_STATE);
     }
   }, [selectedSubmission]);
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
-
-    if (errors.submission) {
-      setErrors((prev) => ({
-        ...prev,
-        submission: '',
-      }));
-    }
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors((prev) => ({ ...prev, [name]: '' }));
+    if (errors.submission) setErrors((prev) => ({ ...prev, submission: '' }));
   };
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-
     if (!selectedSubmission) {
       newErrors.submission = 'Please select a submitted style.';
     }
-
-    if (selectedSubmission && !selectedSubmission.isLatestRevision) {
-      newErrors.submission =
-        'This is an older revision. Only the latest revision can be edited.';
+    // FIX: Validate against component logic
+    if (selectedSubmission && !selectedSubmission.isLatestForComponent) {
+      newErrors.submission = 'This is an older revision. Only the latest revision can be edited.';
     }
-
-    if (formData.status === 'Approved') {
-
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -210,7 +197,7 @@ export default function ApproveSubmission() {
   const handleSaveDecision = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm() || !selectedSubmission || !selectedSubmission.isLatestRevision) {
+    if (!validateForm() || !selectedSubmission || !selectedSubmission.isLatestForComponent) {
       return;
     }
 
@@ -237,8 +224,6 @@ export default function ApproveSubmission() {
     try {
       await processApproval(newRecord);
 
-      // Also update SampleStyle.AdminStatus so the developer sees the correct
-      // status on the Submission page without needing a backend restart
       try {
         await fetch(`${API.BASE}/api/samplestyle/${selectedSubmission.id}/adminaction`, {
           method: 'PATCH',
@@ -251,30 +236,23 @@ export default function ApproveSubmission() {
             remarks: (formData as any).remarks || '',
           }),
         });
-      } catch { /* non-critical — approval record already saved */ }
+      } catch { /* non-critical */ }
 
       await fetchApprovals();
       await fetchStyles(true);
 
       setErrors({});
-
-      // Close the card and show success — prevents double submission
       const decidedStatus = formData.status;
       setSelectedSubmissionId('');
       setFormData(INITIAL_FORM_STATE);
       setSuccessMsg(
-        decidedStatus === 'Approved'
-          ? `✓ Style approved successfully.`
-          : `Decision saved as ${decidedStatus}.`
+        decidedStatus === 'Approved' ? `✓ Style approved successfully.` : `Decision saved as ${decidedStatus}.`
       );
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (error) {
       console.error('Failed to save approval decision:', error);
       setErrors({
-        submission:
-          error instanceof Error
-            ? error.message
-            : 'Failed to save approval decision.',
+        submission: error instanceof Error ? error.message : 'Failed to save approval decision.',
       });
     } finally {
       setIsSaving(false);
@@ -294,7 +272,6 @@ export default function ApproveSubmission() {
           <div className="rounded-2xl bg-blue-50 p-3">
             <ClipboardCheck className="h-7 w-7 text-blue-600" />
           </div>
-
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Approve Submissions</h1>
             <p className="mt-1 text-sm text-slate-500">
@@ -323,7 +300,6 @@ export default function ApproveSubmission() {
           <Search className="h-5 w-5 text-slate-500" />
           <h2 className="text-lg font-semibold text-slate-900">Search Submitted Styles</h2>
         </div>
-
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Customer</label>
@@ -335,7 +311,6 @@ export default function ApproveSubmission() {
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
             />
           </div>
-
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Style No</label>
             <input
@@ -346,18 +321,12 @@ export default function ApproveSubmission() {
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
             />
           </div>
-
           <div className="flex items-end">
             <label className="flex w-full items-center gap-2 rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={showHistory}
-                onChange={(e) => setShowHistory(e.target.checked)}
-              />
+              <input type="checkbox" checked={showHistory} onChange={(e) => setShowHistory(e.target.checked)} />
               Show history revisions
             </label>
           </div>
-
           <div className="flex items-end">
             <button
               type="button"
@@ -384,10 +353,11 @@ export default function ApproveSubmission() {
               </span>
             </div>
 
-            <div className="space-y-3 max-h-175 overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
               {filteredSubmissions.length > 0 ? (
                 filteredSubmissions.map((sub) => {
                   const isSelected = selectedSubmissionId === sub.id;
+                  const componentName = sub.componentName !== 'Unknown' ? sub.componentName : '';
 
                   return (
                     <button
@@ -398,20 +368,20 @@ export default function ApproveSubmission() {
                         setErrors({});
                       }}
                       className={`w-full rounded-xl border p-4 text-left transition ${
-                        isSelected
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                        isSelected ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">{sub.styleNo}</p>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {sub.styleNo}
+                            {componentName && (
+                              <span className="ml-1.5 font-normal text-slate-500">({componentName})</span>
+                            )}
+                          </p>
                           <p className="mt-1 text-sm text-slate-600">{sub.customerName}</p>
                         </div>
-
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${badgeStyles[sub.currentStatus]}`}
-                        >
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${badgeStyles[sub.currentStatus]}`}>
                           {renderStatusIcon(sub.currentStatus)}
                           {sub.currentStatus}
                         </span>
@@ -421,7 +391,8 @@ export default function ApproveSubmission() {
                         <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 font-medium text-indigo-700">
                           Rev {sub.revisionNo}
                         </span>
-                        {sub.isLatestRevision ? (
+                        {/* FIX: Badge logic uses isLatestForComponent */}
+                        {sub.isLatestForComponent ? (
                           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 font-medium text-emerald-700">
                             Latest
                           </span>
@@ -462,12 +433,15 @@ export default function ApproveSubmission() {
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <h2 className="text-xl font-bold text-slate-900">
+                      <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                         {selectedSubmission.styleNo}
+                        {selectedSubmission.componentName !== 'Unknown' && (
+                          <span className="rounded-md bg-slate-100 px-2.5 py-0.5 text-sm font-medium text-slate-600 border border-slate-200">
+                            {selectedSubmission.componentName}
+                          </span>
+                        )}
                       </h2>
-                      <p className="mt-1 text-sm text-slate-600">
-                        {selectedSubmission.customerName}
-                      </p>
+                      <p className="mt-1 text-sm text-slate-600">{selectedSubmission.customerName}</p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -475,10 +449,7 @@ export default function ApproveSubmission() {
                         <GitBranch className="h-4 w-4" />
                         Rev {selectedSubmission.revisionNo}
                       </span>
-
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium ${badgeStyles[selectedSubmission.currentStatus]}`}
-                      >
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium ${badgeStyles[selectedSubmission.currentStatus]}`}>
                         {renderStatusIcon(selectedSubmission.currentStatus)}
                         {selectedSubmission.currentStatus}
                       </span>
@@ -486,32 +457,20 @@ export default function ApproveSubmission() {
                   </div>
 
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <InfoCard
-                      icon={Layers3}
-                      label="Submission Level"
-                      value={selectedSubmission.level || '-'}
-                    />
-                    <InfoCard
-                      icon={CalendarDays}
-                      label="Submission Date"
-                      value={selectedSubmission.submissionDate || '-'}
-                    />
-                    <InfoCard
-                      icon={User2}
-                      label="Comment"
-                      value={selectedSubmission.comment || '-'}
-                    />
+                    <InfoCard icon={Layers3} label="Submission Level" value={selectedSubmission.level || '-'} />
+                    <InfoCard icon={CalendarDays} label="Submission Date" value={selectedSubmission.submissionDate || '-'} />
+                    <InfoCard icon={User2} label="Comment" value={selectedSubmission.comment || '-'} />
                   </div>
 
-                  {!selectedSubmission.isLatestRevision && (
+                  {/* FIX: Banner logic uses isLatestForComponent */}
+                  {!selectedSubmission.isLatestForComponent && (
                     <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                       <div className="flex items-center gap-2 font-semibold">
                         <Lock className="h-4 w-4" />
                         Older revision locked
                       </div>
                       <p className="mt-1">
-                        This revision is history only. A newer revision exists, so this decision
-                        cannot be edited anymore.
+                        This revision is history only. A newer revision exists for this component, so this decision cannot be edited anymore.
                       </p>
                     </div>
                   )}
@@ -583,11 +542,8 @@ export default function ApproveSubmission() {
                             )}
                           </div>
 
-                          {/* Latest revision artwork — from SampleStyle.imagePath which is always up to date */}
                           {(() => {
                             const ss = (selectedSubmission as any).sampleStyle;
-                            // Prefer SampleStyle.imagePath (updated on each revision artwork upload)
-                            // Fall back to DevelopmentJob artwork if no sample style found
                             const artworkUrl = ss?.imagePath
                               ? ss.imagePath.startsWith('http')
                                 ? ss.imagePath
@@ -622,7 +578,6 @@ export default function ApproveSubmission() {
                     </div>
                   )}
 
-                  {/* Revision Summary Banner */}
                   {(() => {
                     const ss = (selectedSubmission as any).sampleStyle;
                     if (!ss) return null;
@@ -640,7 +595,6 @@ export default function ApproveSubmission() {
                               : 'No client revisions — approved on first submission'}
                           </p>
                         </div>
-
                         {latest && (
                           <div className="rounded-lg border border-indigo-200 bg-white px-4 py-3">
                             <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-400 mb-1">
@@ -650,7 +604,6 @@ export default function ApproveSubmission() {
                             <p className="text-[10px] text-slate-400 mt-1">{latest.createdAt} · {latest.createdBy}</p>
                           </div>
                         )}
-
                         {revisions.length > 1 && (
                           <div className="flex gap-2 overflow-x-auto pb-1">
                             {[...revisions]
@@ -666,8 +619,7 @@ export default function ApproveSubmission() {
                                   </div>
                                   {rev.artworkUrl && (
                                     <img
-                                      src={rev.artworkUrl.startsWith('http') ? rev.artworkUrl
-                                        : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(rev.artworkUrl)}`}
+                                      src={rev.artworkUrl.startsWith('http') ? rev.artworkUrl : `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(rev.artworkUrl)}`}
                                       alt={`Rev ${rev.revisionNo}`}
                                       className="w-full h-20 object-cover rounded border border-slate-200"
                                       onError={e => { (e.target as HTMLImageElement).style.display='none'; }}
@@ -697,9 +649,7 @@ export default function ApproveSubmission() {
 
                   <form onSubmit={handleSaveDecision} className="space-y-5">
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">
-                        Status
-                      </label>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
                       <select
                         name="status"
                         value={formData.status}
@@ -713,7 +663,6 @@ export default function ApproveSubmission() {
                       </select>
                     </div>
 
-                    {/* Optional remarks */}
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Remarks (optional)</label>
                       <textarea
@@ -726,7 +675,6 @@ export default function ApproveSubmission() {
                       />
                     </div>
 
-                    {/* Submission details filled by developer — shown as read-only for admin reference */}
                     {formData.status === 'Approved' && (selectedSubmission as any).sampleStyle && (
                       <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
                         <div><p className="text-slate-400">RA Meeting Date</p><p className="font-semibold text-slate-700">{(selectedSubmission as any).sampleStyle.rcMeetingDate || '—'}</p></div>
@@ -768,9 +716,7 @@ export default function ApproveSubmission() {
                 className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm"
               >
                 <ClipboardCheck className="mx-auto h-10 w-10 text-slate-400" />
-                <h3 className="mt-4 text-lg font-semibold text-slate-900">
-                  Select a submitted style
-                </h3>
+                <h3 className="mt-4 text-lg font-semibold text-slate-900">Select a submitted style</h3>
                 <p className="mt-2 text-sm text-slate-500">
                   Search by customer or style number, then choose a submission to review.
                 </p>
@@ -783,15 +729,7 @@ export default function ApproveSubmission() {
   );
 }
 
-function InfoCard({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-}) {
+function InfoCard({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string; }) {
   return (
     <div className="rounded-xl border border-slate-200 p-4">
       <div className="mb-2 flex items-center gap-2">
@@ -799,48 +737,6 @@ function InfoCard({
         <p className="text-sm font-medium text-slate-600">{label}</p>
       </div>
       <p className="wrap-break-word text-sm font-semibold text-slate-900">{value || '-'}</p>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  name,
-  value,
-  onChange,
-  error,
-  type = 'text',
-  placeholder,
-  disabled = false,
-}: {
-  label: string;
-  name: string;
-  value: string;
-  onChange: (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => void;
-  error?: string;
-  type?: string;
-  placeholder?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
-      <input
-        type={type}
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none ${
-          error
-            ? 'border-red-400 focus:ring-2 focus:ring-red-400'
-            : 'border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500'
-        } disabled:bg-slate-100 disabled:cursor-not-allowed`}
-      />
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
 }

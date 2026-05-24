@@ -19,6 +19,22 @@ function generateAdNo(existingNotes: AdviceNoteRecord[]): string {
   return 'AD-' + String(maxNum + 1).padStart(4, '0');
 }
 
+// ── Per-cut subtotal helper ───────────────────────────────────────────────────
+function getCutSubtotals(rows: AdviceNoteRow[]) {
+  const map = new Map<string, { pcs: number; pd: number; fd: number; good: number }>();
+  rows.forEach(r => {
+    const key = r.cutForm;
+    const existing = map.get(key) ?? { pcs: 0, pd: 0, fd: 0, good: 0 };
+    map.set(key, {
+      pcs:  existing.pcs  + (r.totalPcs  || 0),
+      pd:   existing.pd   + (r.pd        || 0),
+      fd:   existing.fd   + (r.fd        || 0),
+      good: existing.good + (r.goodQty   || 0),
+    });
+  });
+  return map;
+}
+
 export default function AdviceNotePage() {
   const {
     adviceNotes, eligibleDispatchItems,
@@ -77,7 +93,9 @@ export default function AdviceNotePage() {
   const totalFd   = bundleRows.reduce((s, r) => s + r.fd, 0);
   const totalGood = bundleRows.reduce((s, r) => s + r.goodQty, 0);
 
-  // Only show styles that don't already have an advice note (unless currently editing)
+  // ── Cut subtotals (live, recalculates as user edits P/D & F/D) ───────────
+  const cutSubtotals = useMemo(() => getCutSubtotals(bundleRows), [bundleRows]);
+
   const unusedStyles = useMemo(() => {
     return eligibleDispatchItems.filter(item => {
       if (editingId && item.storeInRecordId === selectedStoreInId) return true;
@@ -85,7 +103,6 @@ export default function AdviceNotePage() {
     });
   }, [eligibleDispatchItems, adviceNotes, editingId, selectedStoreInId]);
 
-  // ── Add cut to bundle table ───────────────────────────────────────────────
   const handleAddCut = () => {
     if (!selectedCutNo) { setErrors(p => ({ ...p, cutNo: 'Select a cut' })); return; }
     if (!selectedComponent) { setErrors(p => ({ ...p, component: 'Select a component' })); return; }
@@ -109,24 +126,20 @@ export default function AdviceNotePage() {
     setErrors({}); setPageError('');
   };
 
-  // ── Remove an entire cut (all its bundle rows) ────────────────────────────
   const handleRemoveCut = (cutNo: string) => {
     setBundleRows(prev => prev.filter(r => r.cutForm !== cutNo));
     setAddedCutNos(prev => prev.filter(c => c !== cutNo));
   };
 
-  // ── Remove a single bundle row ────────────────────────────────────────────
   const handleRemoveBundleRow = (indexToRemove: number) => {
     setBundleRows(prev => {
       const newRows = prev.filter((_, idx) => idx !== indexToRemove);
-      // If all bundles of a cut are removed, remove the cut tag too
       const remainingCuts = new Set(newRows.map(r => r.cutForm));
       setAddedCutNos(prevCuts => prevCuts.filter(c => remainingCuts.has(c)));
       return newRows;
     });
   };
 
-  // ── Update P/D or F/D on a row ────────────────────────────────────────────
   const updateBundleRow = (index: number, field: 'pd' | 'fd', value: string) => {
     const num = parseInt(value) || 0;
     setBundleRows(prev => prev.map((row, i) => {
@@ -246,6 +259,21 @@ export default function AdviceNotePage() {
     };
   }
 
+  // ── Group bundleRows by cut for rendering ─────────────────────────────────
+  // Preserves order cuts were added, groups bundles under each cut
+  const rowsByCut = useMemo(() => {
+    const groups: { cutNo: string; rows: { row: AdviceNoteRow; globalIdx: number }[] }[] = [];
+    const seenCuts = new Set<string>();
+    bundleRows.forEach((row, globalIdx) => {
+      if (!seenCuts.has(row.cutForm)) {
+        seenCuts.add(row.cutForm);
+        groups.push({ cutNo: row.cutForm, rows: [] });
+      }
+      groups.find(g => g.cutNo === row.cutForm)!.rows.push({ row, globalIdx });
+    });
+    return groups;
+  }, [bundleRows]);
+
   // ==========================================
   // RENDER
   // ==========================================
@@ -267,9 +295,7 @@ export default function AdviceNotePage() {
         </div>
       )}
 
-      {/* ==========================================
-          ADVICE NOTE FORM — physical document layout
-          ========================================== */}
+      {/* Advice Note Form */}
       <div className="overflow-hidden border border-slate-300 bg-white shadow-xl">
         <form onSubmit={handleSubmit}>
 
@@ -316,7 +342,7 @@ export default function AdviceNotePage() {
                   <option value="">Select style…</option>
                   {unusedStyles.map(item => (
                     <option key={item.storeInRecordId} value={item.storeInRecordId}>
-                      {item.styleNo} | {item.customerName} | Sch: {item.scheduleNo} | Remaining: {item.remainingDispatchQty}
+                      {item.styleNo} | {item.customerName}{item.scheduleNo ? ' | Sch: ' + item.scheduleNo : ''} | Remaining: {item.remainingDispatchQty}
                     </option>
                   ))}
                 </select>
@@ -340,7 +366,7 @@ export default function AdviceNotePage() {
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 md:grid-cols-4 text-sm border-t border-blue-200 pt-3">
                 <InfoLine label="Customer"      value={selectedItem.customerName} />
                 <InfoLine label="Style #"       value={selectedItem.styleNo} />
-                <InfoLine label="Schedule No"   value={selectedItem.scheduleNo} />
+                <InfoLine label="Schedule No"   value={selectedItem.scheduleNo || '—'} />
                 <InfoLine label="Body Colour"   value={selectedItem.bodyColour} />
                 <InfoLine label="Print Colour"  value={selectedItem.printColour} />
                 <InfoLine label="Components"    value={selectedItem.components} />
@@ -354,7 +380,6 @@ export default function AdviceNotePage() {
           {selectedItem && (
             <div className="border-b border-slate-300 bg-orange-50/30 px-5 py-4">
               <div className="flex items-end gap-3 flex-wrap">
-
                 <div className="space-y-1 flex-1 min-w-45">
                   <label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">
                     Cut No <span className="text-red-500">*</span>
@@ -383,8 +408,7 @@ export default function AdviceNotePage() {
                   <label className="block text-[10px] font-bold uppercase tracking-wide text-orange-800">
                     Component <span className="text-[9px] font-normal text-slate-400">(from QC)</span>
                   </label>
-                  <div className={'w-full rounded border px-3 py-2 text-sm font-bold outline-none ' + (selectedComponent ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : errors.component ? 'border-red-400 bg-red-50 text-red-500' : 'border-slate-300 bg-slate-50 text-slate-400')}
-                    title="Locked by QC inspection — auto-filled from the selected cut">
+                  <div className={'w-full rounded border px-3 py-2 text-sm font-bold outline-none ' + (selectedComponent ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : errors.component ? 'border-red-400 bg-red-50 text-red-500' : 'border-slate-300 bg-slate-50 text-slate-400')}>
                     {selectedComponent || (selectedCutNo ? 'No component set by QC for this cut' : '—')}
                   </div>
                 </div>
@@ -396,7 +420,6 @@ export default function AdviceNotePage() {
                 </button>
               </div>
 
-              {/* Added cut tags */}
               {addedCutNos.length > 0 && (
                 <div className="flex gap-2 mt-3 flex-wrap">
                   {addedCutNos.map(cn => (
@@ -413,7 +436,7 @@ export default function AdviceNotePage() {
             </div>
           )}
 
-          {/* Bundle rows table */}
+          {/* Bundle rows table — grouped by cut with subtotals */}
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -432,49 +455,67 @@ export default function AdviceNotePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {bundleRows.length > 0 ? (
+                {rowsByCut.length > 0 ? (
                   <>
-                    {bundleRows.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-blue-50/30">
-                        <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-500">
-                          {String(idx + 1).padStart(2, '0')}
-                        </td>
-                        <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.colour}</td>
-                        <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-bold">{row.bundleNo}</td>
-                        <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.size}</td>
-                        <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.cutForm}</td>
-                        <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-semibold text-emerald-700">
-                          {row.component || '—'}
-                        </td>
-                        <td className="border-r border-slate-200 px-2 py-1.5 text-center font-bold">{row.totalPcs}</td>
-                        <td className="border-r border-slate-200 p-0">
-                          <input type="text" inputMode="numeric" pattern="[0-9]*"
-                            value={row.pd || ''}
-                            onChange={e => updateBundleRow(idx, 'pd', e.target.value.replace(/[^0-9]/g, ''))}
-                            className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50"
-                            placeholder="-" />
-                        </td>
-                        <td className="border-r border-slate-200 p-0">
-                          <input type="text" inputMode="numeric" pattern="[0-9]*"
-                            value={row.fd || ''}
-                            onChange={e => updateBundleRow(idx, 'fd', e.target.value.replace(/[^0-9]/g, ''))}
-                            className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50"
-                            placeholder="-" />
-                        </td>
-                        <td className="border-r border-emerald-200 bg-emerald-50/30 px-2 py-1.5 text-center font-black text-emerald-700">
-                          {row.goodQty}
-                        </td>
-                        <td className="px-2 py-1.5 text-center">
-                          <button type="button" onClick={() => handleRemoveBundleRow(idx)}
-                            className="text-slate-300 hover:text-red-600 transition-colors" title="Remove bundle row">
-                            <Trash2 className="mx-auto h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {/* Totals row */}
+                    {rowsByCut.map(group => {
+                      const sub = cutSubtotals.get(group.cutNo) ?? { pcs: 0, pd: 0, fd: 0, good: 0 };
+                      return (
+                        <>
+                          {/* Bundle rows for this cut */}
+                          {group.rows.map(({ row, globalIdx }) => (
+                            <tr key={globalIdx} className="hover:bg-blue-50/30">
+                              <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-500">
+                                {String(globalIdx + 1).padStart(2, '0')}
+                              </td>
+                              <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.colour}</td>
+                              <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-bold">{row.bundleNo}</td>
+                              <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.size}</td>
+                              <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs">{row.cutForm}</td>
+                              <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-semibold text-emerald-700">{row.component || '—'}</td>
+                              <td className="border-r border-slate-200 px-2 py-1.5 text-center font-bold">{row.totalPcs}</td>
+                              <td className="border-r border-slate-200 p-0">
+                                <input type="text" inputMode="numeric" pattern="[0-9]*"
+                                  value={row.pd || ''}
+                                  onChange={e => updateBundleRow(globalIdx, 'pd', e.target.value.replace(/[^0-9]/g, ''))}
+                                  className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50"
+                                  placeholder="-" />
+                              </td>
+                              <td className="border-r border-slate-200 p-0">
+                                <input type="text" inputMode="numeric" pattern="[0-9]*"
+                                  value={row.fd || ''}
+                                  onChange={e => updateBundleRow(globalIdx, 'fd', e.target.value.replace(/[^0-9]/g, ''))}
+                                  className="w-full bg-transparent py-1.5 text-center text-sm font-semibold text-red-700 outline-none focus:bg-red-50"
+                                  placeholder="-" />
+                              </td>
+                              <td className="border-r border-emerald-200 bg-emerald-50/30 px-2 py-1.5 text-center font-black text-emerald-700">{row.goodQty}</td>
+                              <td className="px-2 py-1.5 text-center">
+                                <button type="button" onClick={() => handleRemoveBundleRow(globalIdx)}
+                                  className="text-slate-300 hover:text-red-600 transition-colors" title="Remove bundle row">
+                                  <Trash2 className="mx-auto h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+
+                          {/* ── Cut subtotal row ── */}
+                          <tr className="bg-orange-50 border-t border-b-2 border-orange-300 text-xs font-bold">
+                            <td colSpan={5} className="border-r border-orange-200 px-4 py-1.5 text-right text-orange-700 italic">
+                              Sub-total: {group.cutNo}
+                            </td>
+                            <td className="border-r border-orange-200 px-2 py-1.5 text-center text-orange-600">—</td>
+                            <td className="border-r border-orange-200 px-2 py-1.5 text-center text-orange-800">{sub.pcs}</td>
+                            <td className="border-r border-orange-200 px-2 py-1.5 text-center text-red-700">{sub.pd || '—'}</td>
+                            <td className="border-r border-orange-200 px-2 py-1.5 text-center text-red-700">{sub.fd || '—'}</td>
+                            <td className="border-r border-orange-200 px-2 py-1.5 text-center text-emerald-700">{sub.good}</td>
+                            <td className="px-2 py-1.5" />
+                          </tr>
+                        </>
+                      );
+                    })}
+
+                    {/* Grand totals row */}
                     <tr className="border-t-2 border-slate-800 bg-slate-100 font-bold">
-                      <td colSpan={6} className="border-r border-slate-300 px-4 py-2 text-right text-xs uppercase tracking-wide text-slate-600">Totals</td>
+                      <td colSpan={6} className="border-r border-slate-300 px-4 py-2 text-right text-xs uppercase tracking-wide text-slate-600">Grand Total</td>
                       <td className="border-r border-slate-300 px-2 py-2 text-center font-black">{totalPcs}</td>
                       <td className="border-r border-slate-300 px-2 py-2 text-center font-black text-red-700">{totalPd || '—'}</td>
                       <td className="border-r border-slate-300 px-2 py-2 text-center font-black text-red-700">{totalFd || '—'}</td>
@@ -501,7 +542,7 @@ export default function AdviceNotePage() {
               className="w-full border-b border-slate-300 bg-transparent pb-1 text-sm outline-none focus:border-blue-600" />
           </div>
 
-          {/* Footer: signatures + action buttons */}
+          {/* Footer */}
           <div className="border-t-2 border-slate-800 bg-slate-50 p-5">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3 mb-4">
               <div className="space-y-1">
@@ -542,9 +583,7 @@ export default function AdviceNotePage() {
         </form>
       </div>
 
-      {/* ==========================================
-          SAVED ADVICE NOTES
-          ========================================== */}
+      {/* Saved Advice Notes */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 space-y-3">
           <h3 className="text-lg font-semibold text-slate-800">Advice Notes</h3>
@@ -593,7 +632,7 @@ export default function AdviceNotePage() {
                         )}
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Date: {note.deliveryDate} | Sch: {note.scheduleNo} | Cuts: {note.cutNo} | Dispatch: {note.dispatchQty}
+                        Date: {note.deliveryDate}{note.scheduleNo ? ' | Sch: ' + note.scheduleNo : ''} | Cuts: {note.cutNo} | Dispatch: {note.dispatchQty}
                       </p>
                     </div>
                     <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
@@ -663,138 +702,151 @@ export default function AdviceNotePage() {
 }
 
 // ==========================================
-// PRINT FUNCTION — opens new window with A4 portrait layout
+// PRINT FUNCTION — with per-cut subtotals
 // ==========================================
 function printAdviceNote(note: AdviceNoteRecord) {
   const rows = Object.values(note.rows || {});
-  const tP = rows.reduce((s, r) => s + (r.totalPcs || 0), 0);
-  const tD = rows.reduce((s, r) => s + (r.pd || 0), 0);
-  const tF = rows.reduce((s, r) => s + (r.fd || 0), 0);
-  const tG = rows.reduce((s, r) => s + (r.goodQty || 0), 0);
 
-  // Minimum 28 rows to fill page, plus 1 totals row
-  const minRows = Math.max(rows.length + 1, 28);
+  // Group rows by cut, preserving insertion order
+  const cutGroups = new Map<string, typeof rows>();
+  rows.forEach(r => {
+    const key = r.cutForm;
+    if (!cutGroups.has(key)) cutGroups.set(key, []);
+    cutGroups.get(key)!.push(r);
+  });
+
+  const grandPcs  = rows.reduce((s, r) => s + (r.totalPcs  || 0), 0);
+  const grandPd   = rows.reduce((s, r) => s + (r.pd        || 0), 0);
+  const grandFd   = rows.reduce((s, r) => s + (r.fd        || 0), 0);
+  const grandGood = rows.reduce((s, r) => s + (r.goodQty   || 0), 0);
+
+  // Minimum 28 data rows for print layout (not counting subtotal/total rows)
+  const dataRowCount = rows.length + cutGroups.size; // bundles + subtotal rows
+  const minDataRows = Math.max(dataRowCount, 24);
+  const blankPad = Math.max(0, minDataRows - dataRowCount);
 
   let tableRows = '';
-  for (let i = 0; i < minRows; i++) {
-    const r = rows[i];
-    const isTotals = i === minRows - 1;
+  let rowNo = 1;
 
-    if (isTotals) {
-      tableRows += '<tr class="total-row">'
-        + '<td>' + (i + 1) + '</td>'
-        + '<td colspan="5"></td>'
-        + '<td class="bold">' + tP + '</td>'
-        + '<td class="red bold">' + (tD || '') + '</td>'
-        + '<td class="red bold">' + (tF || '') + '</td>'
-        + '<td class="bold">' + tG + '</td>'
-        + '</tr>';
-    } else if (r) {
-      tableRows += '<tr>'
-        + '<td>' + String(i + 1).padStart(2, '0') + '</td>'
-        + '<td>' + (r.colour || '') + '</td>'
-        + '<td>' + (r.bundleNo || '') + '</td>'
-        + '<td>' + (r.size || '') + '</td>'
-        + '<td>' + (r.cutForm || '') + '</td>'
-        + '<td class="comp">' + (r.component || '') + '</td>'
-        + '<td class="bold">' + (r.totalPcs || '') + '</td>'
-        + '<td class="red">' + (r.pd || '—') + '</td>'
-        + '<td class="red">' + (r.fd || '—') + '</td>'
-        + '<td class="bold">' + (r.goodQty || '') + '</td>'
-        + '</tr>';
-    } else {
-      tableRows += '<tr>'
-        + '<td>' + String(i + 1).padStart(2, '0') + '</td>'
-        + '<td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>'
-        + '</tr>';
-    }
+  cutGroups.forEach((cutRows, cutNo) => {
+    const subPcs  = cutRows.reduce((s, r) => s + (r.totalPcs || 0), 0);
+    const subPd   = cutRows.reduce((s, r) => s + (r.pd       || 0), 0);
+    const subFd   = cutRows.reduce((s, r) => s + (r.fd       || 0), 0);
+    const subGood = cutRows.reduce((s, r) => s + (r.goodQty  || 0), 0);
+
+    // Bundle rows for this cut
+    cutRows.forEach(r => {
+      tableRows += `<tr>
+        <td>${String(rowNo++).padStart(2, '0')}</td>
+        <td>${r.colour || ''}</td>
+        <td><b>${r.bundleNo || ''}</b></td>
+        <td>${r.size || ''}</td>
+        <td>${r.cutForm || ''}</td>
+        <td class="comp">${r.component || ''}</td>
+        <td class="bold">${r.totalPcs || ''}</td>
+        <td class="red">${r.pd || '—'}</td>
+        <td class="red">${r.fd || '—'}</td>
+        <td class="bold">${r.goodQty || ''}</td>
+      </tr>`;
+    });
+
+    // Subtotal row for this cut
+    tableRows += `<tr class="sub-row">
+      <td colspan="5" style="text-align:right;font-style:italic;padding-right:6px;color:#7c5d1e;">Sub-total: ${cutNo}</td>
+      <td>—</td>
+      <td class="bold">${subPcs}</td>
+      <td class="red bold">${subPd || '—'}</td>
+      <td class="red bold">${subFd || '—'}</td>
+      <td class="bold" style="color:#166534;">${subGood}</td>
+    </tr>`;
+  });
+
+  // Blank padding rows
+  for (let i = 0; i < blankPad; i++) {
+    tableRows += `<tr><td>${String(rowNo++).padStart(2, '0')}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
   }
 
-  const html = '<!DOCTYPE html><html><head>'
-    + '<title>AD-' + note.adNo + '</title>'
-    + '<style>'
-    + '@page { size: A4 portrait; margin: 10mm; }'
-    + '* { margin: 0; padding: 0; box-sizing: border-box; }'
-    + 'body { font-family: Arial, sans-serif; font-size: 10px; color: #000; }'
-    + '.hdr { display: flex; justify-content: space-between; margin-bottom: 4px; }'
-    + '.hdr-left h1 { font-size: 13px; font-weight: 900; }'
-    + '.hdr-left p, .hdr-right p { margin: 1px 0; font-size: 9px; }'
-    + '.hdr-right { text-align: right; }'
-    + '.ad-block { text-align: center; margin: 6px 0; }'
-    + '.ad-no { font-size: 18px; font-weight: 900; border: 2px solid #000; padding: 2px 16px; display: inline-block; }'
-    + '.info .row { display: flex; margin: 2px 0; }'
-    + '.info .lbl { font-weight: 700; min-width: 90px; }'
-    + '.info .val { border-bottom: 1px solid #000; flex: 1; min-height: 14px; padding: 0 4px; }'
-    + 'table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-top: 6px; }'
-    + 'th, td { border: 0.5px solid #000; padding: 2px 3px; font-size: 9px; text-align: center; height: 18px; }'
-    + 'th { background: #e0e0e0; font-weight: 700; }'
-    + '.bold { font-weight: 700; }'
-    + '.red { color: #c00; }'
-    + '.comp { color: #1a6b3c; font-weight: 600; }'
-    + '.total-row td { border-top: 2px solid #000; font-weight: 700; }'
-    + '.remarks { margin-top: 5px; font-size: 10px; border-top: 1px solid #000; padding-top: 3px; }'
-    + '.footer { display: flex; justify-content: space-between; margin-top: 18px; }'
-    + '.footer .sig { flex: 1; text-align: center; font-size: 10px; }'
-    + '.footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 18px; }'
-    + '.footer .sig .line { border-top: 1px solid #000; padding-top: 2px; margin: 0 10px; }'
-    + '@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }'
-    + '</style></head><body>'
-    // Company header
-    + '<div class="hdr">'
-    + '<div class="hdr-left"><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>'
-    + '<p>SCREEN PRINTERS FOR TEXTILES</p>'
-    + '<p>E-mail: colourplus@sitnet.lk</p></div>'
-    + '<div class="hdr-right"><p>564, Athurugiriya Road, Kottawa.</p><p>Tel: 011 278 1525</p></div>'
-    + '</div>'
-    // AD number + date
-    + '<div class="ad-block">'
-    + '<span style="font-size:10px;font-weight:700">AD No:</span> '
-    + '<span class="ad-no">' + note.adNo + '</span>'
-    + '<span style="margin-left:40px;font-size:10px"><b>Date:</b> ' + note.deliveryDate + '</span>'
-    + '</div>'
-    // Info fields
-    + '<div class="info">'
-    + '<div class="row"><span class="lbl">Customer:</span><span class="val">' + note.customerName + '</span>'
-    + '<span class="lbl" style="margin-left:20px">Attn:</span><span class="val">' + note.attn + '</span></div>'
-    + '<div class="row"><span class="lbl">Style #:</span><span class="val">' + note.styleNo + '</span></div>'
-    + '<div class="row"><span class="lbl">Address:</span><span class="val">' + note.address + '</span></div>'
-    + '<div class="row"><span class="lbl">Schedule No:</span><span class="val">' + note.scheduleNo + '</span></div>'
-    + '</div>'
-    // Table
-    + '<table><thead><tr>'
-    + '<th style="width:24px"></th>'
-    + '<th>COLOUR</th><th>BUN NO.</th><th>SIZE</th><th>CUT FORM</th>'
-    + '<th>COMPONENT</th>'
-    + '<th>TOTAL PCS</th><th>P/D</th><th>F/D</th><th>GOOD QTY</th>'
-    + '</tr></thead><tbody>' + tableRows + '</tbody></table>'
-    // Remarks
-    + '<div class="remarks"><b>Remarks.</b> ' + (note.remarks || '') + '</div>'
-    // Signatures
-    + '<div class="footer">'
-    + '<div class="sig"><div class="lbl">Received by</div><div class="line">' + (note.receivedByName || '') + '</div></div>'
-    + '<div class="sig"><div class="lbl">Prep. & Checked by</div><div class="line">' + (note.prepByName || '') + '</div></div>'
-    + '<div class="sig"><div class="lbl">Authorized by</div><div class="line">' + (note.authByName || '') + '</div></div>'
-    + '</div>'
-    + '</body></html>';
+  // Grand total row
+  tableRows += `<tr class="total-row">
+    <td colspan="6" style="text-align:right;padding-right:6px;">GRAND TOTAL</td>
+    <td class="bold">${grandPcs}</td>
+    <td class="red bold">${grandPd || '—'}</td>
+    <td class="red bold">${grandFd || '—'}</td>
+    <td class="bold" style="color:#166534;">${grandGood}</td>
+  </tr>`;
 
-  // Remove any stale frame
+  const html = `<!DOCTYPE html><html><head>
+    <title>${note.adNo}</title>
+    <style>
+      @page { size: A4 portrait; margin: 10mm; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; font-size: 10px; color: #000; }
+      .hdr { display: flex; justify-content: space-between; margin-bottom: 4px; }
+      .hdr-left h1 { font-size: 13px; font-weight: 900; }
+      .hdr-left p, .hdr-right p { margin: 1px 0; font-size: 9px; }
+      .hdr-right { text-align: right; }
+      .ad-block { text-align: center; margin: 6px 0; }
+      .ad-no { font-size: 18px; font-weight: 900; border: 2px solid #000; padding: 2px 16px; display: inline-block; }
+      .info .row { display: flex; margin: 2px 0; }
+      .info .lbl { font-weight: 700; min-width: 90px; }
+      .info .val { border-bottom: 1px solid #000; flex: 1; min-height: 14px; padding: 0 4px; }
+      table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-top: 6px; }
+      th, td { border: 0.5px solid #000; padding: 2px 3px; font-size: 9px; text-align: center; height: 18px; }
+      th { background: #e0e0e0; font-weight: 700; }
+      .bold { font-weight: 700; }
+      .red { color: #c00; }
+      .comp { color: #1a6b3c; font-weight: 600; }
+      .sub-row td { background: #fff8e7; font-weight: 700; border-top: 1.5px solid #d97706; border-bottom: 1.5px solid #d97706; }
+      .total-row td { border-top: 2px solid #000; font-weight: 700; background: #f0f0f0; }
+      .remarks { margin-top: 5px; font-size: 10px; border-top: 1px solid #000; padding-top: 3px; }
+      .footer { display: flex; justify-content: space-between; margin-top: 18px; }
+      .footer .sig { flex: 1; text-align: center; font-size: 10px; }
+      .footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 18px; }
+      .footer .sig .line { border-top: 1px solid #000; padding-top: 2px; margin: 0 10px; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style></head><body>
+    <div class="hdr">
+      <div class="hdr-left"><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
+      <p>SCREEN PRINTERS FOR TEXTILES</p>
+      <p>E-mail: colourplus@sitnet.lk</p></div>
+      <div class="hdr-right"><p>564, Athurugiriya Road, Kottawa.</p><p>Tel: 011 278 1525</p></div>
+    </div>
+    <div class="ad-block">
+      <span style="font-size:10px;font-weight:700">AD No:</span>
+      <span class="ad-no">${note.adNo}</span>
+      <span style="margin-left:40px;font-size:10px"><b>Date:</b> ${note.deliveryDate}</span>
+    </div>
+    <div class="info">
+      <div class="row"><span class="lbl">Customer:</span><span class="val">${note.customerName}</span>
+      <span class="lbl" style="margin-left:20px">Attn:</span><span class="val">${note.attn}</span></div>
+      <div class="row"><span class="lbl">Style #:</span><span class="val">${note.styleNo}</span></div>
+      <div class="row"><span class="lbl">Address:</span><span class="val">${note.address}</span></div>
+      <div class="row"><span class="lbl">Schedule No:</span><span class="val">${note.scheduleNo || ''}</span></div>
+    </div>
+    <table><thead><tr>
+      <th style="width:24px"></th>
+      <th>COLOUR</th><th>BUN NO.</th><th>SIZE</th><th>CUT FORM</th>
+      <th>COMPONENT</th>
+      <th>TOTAL PCS</th><th>P/D</th><th>F/D</th><th>GOOD QTY</th>
+    </tr></thead><tbody>${tableRows}</tbody></table>
+    <div class="remarks"><b>Remarks.</b> ${note.remarks || ''}</div>
+    <div class="footer">
+      <div class="sig"><div class="lbl">Received by</div><div class="line">${note.receivedByName || ''}</div></div>
+      <div class="sig"><div class="lbl">Prep. & Checked by</div><div class="line">${note.prepByName || ''}</div></div>
+      <div class="sig"><div class="lbl">Authorized by</div><div class="line">${note.authByName || ''}</div></div>
+    </div>
+    </body></html>`;
+
   const old = document.getElementById('gatepass-print-frame') as HTMLIFrameElement | null;
   if (old) old.remove();
-
   const frame = document.createElement('iframe');
   frame.id = 'gatepass-print-frame';
   frame.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:900px;height:1200px';
   document.body.appendChild(frame);
-
   const doc = frame.contentDocument || frame.contentWindow?.document;
   if (doc) {
-    doc.open();
-    doc.write(html);
-    doc.close();
-    setTimeout(() => {
-      frame.contentWindow?.print();
-      setTimeout(() => frame.remove(), 1000);
-    }, 300);
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(() => { frame.contentWindow?.print(); setTimeout(() => frame.remove(), 1000); }, 300);
   }
 }
 

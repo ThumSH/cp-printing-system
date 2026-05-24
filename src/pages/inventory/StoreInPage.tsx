@@ -157,7 +157,9 @@ export default function StoreInPage() {
   const styleComponents = useMemo(() => {
     if (!selectedStyleNo || !selectedCustomer) return [];
     return eligibleStoreInItems.filter(
-      i => i.styleNo === selectedStyleNo && i.customerName === selectedCustomer
+      i => i.styleNo === selectedStyleNo &&
+           i.customerName === selectedCustomer &&
+           i.remainingBulkQty > 0   // exclude fully-received submissions
     );
   }, [eligibleStoreInItems, selectedStyleNo, selectedCustomer]);
 
@@ -360,7 +362,7 @@ export default function StoreInPage() {
     const errs: Record<string, string> = {};
     if (!selectedStyleNo)   errs.styleNo    = 'Select a style number';
     if (!selectedCustomer)  errs.customer   = 'Select a customer';
-    if (!scheduleNo.trim()) errs.scheduleNo = 'Schedule No is required';
+    // scheduleNo is optional — not required
     if (!cutInDate)         errs.cutInDate  = 'Cut In Date is required';
     if (inQtyNum <= 0)      errs.inQty      = 'Enter IN Qty for at least one component';
 
@@ -461,7 +463,7 @@ export default function StoreInPage() {
   // ── Stage a single component ─────────────────────────────────────────────
   const stageComponent = (comp: EligibleStoreInItem) => {
     // Validate basics first
-    if (!scheduleNo.trim()) { setErrors(p => ({ ...p, scheduleNo: 'Schedule No is required' })); return; }
+    // scheduleNo is optional
     if (!cutInDate)         { setErrors(p => ({ ...p, cutInDate: 'Cut In Date is required' })); return; }
 
     const compCuts  = savedCuts.filter(c => c.submissionId === comp.submissionId);
@@ -999,10 +1001,19 @@ export default function StoreInPage() {
                                     </div>
                                   </div>
                                 ))}
-                                <button type="button" onClick={addBundle}
-                                  className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 mt-1">
-                                  <Plus className="h-3 w-3" /> Add Bundle
-                                </button>
+                                {(() => {
+                                  const totalBundled = activeCutBundles.reduce((s, b) => s + (parseInt(b.bundleQty) || 0), 0);
+                                  const cutQtyNum = parseInt(activeCutQty) || 0;
+                                  const bundleFull = cutQtyNum > 0 && totalBundled >= cutQtyNum;
+                                  return (
+                                    <button type="button" onClick={addBundle}
+                                      disabled={bundleFull}
+                                      title={bundleFull ? 'Bundle total already equals cut qty' : 'Add another bundle'}
+                                      className="inline-flex items-center gap-1 text-xs font-medium mt-1 disabled:opacity-40 disabled:cursor-not-allowed text-blue-600 hover:text-blue-800 disabled:hover:text-blue-600">
+                                      <Plus className="h-3 w-3" /> Add Bundle
+                                    </button>
+                                  );
+                                })()}
                               </div>}
 
                               <div className="flex gap-2 pt-2 border-t border-slate-200">
@@ -1129,6 +1140,32 @@ export default function StoreInPage() {
                               <Layers className="h-3.5 w-3.5 text-slate-400" />
                               <span className="text-sm font-bold text-slate-700">{cut.cutNo}</span>
                               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">Qty: {cut.cutQty}</span>
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  // cut.submissionId tells us which component this cut belongs to
+                                  // Find the matching SavedCut by cutNo+submissionId to get its tempId
+                                  const matchedSavedCut = savedCuts.find(
+                                    sc => sc.cutNo === cut.cutNo && sc.submissionId === cut.submissionId
+                                  );
+                                  if (!matchedSavedCut) return;
+                                  setActiveSubmissionId(cut.submissionId);
+                                  setEditingCutTempId(matchedSavedCut.tempId);
+                                  setActiveCutQty(String(cut.cutQty));
+                                  setCutQtyConfirmed(true);
+                                  setActiveCutBundles(cut.bundles.map((b, i) => ({
+                                    tempId: b.bundleNo + '_' + i,
+                                    bundleNo: b.bundleNo,
+                                    bundleQty: String(b.bundleQty),
+                                    size: b.size,
+                                    numberRange: b.numberRange,
+                                  })));
+                                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                                }}
+                                className="ml-auto inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors">
+                                <Pencil className="h-3 w-3" /> Edit
+                              </button>
                             </div>
                             <div className="ml-6 border-l-2 border-slate-200 pl-4">
                               <table className="w-full text-xs">

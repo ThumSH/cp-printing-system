@@ -1,245 +1,191 @@
+// src/store/auditStore.ts
+//
+// WHAT CHANGED (internal only — no exported names changed):
+//   fetchEligibleAuditItems()  → hits /audit/eligible   (was /audit/eligible-audits — 404)
+//   updateAuditStatus()        → removed the non-existent PATCH endpoint call;
+//                                now updates optimistically in local state only
+//                                (backend has no PATCH /records/:id/status endpoint)
+//   updateAuditRecord()        → removed the non-existent PUT endpoint call;
+//                                now updates optimistically in local state only
+//                                (backend has no PUT /records/:id endpoint)
+//   addAuditRecord()           → kept; internally wraps the batch endpoint (/records/batch)
+//                                since backend only has POST /records/batch, not POST /records
+//   EligibleAuditItem          → interface corrected to match what backend actually returns
+//   AuditRecord                → interface cleaned to match backend (removed non-existent fields)
+//
+// WHAT DID NOT CHANGE:
+//   All exported method names: fetchAuditRecords, fetchEligibleAuditItems,
+//     addAuditRecord, updateAuditRecord, updateAuditStatus, deleteAuditRecord
+//   All exported state names: auditRecords, eligibleAuditItems
+
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
 
 export type AuditStatus = 'Pending' | 'Pass' | 'Fail';
 
+// ── Corrected to match AuditBundleSelection in backend ────────────────────────
 export interface AuditBundle {
-  id: string;
   bundleNo: string;
-  size: string;
-  qty: number;
+  size:     string;
+  qty:      number;
 }
 
+// ── Corrected to match what AuditController.GetEligibleAuditItems actually returns ──
+// Backend returns storeIn records with cuts/bundles; it does NOT return delivery tracker fields
 export interface EligibleAuditItem {
-  deliveryTrackerReportId: string;
-  adviceNoteId: string;
-  productionRecordId: string;
-  storeInRecordId: string;
-  submissionId: string;
-  revisionNo: number;
-  styleNo: string;
-  customerName: string;
-  scheduleNo: string;
-  cutNo: string;
-  adNo: string;
-  deliveryStatus: string;
-  deliveryQty: number;
-  remainingAuditQty: number;
-  createdAt: string;
+  id:            string;   // storeInRecord.Id
+  submissionId:  string;
+  revisionNo:    number;
+  styleNo:       string;
+  customerName:  string;
+  scheduleNo:    string;
+  bodyColour:    string;
+  cuts: {
+    id:       string;
+    cutNo:    string;
+    cutQty:   number;
+    bundles:  {
+      id:          string;
+      bundleNo:    string;
+      bundleQty:   number;
+      size:        string;
+      numberRange: string;
+    }[];
+  }[];
 }
 
+// ── Corrected to match AuditRecord model in backend ───────────────────────────
 export interface AuditRecord {
-  id: string;
-  deliveryTrackerReportId: string;
-  adviceNoteId: string;
-  productionRecordId: string;
+  id:              string;
   storeInRecordId: string;
-  submissionId: string;
-  revisionNo: number;
-  date: string;
-  styleNo: string;
-  customerName: string;
-  scheduleNo: string;
-  cutNo: string;
-  colour: string;
-  adNo: string;
-  deliveryStatus: string;
-  bundles: AuditBundle[];
-  sizes: string;
-  totalQty: number;
-  auditQty: number;
-  status: AuditStatus;
-  auditorName: string;
-  remarks: string;
+  submissionId:    string;
+  revisionNo:      number;
+  date:            string;
+  styleNo:         string;
+  customerName:    string;
+  scheduleNo:      string;
+  colour:          string;
+  cutNo:           string;
+  sizes:           string;
+  bundles:         AuditBundle[];
+  releaseQty:      number;
+  auditQty:        number;
+  status:          AuditStatus;
+  auditorName:     string;
+  remarks:         string;
 }
 
 interface AuditStore {
-  auditRecords: AuditRecord[];
-  eligibleAuditItems: EligibleAuditItem[];
-  fetchAuditRecords: () => Promise<void>;
-  fetchEligibleAuditItems: () => Promise<void>;
+  auditRecords:        AuditRecord[];
+  eligibleAuditItems:  EligibleAuditItem[];
+
+  fetchAuditRecords:        () => Promise<void>;
+  fetchEligibleAuditItems:  () => Promise<void>;
   addAuditRecord: (
-    record: Omit<
-      AuditRecord,
-      | 'id'
-      | 'adviceNoteId'
-      | 'productionRecordId'
-      | 'storeInRecordId'
-      | 'submissionId'
-      | 'revisionNo'
-      | 'styleNo'
-      | 'customerName'
-      | 'scheduleNo'
-      | 'cutNo'
-      | 'colour'
-      | 'adNo'
-      | 'deliveryStatus'
-      | 'totalQty'
-    >
+    record: Omit<AuditRecord, 'id' | 'submissionId' | 'revisionNo' | 'styleNo' | 'customerName' | 'scheduleNo' | 'colour'>
   ) => Promise<AuditRecord>;
-  updateAuditRecord: (id: string, record: AuditRecord) => Promise<void>;
-  updateAuditStatus: (
-    id: string,
-    status: AuditStatus,
-    remarks: string,
-    auditorName: string
-  ) => Promise<void>;
-  deleteAuditRecord: (id: string) => Promise<void>;
+  updateAuditRecord:  (id: string, record: AuditRecord) => Promise<void>;
+  updateAuditStatus:  (id: string, status: AuditStatus, remarks: string, auditorName: string) => Promise<void>;
+  deleteAuditRecord:  (id: string) => Promise<void>;
 }
 
 const API_BASE = API.AUDIT;
- 
-const getHeaders = getAuthHeaders;
 
-const sortAuditRecords = (records: AuditRecord[]) => {
-  return [...records].sort((a, b) => {
-    const bTime = new Date(b.date).getTime();
-    const aTime = new Date(a.date).getTime();
-    if (bTime !== aTime) return bTime - aTime;
+const sortAuditRecords = (records: AuditRecord[]) =>
+  // yyyy-MM-dd strings sort correctly as strings — avoids timezone issues with new Date()
+  [...records].sort((a, b) => {
+    const dateDiff = b.date.localeCompare(a.date);
+    if (dateDiff !== 0) return dateDiff;
     return b.revisionNo - a.revisionNo;
   });
-};
 
-export const useAuditStore = create<AuditStore>((set) => ({
-  auditRecords: [],
-  eligibleAuditItems: [],
+export const useAuditStore = create<AuditStore>((set, get) => ({
+  auditRecords:        [],
+  eligibleAuditItems:  [],
 
   fetchAuditRecords: async () => {
     try {
-      const res = await fetch(`${API_BASE}/records`, {
-        headers: getHeaders(),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to fetch audit records');
-      }
-
+      const res = await fetch(`${API_BASE}/records`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
       const data: AuditRecord[] = await res.json();
-
-      set({
-        auditRecords: sortAuditRecords(data),
-      });
-    } catch (error) {
-      console.error('Failed to fetch audit records:', error);
-      throw error;
+      set({ auditRecords: sortAuditRecords(data) });
+    } catch (e) {
+      console.error('auditStore.fetchAuditRecords:', e);
+      throw e;
     }
   },
 
+  // FIX: was /audit/eligible-audits (404) — correct endpoint is /audit/eligible
   fetchEligibleAuditItems: async () => {
     try {
-      const res = await fetch(`${API_BASE}/eligible-audits`, {
-        headers: getHeaders(),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to fetch eligible audit items');
-      }
-
+      const res = await fetch(`${API_BASE}/eligible`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
       const data: EligibleAuditItem[] = await res.json();
-
-      set({
-        eligibleAuditItems: data,
-      });
-    } catch (error) {
-      console.error('Failed to fetch eligible audit items:', error);
-      throw error;
+      set({ eligibleAuditItems: data });
+    } catch (e) {
+      console.error('auditStore.fetchEligibleAuditItems:', e);
+      throw e;
     }
   },
 
+  // FIX: backend only has POST /records/batch (no single-record POST).
+  // Wraps it transparently so consumers don't know the difference.
   addAuditRecord: async (record) => {
     try {
-      const res = await fetch(`${API_BASE}/records`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(record),
+      const res = await fetch(`${API_BASE}/records/batch`, {
+        method:  'POST',
+        headers: getAuthHeaders(),
+        body:    JSON.stringify([record]),   // batch endpoint expects an array
       });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to create audit record');
-      }
-
-      const saved: AuditRecord = await res.json();
-
-      set((state) => ({
-        auditRecords: sortAuditRecords([saved, ...state.auditRecords]),
-      }));
-
-      return saved;
-    } catch (error) {
-      console.error('Failed to create audit record:', error);
-      throw error;
+      if (!res.ok) throw new Error(await res.text() || 'Failed to create audit record');
+      const saved: AuditRecord[] = await res.json();
+      const first = saved[0];
+      set((state) => ({ auditRecords: sortAuditRecords([first, ...state.auditRecords]) }));
+      // Re-fetch eligible so audited bundles leave the list
+      get().fetchEligibleAuditItems().catch(console.error);
+      return first;
+    } catch (e) {
+      console.error('auditStore.addAuditRecord:', e);
+      throw e;
     }
   },
 
+  // NOTE: Backend has no PUT /records/:id endpoint.
+  // This updates local state optimistically so the UI reflects the change immediately.
+  // The change will be lost on next full fetch — to persist, a backend PUT endpoint is needed.
   updateAuditRecord: async (id, updatedRecord) => {
-    try {
-      const res = await fetch(`${API_BASE}/records/${id}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify(updatedRecord),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to update audit record');
-      }
-
-      set((state) => ({
-        auditRecords: sortAuditRecords(
-          state.auditRecords.map((rec) => (rec.id === id ? updatedRecord : rec))
-        ),
-      }));
-    } catch (error) {
-      console.error('Failed to update audit record:', error);
-      throw error;
-    }
+    console.warn('auditStore.updateAuditRecord: no backend PUT endpoint — updating local state only');
+    set((state) => ({
+      auditRecords: sortAuditRecords(
+        state.auditRecords.map(r => r.id === id ? updatedRecord : r)
+      ),
+    }));
   },
 
+  // NOTE: Backend has no PATCH /records/:id/status endpoint.
+  // Updates local state only so UI reflects the status change immediately.
   updateAuditStatus: async (id, status, remarks, auditorName) => {
-    try {
-      const res = await fetch(`${API_BASE}/records/${id}/status`, {
-        method: 'PATCH',
-        headers: getHeaders(),
-        body: JSON.stringify({ status, remarks, auditorName }),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to update audit status');
-      }
-
-      set((state) => ({
-        auditRecords: state.auditRecords.map((rec) =>
-          rec.id === id ? { ...rec, status, remarks, auditorName } : rec
-        ),
-      }));
-    } catch (error) {
-      console.error('Failed to update audit status:', error);
-      throw error;
-    }
+    console.warn('auditStore.updateAuditStatus: no backend PATCH endpoint — updating local state only');
+    set((state) => ({
+      auditRecords: state.auditRecords.map(r =>
+        r.id === id ? { ...r, status, remarks, auditorName } : r
+      ),
+    }));
   },
 
   deleteAuditRecord: async (id) => {
     try {
       const res = await fetch(`${API_BASE}/records/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
+        method:  'DELETE',
+        headers: getAuthHeaders(),
       });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to delete audit record');
-      }
-
-      set((state) => ({
-        auditRecords: state.auditRecords.filter((rec) => rec.id !== id),
-      }));
-    } catch (error) {
-      console.error('Failed to delete audit record:', error);
-      throw error;
+      if (!res.ok) throw new Error(await res.text() || 'Failed to delete audit record');
+      set((state) => ({ auditRecords: state.auditRecords.filter(r => r.id !== id) }));
+      // Re-fetch eligible so deleted audit re-appears as auditable
+      get().fetchEligibleAuditItems().catch(console.error);
+    } catch (e) {
+      console.error('auditStore.deleteAuditRecord:', e);
+      throw e;
     }
   },
 }));
