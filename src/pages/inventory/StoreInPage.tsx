@@ -114,7 +114,7 @@ export default function StoreInPage() {
   const [isSavingToDb, setIsSavingToDb] = useState(false);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, { isLocked: boolean }>>({});
-  const [systemStyleSchedules, setSystemStyleSchedules] = useState<StyleScheduleOption[]>([]);
+  const [, setSystemStyleSchedules] = useState<StyleScheduleOption[]>([]);
   const [searchText, setSearchText] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
@@ -185,8 +185,6 @@ export default function StoreInPage() {
   const isComponentConfirmed = (subId: string) => !!confirmedInQty[subId];
 
   const anyComponentConfirmed = styleComponents.some(c => isComponentConfirmed(c.submissionId));
-  const allComponentsConfirmed = styleComponents.length > 0 &&
-    styleComponents.every(c => isComponentConfirmed(c.submissionId));
 
   const confirmComponentInQty = (subId: string) => {
     if (getComponentInQty(subId) <= 0) return;
@@ -405,61 +403,6 @@ export default function StoreInPage() {
     setErrors({}); setCutErrors({}); setPageError('');
     clearDraft();
   };
-
-  // ── Save to staging (one entry per confirmed component) ───────────────────
-  const handleSaveToTable = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validateForm()) return;
-
-    const confirmedComps = styleComponents.filter(c => isComponentConfirmed(c.submissionId));
-    const newEntries: StagedEntry[] = confirmedComps
-      .filter(comp => savedCuts.some(c => c.submissionId === comp.submissionId))
-      .map(comp => {
-        const compCuts  = savedCuts.filter(c => c.submissionId === comp.submissionId);
-        const compInQty = getComponentInQty(comp.submissionId);
-        return {
-          tempId:       crypto.randomUUID(),
-          styleNo:      selectedStyleNo,
-          customerName: selectedCustomer,
-          components:   comp.components,
-          scheduleNo:   scheduleNo.trim(),
-          cutInDate,
-          inQty:        compInQty,
-          cuts: compCuts.map(c => ({
-            cutNo:        c.cutNo,
-            cutQty:       c.cutQty,
-            submissionId: c.submissionId,
-            bundles:      c.bundles,
-          })),
-        };
-      });
-
-    if (newEntries.length === 0) return;
-
-    setStagedEntries(prev => [...prev, ...newEntries]);
-    setSuccessMsg('Added ' + newEntries.length + ' component record(s) to staging.');
-    setTimeout(() => setSuccessMsg(''), 4000);
-
-    // Clear only confirmed components; keep unconfirmed ones
-    const confirmedSubIds = new Set(confirmedComps.map(c => c.submissionId));
-    setSavedCuts(prev => prev.filter(c => !confirmedSubIds.has(c.submissionId)));
-    setConfirmedInQty(prev => {
-      const next = { ...prev };
-      confirmedSubIds.forEach(id => delete next[id]);
-      return next;
-    });
-    setComponentInQty(prev => {
-      const next = { ...prev };
-      confirmedSubIds.forEach(id => delete next[id]);
-      return next;
-    });
-    setActiveCutBundles([makeBundleRow(1)]);
-    setActiveCutQty('');
-    setActiveSubmissionId('');
-    setErrors({});
-    setPageError('');
-  };
-
   // ── Stage a single component ─────────────────────────────────────────────
   const stageComponent = (comp: EligibleStoreInItem) => {
     // Validate basics first

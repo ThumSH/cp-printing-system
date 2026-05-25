@@ -65,7 +65,7 @@ function RevisionEntry({ rev }: { rev: SampleStyleRevision }) {
   return (
     <div className="flex gap-3 items-start rounded-lg border border-slate-200 bg-white px-4 py-3">
       {/* Rev number badge */}
-      <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-black text-indigo-700">
+      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-black text-indigo-700">
         {rev.revisionNo}
       </div>
 
@@ -158,8 +158,8 @@ export default function SampleStylePage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAll, setShowAll]       = useState(false);
-  const [filterCustomer, setFilterCustomer] = useState('');
-  const [filterStatus, setFilterStatus]     = useState('');
+  const [filterCustomer] = useState('');
+  const [filterStatus]     = useState('');
 
   // Add revision state
   const [addingRevFor, setAddingRevFor]     = useState<string | null>(null);

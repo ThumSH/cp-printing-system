@@ -15,9 +15,6 @@ import {
 import { useInventoryStore } from '../../store/inventoryStore';
 import { API } from '../../api/client';
 
-// ==========================================
-// Staging row type (local, not yet saved)
-// ==========================================
 interface StagingRow {
   tempId: string;
   styleNo: string;

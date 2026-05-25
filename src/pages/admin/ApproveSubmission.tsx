@@ -353,7 +353,7 @@ export default function ApproveSubmission() {
               </span>
             </div>
 
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-150 overflow-y-auto pr-1">
               {filteredSubmissions.length > 0 ? (
                 filteredSubmissions.map((sub) => {
                   const isSelected = selectedSubmissionId === sub.id;
@@ -610,7 +610,7 @@ export default function ApproveSubmission() {
                               .sort((a: any, b: any) => a.revisionNo - b.revisionNo)
                               .slice(0, -1)
                               .map((rev: any) => (
-                                <div key={rev.id} className="flex-shrink-0 w-40 rounded-lg border border-slate-200 bg-white p-2.5 space-y-1.5">
+                                <div key={rev.id} className="shrink-0 w-40 rounded-lg border border-slate-200 bg-white p-2.5 space-y-1.5">
                                   <div className="flex items-center gap-1.5">
                                     <span className="w-4 h-4 rounded-full bg-slate-100 text-slate-500 text-[9px] font-black flex items-center justify-center">
                                       {rev.revisionNo}

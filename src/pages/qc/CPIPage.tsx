@@ -1,14 +1,3 @@
-// src/pages/qc/CPIPage.tsx
-// Cut Panel Inspection Report — CP Chart No. 002
-// CHANGES FROM PREVIOUS VERSION:
-//   1. Added inspectionStatus state (Passed/Failed/Pending) — was hardcoded 'Passed'
-//   2. Added status selector UI in Report Header section
-//   3. handleSave now uses selected status instead of hardcoded 'Passed'
-//   4. appRej now reflects status: Passed→'Approved', else→'Rejected'
-//   5. handleReset resets inspectionStatus to 'Passed'
-//   6. Success message shows the saved status
-// Everything else is identical to the original.
-
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -61,7 +50,7 @@ interface CutInspection {
 
 type InspectionStatus = 'Passed' | 'Failed' | 'Pending';
 
-const makeDefects = (cutQty: number): DefectEntry[] =>
+const makeDefects = (_cutQty: number): DefectEntry[] =>
   DEFECTS.map(d => ({
     defectCode: d.code, check: '',
     beforeL_plus: '', beforeL_minus: '', beforeW_plus: '', beforeW_minus: '',
@@ -578,7 +567,7 @@ export default function CPIPage() {
   // ==========================================
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-      className="mx-auto max-w-[1500px] space-y-6 pb-16">
+      className="mx-auto max-w-375 space-y-6 pb-16">
 
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-200 pb-4">
@@ -724,7 +713,7 @@ export default function CPIPage() {
               <thead>
                 <tr className="bg-slate-100 text-slate-700 text-[11px]">
                   <th className="border border-slate-300 px-2 py-2 text-left font-bold w-8">#</th>
-                  <th className="border border-slate-300 px-2 py-2 text-left font-bold min-w-[140px]">Defect</th>
+                  <th className="border border-slate-300 px-2 py-2 text-left font-bold min-w-35">Defect</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-8">✓</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-20">Cut No</th>
                   <th className="border border-slate-300 px-2 py-2 font-bold w-12">Qty</th>
