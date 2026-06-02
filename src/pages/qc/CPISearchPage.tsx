@@ -89,56 +89,74 @@ export default function CPISearchPage() {
 
   // ── Print handler for saved reports ──────────────────────────────────────
   const handlePrint = (rep: CPIReport, e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent row collapse
+    e.stopPropagation();
 
     const td = (val: string | number, extra = '') =>
       `<td style="border:1px solid #bbb;padding:2px 4px;text-align:center;font-size:10px;${extra}">${val ?? ''}</td>`;
     const tdL = (val: string | number) =>
       `<td style="border:1px solid #bbb;padding:2px 4px;text-align:left;font-size:10px;">${val ?? ''}</td>`;
 
+    const DEFECTS = [
+      { code: 'F1',    label: 'Panel Shrinkage' },
+      { code: 'F2',    label: 'Fabric colour variation' },
+      { code: 'F3',    label: 'Crush mark' },
+      { code: 'F4',    label: 'Shape out panel' },
+      { code: 'F5',    label: 'Dust mark' },
+      { code: 'F6',    label: 'Stain marks / Oil marks' },
+      { code: 'F7',    label: 'Cut holes' },
+      { code: 'F8',    label: 'Needle marks' },
+      { code: 'F9',    label: 'Incorrect part' },
+      { code: 'F10',   label: 'Numbering stickers missing' },
+      { code: 'F11',   label: 'Numbering stickers mixed-up' },
+      { code: 'F12',   label: 'Size mixed-up' },
+      { code: 'F13',   label: 'Wrong Cut Mark' },
+      { code: 'Other', label: 'Other' },
+    ];
+
     let rows = '';
     let totalSampleSize = 0;
     let totalDefectedQty = 0;
 
-    (rep.cutInspections || []).forEach((ci, cutIdx) => {
-      const defs = ci.defectRows || [];
-      const isFirstCut = cutIdx === 0; // Only print F1-F13 labels for the first cut
-      
-      defs.forEach((def, idx) => {
-        const isFirstRow = idx === 0;
-        if (isFirstRow) totalSampleSize += ci.sampleSize || 0;
-        totalDefectedQty += def.defectedQty || 0;
+    const cuts = rep.cutInspections || [];
+    const savedDefects = cuts[0]?.defectRows || []; 
+    const numRows = Math.max(14, cuts.length);
 
-        rows += '<tr>'
-          + td(isFirstCut ? def.defectCode : '', isFirstCut ? 'color:#666;font-family:monospace;' : '')
-          + tdL(isFirstCut ? def.defectName : '')
-          + td('') // check mark placeholder
-          + td(isFirstRow ? ci.cutNo : '')
-          + td(isFirstRow ? ci.cutQty : '', 'font-weight:bold;')
-          + td(isFirstRow ? (ci.bundleNos || '') : '')
-          + td(isFirstRow ? (ci.part || '') : '')
-          + td(isFirstRow ? (ci.sizes || '') : '')
-          + td(def.beforeLength || '')
-          + td('') // L- not saved in DB
-          + td(def.beforeWidth || '')
-          + td('') // W- not saved in DB
-          + td(def.afterLength || '')
-          + td('') // L- not saved in DB
-          + td(def.afterWidth || '')
-          + td('') // W- not saved in DB
-          + td(isFirstRow ? (ci.numberRanges || '') : '', 'font-size:9px;')
-          + td(isFirstRow ? ci.sampleSize : '')
-          + td(def.defectedQty || '')
-          + td(def.percentage || '')
-          + td(def.remarks || '', 'text-align:left;')
-          + '</tr>';
-      });
-    });
+    for (let i = 0; i < numRows; i++) {
+      const defInfo = i < 14 ? DEFECTS[i] : null;
+      const defRow = i < 14 ? savedDefects[i] : null;
+      const cut = i < cuts.length ? cuts[i] : null;
 
-    // Blank rows if necessary
-    const blankCount = Math.max(0, 2 - (rep.cutInspections?.length || 0));
-    for (let i = 0; i < blankCount; i++) {
-      rows += '<tr>' + Array(21).fill('<td style="border:1px solid #bbb;height:18px;"></td>').join('') + '</tr>';
+      if (cut) {
+        totalSampleSize += cut.sampleSize || 0;
+      }
+      if (defRow) {
+        totalDefectedQty += defRow.defectedQty || 0;
+      }
+
+      // Safely check for the check property
+      const defCheck = (defRow as any)?.check;
+      const checkMark  = defCheck === '✓' ? '&#10003;' : defCheck === '✗' ? '&#10007;' : '';
+      const checkColor = defCheck === '✓' ? 'color:green;font-weight:bold;' : defCheck === '✗' ? 'color:red;font-weight:bold;' : '';
+
+      rows += '<tr>'
+        + td(defInfo?.code ?? '', 'color:#666;font-family:monospace;')
+        + tdL(defInfo?.label ?? '')
+        + td(checkMark, checkColor)
+        + td(cut?.cutNo ?? '')
+        + td(cut?.cutQty ?? '', 'font-weight:bold;')
+        + td(cut?.bundleNos ?? '', 'font-size:9px;')
+        + td(cut?.part ?? '')
+        + td(cut?.sizes ?? '')
+        + td(defRow?.beforeLength || '') + td('')
+        + td(defRow?.beforeWidth || '') + td('')
+        + td(defRow?.afterLength || '') + td('')
+        + td(defRow?.afterWidth || '') + td('')
+        + td(cut?.numberRanges ?? '', 'font-size:9px;')
+        + td(cut?.sampleSize ?? '')
+        + td(defRow?.defectedQty || '')
+        + td(defRow?.percentage || '')
+        + td(defRow?.remarks || '', 'text-align:left;')
+        + '</tr>';
     }
 
     // Totals row
@@ -156,6 +174,7 @@ export default function CPISearchPage() {
 
     const scheduleDisplay = rep.scheduleNo ? rep.scheduleNo : '(No Schedule)';
     const auditorDisplay = rep.cpiAuditor || rep.checkedBy || '_______________';
+    const statusColor = rep.inspectionStatus === 'Passed' ? '#16a34a' : rep.inspectionStatus === 'Failed' ? '#dc2626' : '#d97706';
 
     const html = '<!DOCTYPE html><html><head>'
       + `<title>CPI Report - ${rep.styleNo} - ${scheduleDisplay}</title>`
@@ -192,6 +211,11 @@ export default function CPISearchPage() {
       + `<td style="border:none;border-bottom:1px solid black;padding-right:8px;">${rep.bodyColour}</td>`
       + '<td style="border:none;">CPI Qty:</td>'
       + `<td style="border:none;border-bottom:1px solid black;">${rep.cpiQty}</td>`
+      + '</tr><tr>'
+      + '<td style="border:none;">Status:</td>'
+      + '<td colspan="5" style="border:none;">'
+      + `<span style="font-weight:bold;color:${statusColor};font-size:12px;">${(rep.inspectionStatus || '').toUpperCase()}</span>`
+      + '</td>'
       + '</tr></table>'
       + '<table><thead>'
       + '<tr>'

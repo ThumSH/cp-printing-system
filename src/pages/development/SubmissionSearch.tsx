@@ -7,7 +7,7 @@ import { useAdminStore } from '../../store/adminStore'; // <-- NEW: Import Admin
 
 export default function SubmissionSearch() {
   const { submissions } = useDevelopmentStore();
-  const { approvals } = useAdminStore(); // <-- NEW: Pull Admin decisions
+  const { approvals } = useAdminStore(); 
 
   // --- SEARCH & FILTER STATE ---
   const [selectedCustomer, setSelectedCustomer] = useState('');

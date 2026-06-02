@@ -35,6 +35,7 @@ interface StagedEntry {
   styleNo: string;
   customerName: string;
   components: string;
+  inAdNo: string;
   scheduleNo: string;
   cutInDate: string;
   inQty: number;
@@ -85,6 +86,7 @@ export default function StoreInPage() {
   // Selection
   const [selectedStyleNo, setSelectedStyleNo] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [inAdNo, setInAdNo] = useState('');
   const [scheduleNo, setScheduleNo] = useState('');
   const [cutInDate, setCutInDate] = useState('');
 
@@ -94,6 +96,7 @@ export default function StoreInPage() {
 
   // Cut builder
   const [activeSubmissionId, setActiveSubmissionId] = useState('');
+  const [activeCutNo, setActiveCutNo] = useState(''); // Added for manual cut numbering
   const [activeCutBundles, setActiveCutBundles] = useState<BundleFormRow[]>([makeBundleRow(1)]);
   const [activeCutQty, setActiveCutQty] = useState('');
   const [cutQtyConfirmed, setCutQtyConfirmed] = useState(false);
@@ -187,8 +190,53 @@ export default function StoreInPage() {
   const anyComponentConfirmed = styleComponents.some(c => isComponentConfirmed(c.submissionId));
 
   const confirmComponentInQty = (subId: string) => {
-    if (getComponentInQty(subId) <= 0) return;
+    const qty = getComponentInQty(subId);
+    if (qty <= 0) return;
     setConfirmedInQty(prev => ({ ...prev, [subId]: true }));
+
+    // 1. Auto-fill IN QTY for other unconfirmed empty components
+    setComponentInQty(prev => {
+       const next = { ...prev };
+       let changed = false;
+       styleComponents.forEach(c => {
+          if (c.submissionId !== subId && !isComponentConfirmed(c.submissionId) && !next[c.submissionId]) {
+             next[c.submissionId] = String(qty);
+             changed = true;
+          }
+       });
+       return changed ? next : prev;
+    });
+
+    // 2. Auto-copy cuts from an already populated component
+    setSavedCuts(prev => {
+       const thisCompHasCuts = prev.some(c => c.submissionId === subId);
+       if (thisCompHasCuts) return prev; // Don't overwrite existing cuts
+
+       const sourceSubId = styleComponents.find(c =>
+          c.submissionId !== subId && prev.some(cut => cut.submissionId === c.submissionId)
+       )?.submissionId;
+
+       if (sourceSubId) {
+          const cutsToCopy = prev.filter(c => c.submissionId === sourceSubId);
+          const compInfo = styleComponents.find(c => c.submissionId === subId);
+          const sourceCompInfo = styleComponents.find(c => c.submissionId === sourceSubId);
+          
+          const targetCompName = compInfo?.components ?? '';
+          const sourceCompName = sourceCompInfo?.components ?? '';
+
+          const clonedCuts = cutsToCopy.map(c => ({
+             ...c,
+             tempId: crypto.randomUUID(),
+             submissionId: subId,
+             component: targetCompName,
+             bodyColour: compInfo?.bodyColour ?? '',
+             cutNo: c.cutNo.replace(sourceCompName, targetCompName), // cleanly swaps prefix
+             bundles: c.bundles.map(b => ({ ...b }))
+          }));
+          return [...prev, ...clonedCuts];
+       }
+       return prev;
+    });
   };
 
   const unlockComponentInQty = (subId: string) => {
@@ -210,44 +258,26 @@ export default function StoreInPage() {
 
   // ── Auto-draft ────────────────────────────────────────────────────────────
   const draftState = useMemo(() => ({
-    selectedStyleNo, selectedCustomer, scheduleNo, cutInDate,
-    componentInQty, savedCuts, stagedEntries,
-  }), [selectedStyleNo, selectedCustomer, scheduleNo, cutInDate, componentInQty, savedCuts, stagedEntries]);
+    selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, cutInDate,
+    componentInQty, savedCuts, stagedEntries, activeCutNo,
+  }), [selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, cutInDate, componentInQty, savedCuts, stagedEntries, activeCutNo]);
 
   const { draftRestored, clearDraft, dismissDraftNotice } = useAutoDraft(
     'store-in-form', draftState,
     (saved) => {
       if (saved.selectedStyleNo)  setSelectedStyleNo(saved.selectedStyleNo);
       if (saved.selectedCustomer) setSelectedCustomer(saved.selectedCustomer);
+      if (saved.inAdNo)           setInAdNo(saved.inAdNo);
       if (saved.scheduleNo)       setScheduleNo(saved.scheduleNo);
       if (saved.cutInDate)        setCutInDate(saved.cutInDate);
       if (saved.componentInQty)   setComponentInQty(saved.componentInQty);
       if (saved.savedCuts)        setSavedCuts(saved.savedCuts);
       if (saved.stagedEntries)    setStagedEntries(saved.stagedEntries);
+      if (saved.activeCutNo)      setActiveCutNo(saved.activeCutNo);
     }
   );
 
   // ── Cut builder ───────────────────────────────────────────────────────────
-  const selectedComponent = useMemo(() =>
-    styleComponents.find(c => c.submissionId === activeSubmissionId) || null,
-    [styleComponents, activeSubmissionId]);
-
-  const nextComponent = useMemo((): EligibleStoreInItem | null => {
-    const used = new Set(savedCuts.map(c => c.submissionId));
-    return styleComponents.find(c => !used.has(c.submissionId)) ?? null;
-  }, [savedCuts, styleComponents]);
-
-  const activeCutTitle = useMemo(() => {
-    const compCuts = savedCuts.filter(c => c.submissionId === activeSubmissionId);
-    const idx = editingCutTempId ? compCuts.findIndex(c => c.tempId === editingCutTempId) + 1 : compCuts.length + 1;
-    if (editingCutTempId) {
-      const ex = savedCuts.find(c => c.tempId === editingCutTempId);
-      return ex ? ex.cutNo : 'Edit Cut';
-    }
-    const compName = selectedComponent?.components ?? nextComponent?.components ?? 'Cut';
-    return compName + ' Cut ' + idx;
-  }, [editingCutTempId, savedCuts, selectedComponent, nextComponent, activeSubmissionId]);
-
   const addBundle = () =>
     setActiveCutBundles(prev => [...prev, makeBundleRow(prev.length + 1)]);
   const removeBundle = (id: string) =>
@@ -259,6 +289,16 @@ export default function StoreInPage() {
   const validateActiveCut = (): boolean => {
     const errs: Record<string, string> = {};
     if (!activeSubmissionId) errs.component = 'Select a component for this cut';
+    if (!activeCutNo.trim()) errs.cutNo = 'Cut name/number is required';
+
+    // Check for duplicate Cut No inside the same component
+    const duplicateCutNo = savedCuts.some(c => 
+      c.submissionId === activeSubmissionId && 
+      c.tempId !== editingCutTempId && 
+      c.cutNo.toLowerCase() === activeCutNo.trim().toLowerCase()
+    );
+    if (duplicateCutNo) errs.cutNo = 'This cut name already exists for this component';
+
     const cutQtyNum = parseInt(activeCutQty) || 0;
     if (cutQtyNum <= 0) errs.cutQty = 'Cut Qty must be > 0';
 
@@ -306,10 +346,12 @@ export default function StoreInPage() {
   const handleSaveCut = () => {
     if (!validateActiveCut()) return;
     const comp = styleComponents.find(c => c.submissionId === activeSubmissionId);
+    const sourceCompName = comp?.components ?? ''; 
+    
     const newCut: SavedCut = {
       tempId:       editingCutTempId ?? crypto.randomUUID(),
-      cutNo:        activeCutTitle,
-      component:    comp?.components ?? '',
+      cutNo:        activeCutNo.trim(),
+      component:    sourceCompName,
       submissionId: activeSubmissionId,
       bodyColour:   comp?.bodyColour ?? '',
       cutQty:       parseInt(activeCutQty) || 0,
@@ -320,14 +362,33 @@ export default function StoreInPage() {
         numberRange: b.numberRange.trim(),
       })),
     };
+    
     if (editingCutTempId) {
       setSavedCuts(prev => prev.map(c => c.tempId === editingCutTempId ? newCut : c));
       setEditingCutTempId(null);
     } else {
-      setSavedCuts(prev => [...prev, newCut]);
+      setSavedCuts(prev => {
+         const toAdd = [newCut];
+         // Auto-copy to other CONFIRMED components that want to keep in sync
+         const otherComps = styleComponents.filter(c => c.submissionId !== activeSubmissionId && isComponentConfirmed(c.submissionId));
+
+         otherComps.forEach(otherComp => {
+            toAdd.push({
+               ...newCut,
+               tempId: crypto.randomUUID(),
+               submissionId: otherComp.submissionId,
+               component: otherComp.components,
+               bodyColour: otherComp.bodyColour,
+               cutNo: newCut.cutNo.replace(sourceCompName, otherComp.components),
+               bundles: newCut.bundles.map(b => ({ ...b }))
+            });
+         });
+         return [...prev, ...toAdd];
+      });
     }
     setActiveCutBundles([makeBundleRow(1)]);
     setActiveCutQty('');
+    setActiveCutNo('');
     setActiveSubmissionId('');
     setCutErrors({});
   };
@@ -335,6 +396,7 @@ export default function StoreInPage() {
   const handleEditSavedCut = (cut: SavedCut) => {
     setEditingCutTempId(cut.tempId);
     setActiveSubmissionId(cut.submissionId);
+    setActiveCutNo(cut.cutNo);
     setActiveCutQty(cut.cutQty.toString());
     setActiveCutBundles(cut.bundles.map(b => ({
       tempId: crypto.randomUUID(),
@@ -348,6 +410,7 @@ export default function StoreInPage() {
     setEditingCutTempId(null);
     setActiveCutBundles([makeBundleRow(1)]);
     setActiveCutQty('');
+    setActiveCutNo('');
     setActiveSubmissionId('');
     setCutErrors({});
   };
@@ -360,7 +423,7 @@ export default function StoreInPage() {
     const errs: Record<string, string> = {};
     if (!selectedStyleNo)   errs.styleNo    = 'Select a style number';
     if (!selectedCustomer)  errs.customer   = 'Select a customer';
-    // scheduleNo is optional — not required
+    if (!inAdNo.trim())     errs.inAdNo     = 'IN-AD No is required';
     if (!cutInDate)         errs.cutInDate  = 'Cut In Date is required';
     if (inQtyNum <= 0)      errs.inQty      = 'Enter IN Qty for at least one component';
 
@@ -395,19 +458,19 @@ export default function StoreInPage() {
 
   const resetForm = () => {
     setSelectedStyleNo(''); setSelectedCustomer('');
-    setScheduleNo(''); setCutInDate('');
+    setInAdNo(''); setScheduleNo(''); setCutInDate('');
     setComponentInQty({}); setConfirmedInQty({});
     setSavedCuts([]); setActiveCutBundles([makeBundleRow(1)]);
-    setActiveCutQty(''); setActiveSubmissionId('');
+    setActiveCutQty(''); setActiveCutNo(''); setActiveSubmissionId('');
     setEditingCutTempId(null); setEditingRecordId(null);
     setErrors({}); setCutErrors({}); setPageError('');
     clearDraft();
   };
+
   // ── Stage a single component ─────────────────────────────────────────────
   const stageComponent = (comp: EligibleStoreInItem) => {
-    // Validate basics first
-    // scheduleNo is optional
-    if (!cutInDate)         { setErrors(p => ({ ...p, cutInDate: 'Cut In Date is required' })); return; }
+    if (!inAdNo.trim()) { setErrors(p => ({ ...p, inAdNo: 'IN-AD No is required' })); return; }
+    if (!cutInDate)     { setErrors(p => ({ ...p, cutInDate: 'Cut In Date is required' })); return; }
 
     const compCuts  = savedCuts.filter(c => c.submissionId === comp.submissionId);
     const compInQty = getComponentInQty(comp.submissionId);
@@ -426,6 +489,7 @@ export default function StoreInPage() {
       styleNo:      selectedStyleNo,
       customerName: selectedCustomer,
       components:   comp.components,
+      inAdNo:       inAdNo.trim(),
       scheduleNo:   scheduleNo.trim(),
       cutInDate,
       inQty:        compInQty,
@@ -449,6 +513,7 @@ export default function StoreInPage() {
       setActiveSubmissionId('');
       setActiveCutBundles([makeBundleRow(1)]);
       setActiveCutQty('');
+      setActiveCutNo('');
     }
     setErrors({});
   };
@@ -465,6 +530,7 @@ export default function StoreInPage() {
         const primarySubId = entry.cuts[0]?.submissionId ?? '';
         await addStoreInRecord({
           submissionId: primarySubId,
+          inAdNo:       entry.inAdNo,
           scheduleNo:   entry.scheduleNo,
           cutInDate:    entry.cutInDate,
           inQty:        entry.inQty,
@@ -495,6 +561,7 @@ export default function StoreInPage() {
       const primarySubId = savedCuts[0]?.submissionId ?? '';
       await updateStoreInRecord(editingRecordId!, {
         submissionId: primarySubId,
+        inAdNo:       inAdNo.trim(),
         scheduleNo:   scheduleNo.trim(),
         cutInDate,
         inQty:        inQtyNum,
@@ -517,6 +584,7 @@ export default function StoreInPage() {
   const handleEdit = (record: StoreInRecord) => {
     setSelectedStyleNo(record.styleNo);
     setSelectedCustomer(record.customerName);
+    setInAdNo(record.inAdNo || '');
     setScheduleNo(record.scheduleNo);
     setCutInDate(record.cutInDate);
     const compQtyMap: Record<string, string> = {};
@@ -561,6 +629,7 @@ export default function StoreInPage() {
       records = records.filter(r =>
         r.styleNo.toLowerCase().includes(q) ||
         r.customerName.toLowerCase().includes(q) ||
+        r.inAdNo?.toLowerCase().includes(q) ||
         r.scheduleNo.toLowerCase().includes(q) ||
         r.bodyColour?.toLowerCase().includes(q) ||
         r.season?.toLowerCase().includes(q)
@@ -643,7 +712,7 @@ export default function StoreInPage() {
           {/* Style & Schedule */}
           <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-5 space-y-4">
             <h4 className="border-b border-blue-200 pb-2 text-sm font-bold uppercase tracking-wider text-blue-800">Style & Schedule</h4>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
 
               <div className="space-y-1">
                 <label className="block text-xs font-medium text-slate-600">Style No <span className="text-red-500">*</span></label>
@@ -670,7 +739,16 @@ export default function StoreInPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-600">Schedule No <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-slate-600">IN-AD No <span className="text-red-500">*</span></label>
+                <input type="text" value={inAdNo}
+                  onChange={e => { setInAdNo(e.target.value); if (errors.inAdNo) setErrors(p => ({ ...p, inAdNo: '' })); }}
+                  placeholder="e.g. AD-2026"
+                  className={'w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ' + (errors.inAdNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500')} />
+                {errors.inAdNo && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.inAdNo}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-600">Schedule No</label>
                 <input type="text" list={scheduleDatalistId} value={scheduleNo}
                   onChange={e => { setScheduleNo(e.target.value); if (errors.scheduleNo) setErrors(p => ({ ...p, scheduleNo: '' })); }}
                   disabled={!selectedCustomer}
@@ -851,13 +929,31 @@ export default function StoreInPage() {
                             <motion.div
                               initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                               className={'rounded-lg border-2 p-4 space-y-3 ' + (editingCutTempId ? 'border-amber-300 bg-amber-50/40' : 'border-indigo-200 bg-indigo-50/30')}>
-
-                              <div className="flex items-center justify-between flex-wrap gap-3">
+                              
+                              <div className="mb-2">
                                 <span className="text-xs font-bold text-indigo-800">
-                                  {editingCutTempId
-                                    ? 'Editing: ' + (savedCuts.find(c => c.tempId === editingCutTempId)?.cutNo ?? '')
-                                    : 'New cut for ' + comp.components}
+                                  {editingCutTempId ? 'Editing Cut' : `New cut for ${comp.components}`}
                                 </span>
+                              </div>
+
+                              <div className="flex items-start flex-wrap gap-4">
+                                
+                                {/* Manual Cut No Input */}
+                                <div className="space-y-0.5">
+                                  <label className="block text-[10px] font-medium text-slate-500">Cut Name / No <span className="text-red-500">*</span></label>
+                                  <input
+                                    type="text"
+                                    value={activeCutNo}
+                                    onChange={e => {
+                                      setActiveCutNo(e.target.value);
+                                      if (cutErrors.cutNo) setCutErrors(p => ({ ...p, cutNo: '' }));
+                                    }}
+                                    placeholder={`e.g. ${comp.components} Cut 1`}
+                                    className={'w-48 rounded-lg border px-3 py-1.5 text-sm font-bold outline-none ' + (cutErrors.cutNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-indigo-500')}
+                                  />
+                                  {cutErrors.cutNo && <p className="text-[10px] text-red-600">{cutErrors.cutNo}</p>}
+                                </div>
+
                                 <div className="space-y-0.5">
                                   <label className="block text-[10px] font-medium text-slate-500">Cut Qty <span className="text-red-500">*</span></label>
                                   <div className="flex items-center gap-2">
@@ -866,10 +962,10 @@ export default function StoreInPage() {
                                       value={activeCutQty}
                                       onChange={e => {
                                         setActiveCutQty(e.target.value.replace(/[^0-9]/g, ''));
-                                        setCutQtyConfirmed(false); // reset confirmation if qty changes
+                                        setCutQtyConfirmed(false); 
                                         if (cutErrors.cutQty) setCutErrors(p => ({ ...p, cutQty: '' }));
                                       }}
-                                      placeholder="e.g. 100" autoFocus
+                                      placeholder="e.g. 100"
                                       disabled={cutQtyConfirmed}
                                       className={'w-28 rounded-lg border px-3 py-1.5 text-sm font-bold outline-none ' + (cutQtyConfirmed ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : cutErrors.cutQty ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-indigo-500')} />
                                     {!cutQtyConfirmed ? (
@@ -981,6 +1077,9 @@ export default function StoreInPage() {
                                 setActiveCutBundles([makeBundleRow(1)]);
                                 setActiveCutQty('');
                                 setCutErrors({});
+                                // Set a smart default for the manual cut name
+                                const compCuts = savedCuts.filter(c => c.submissionId === comp.submissionId);
+                                setActiveCutNo(`${comp.components} Cut ${compCuts.length + 1}`);
                               }}
                               disabled={compUncut <= 0}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-indigo-300 px-4 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -1057,7 +1156,7 @@ export default function StoreInPage() {
                         <span className="text-xs text-slate-500">{entry.customerName}</span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Sch: {entry.scheduleNo} | {entry.cutInDate}
+                        IN-AD: <span className="font-semibold text-slate-700">{entry.inAdNo}</span> | Sch: {entry.scheduleNo} | {entry.cutInDate}
                         <span className="ml-2 inline-flex items-center rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-bold px-2 py-0.5">
                           {entry.components}
                         </span>
@@ -1095,6 +1194,7 @@ export default function StoreInPage() {
                                   if (!matchedSavedCut) return;
                                   setActiveSubmissionId(cut.submissionId);
                                   setEditingCutTempId(matchedSavedCut.tempId);
+                                  setActiveCutNo(cut.cutNo);
                                   setActiveCutQty(String(cut.cutQty));
                                   setCutQtyConfirmed(true);
                                   setActiveCutBundles(cut.bundles.map((b, i) => ({
@@ -1205,7 +1305,7 @@ export default function StoreInPage() {
                         </span>
                         <span className="text-xs text-slate-500">{record.customerName}</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{record.components} · Sch: {record.scheduleNo} | {record.cutInDate}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{record.components} · IN-AD: {record.inAdNo} · Sch: {record.scheduleNo} | {record.cutInDate}</p>
                     </div>
                     <div className="text-right space-y-0.5 shrink-0">
                       <div className="text-xs text-slate-500">IN: <span className="font-bold text-orange-600">{record.inQty}</span></div>

@@ -11,7 +11,6 @@ import { API, getAuthHeaders } from '../api/client';
 // ==========================================
 // TYPES — matches backend DTOs
 // ==========================================
-
 export interface EligibleStoreInItem {
   submissionId: string;
   revisionNo: number;
@@ -55,6 +54,9 @@ export interface StoreInRecord {
   printColour: string;
   components: string;
   season: string;
+
+  inAdNo: string;
+
   scheduleNo: string;
   cutInDate: string;
   bulkQty: number;
@@ -98,6 +100,9 @@ export interface CreateCutInput {
 
 export interface CreateStoreInInput {
   submissionId: string;
+
+  inAdNo: string;
+
   scheduleNo: string;
   cutInDate: string;
   inQty: number;

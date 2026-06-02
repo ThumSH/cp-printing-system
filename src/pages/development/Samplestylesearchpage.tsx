@@ -1,6 +1,6 @@
 // src/pages/development/SampleStyleSearchPage.tsx
 // Developer search history — Sample Styles and Admin-Approved styles.
-// Filters: Style No, Customer, Body Colour, Date (dropdown of available dates).
+// Filters: Style No, Customer, Body Colour, Date Range (from/to).
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -15,7 +15,8 @@ interface Filters {
   styleNo: string;
   customer: string;
   bodyColour: string;
-  date: string;
+  dateFrom: string;
+  dateTo: string;
   tab: 'all' | 'submitted' | 'approved';
 }
 
@@ -23,7 +24,8 @@ const EMPTY_FILTERS: Filters = {
   styleNo: '',
   customer: '',
   bodyColour: '',
-  date: '',
+  dateFrom: '',
+  dateTo: '',
   tab: 'all',
 };
 
@@ -220,9 +222,8 @@ export default function SampleStyleSearchPage() {
   const styleNos = useMemo(() => unique(styles.map((s) => s.styleNo)), [styles]);
   const customers = useMemo(() => unique(styles.map((s) => s.customer)), [styles]);
   const bodyColours = useMemo(() => unique(styles.map((s) => s.bodyColour)), [styles]);
-  const dates = useMemo(() => unique(styles.map((s) => s.createdAt?.slice(0, 10))), [styles]);
 
-  const hasFilters = filters.styleNo || filters.customer || filters.bodyColour || filters.date;
+  const hasFilters = filters.styleNo || filters.customer || filters.bodyColour || filters.dateFrom || filters.dateTo;
 
   const filtered = useMemo(() => {
     return styles.filter((s) => {
@@ -234,7 +235,11 @@ export default function SampleStyleSearchPage() {
       if (filters.styleNo && s.styleNo !== filters.styleNo) return false;
       if (filters.customer && s.customer !== filters.customer) return false;
       if (filters.bodyColour && !s.bodyColour?.toLowerCase().includes(filters.bodyColour.toLowerCase())) return false;
-      if (filters.date && s.createdAt?.slice(0, 10) !== filters.date) return false;
+      
+      // Date Range filters
+      const createdDate = s.createdAt?.slice(0, 10) || '';
+      if (filters.dateFrom && createdDate < filters.dateFrom) return false;
+      if (filters.dateTo && createdDate > filters.dateTo) return false;
 
       return true;
     }).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -243,7 +248,7 @@ export default function SampleStyleSearchPage() {
   const set = (key: keyof Filters, val: string) =>
     setFilters((p) => ({ ...p, [key]: val }));
 
-  const clearFilters = () => setFilters((p) => ({ ...p, styleNo: '', customer: '', bodyColour: '', date: '' }));
+  const clearFilters = () => setFilters((p) => ({ ...p, styleNo: '', customer: '', bodyColour: '', dateFrom: '', dateTo: '' }));
 
   const counts = {
     all: styles.length,
@@ -304,7 +309,7 @@ export default function SampleStyleSearchPage() {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
 
           {/* Style No dropdown */}
           <div>
@@ -336,15 +341,20 @@ export default function SampleStyleSearchPage() {
             </select>
           </div>
 
-          {/* Date dropdown */}
+          {/* Date From picker */}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Date Created</label>
-            <select value={filters.date} onChange={(e) => set('date', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-              <option value="">All</option>
-              {dates.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Date From</label>
+            <input type="date" value={filters.dateFrom} onChange={(e) => set('dateFrom', e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
           </div>
+
+          {/* Date To picker */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Date To</label>
+            <input type="date" value={filters.dateTo} onChange={(e) => set('dateTo', e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+          </div>
+
         </div>
       </div>
 

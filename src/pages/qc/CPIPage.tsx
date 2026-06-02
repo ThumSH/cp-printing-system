@@ -1,8 +1,9 @@
+// src/pages/qc/CPIPage.tsx
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   ClipboardList, Save, AlertCircle, Loader2, CheckCircle2, Printer,
-  XCircle, Clock,
+  XCircle, Clock, Trash2,
 } from 'lucide-react';
 import { useQCStore } from '../../store/qcStore';
 import { useInventoryStore } from '../../store/inventoryStore';
@@ -26,37 +27,31 @@ const DEFECTS = [
 ];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-interface BundleRow {
-  bundleNo: string; qty: number; size: string; numberRange: string;
+interface GlobalDefect {
+  check: string;
+  sampleSize: string;
+  defectedQty: string;
+  percentage: string;
+  remarks: string;
 }
 
-interface DefectEntry {
-  defectCode: string;
-  check: string;
+interface BundleRow {
+  bundleNo: string; qty: number; size: string; numberRange: string;
   beforeL_plus: string; beforeL_minus: string;
   beforeW_plus: string; beforeW_minus: string;
   afterL_plus:  string; afterL_minus:  string;
   afterW_plus:  string; afterW_minus:  string;
-  sampleSize:   string;
-  defectedQty:  string;
-  percentage:   string;
-  remarks:      string;
 }
 
 interface CutInspection {
   cutNo: string; cutQty: number; component: string;
-  bundles: BundleRow[]; defects: DefectEntry[];
+  bundles: BundleRow[];
 }
 
 type InspectionStatus = 'Passed' | 'Failed' | 'Pending';
 
-const makeDefects = (_cutQty: number): DefectEntry[] =>
-  DEFECTS.map(d => ({
-    defectCode: d.code, check: '',
-    beforeL_plus: '', beforeL_minus: '', beforeW_plus: '', beforeW_minus: '',
-    afterL_plus:  '', afterL_minus:  '', afterW_plus:  '', afterW_minus:  '',
-    sampleSize: '', defectedQty: '', percentage: '', remarks: '',
-  }));
+const makeGlobalDefects = (): GlobalDefect[] =>
+  DEFECTS.map(() => ({ check: '', sampleSize: '', defectedQty: '', percentage: '', remarks: '' }));
 
 // ── Tiny cell input ───────────────────────────────────────────────────────────
 function Cell({ value, onChange, w = 'w-10', type = 'text', placeholder = '' }: {
@@ -71,6 +66,21 @@ function Cell({ value, onChange, w = 'w-10', type = 'text', placeholder = '' }: 
   );
 }
 
+// ── Tick/Cross toggle ────────────────────────────────────────────────────────
+function TickCrossToggle({ value, onChange }: { value: string, onChange: (v: string) => void }) {
+  const handleClick = () => {
+    if (value === '') onChange('✓');
+    else if (value === '✓') onChange('✗');
+    else onChange('');
+  };
+  return (
+    <button type="button" onClick={handleClick}
+      className="mx-auto flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white text-xs font-bold shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-500">
+      {value === '✓' ? <span className="text-emerald-600">✓</span> : value === '✗' ? <span className="text-red-600">✗</span> : ''}
+    </button>
+  );
+}
+
 // ── Dropdown helper ───────────────────────────────────────────────────────────
 function CascadeSelect({ label, value, onChange, options, disabled = false }: {
   label: string; value: string; onChange: (v: string) => void;
@@ -80,7 +90,7 @@ function CascadeSelect({ label, value, onChange, options, disabled = false }: {
     <div className="space-y-1">
       <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</label>
       <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-        className="min-w-40 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed">
+        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed">
         <option value="">— Select —</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
@@ -138,14 +148,19 @@ function StatusSelector({ value, onChange }: {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function CPIPage() {
-  const { eligibleCpiItems, fetchEligibleCpiItems, addCPIReport, cpiReports, fetchReports } = useQCStore();
+  const { eligibleCpiItems, fetchEligibleCpiItems, addCPIReport, updateCPIReport, cpiReports, fetchReports } = useQCStore();
   const { storeInRecords, fetchRecords } = useInventoryStore();
 
   // Cascading selection
   const [selStyle,     setSelStyle]     = useState('');
   const [selCustomer,  setSelCustomer]  = useState('');
   const [selSchedule,  setSelSchedule]  = useState('');
-  const [selComponent, setSelComponent] = useState('');
+  
+  // Changed to composite key to uniquely identify the exact Store-In batch
+  const [selComponentVal, setSelComponentVal] = useState(''); 
+
+  const parsedStoreInId = selComponentVal ? selComponentVal.split('|||')[0] : '';
+  const selComponent    = selComponentVal ? selComponentVal.split('|||')[1] : '';
 
   // Header manual fields
   const [date,        setDate]        = useState(new Date().toISOString().slice(0, 10));
@@ -153,11 +168,11 @@ export default function CPIPage() {
   const [cpiQty,      setCpiQty]      = useState('');
   const [auditor,     setAuditor]     = useState('');
 
-  // FIX 1: Inspection status — was hardcoded 'Passed', now user-selectable
   const [inspectionStatus, setInspectionStatus] = useState<InspectionStatus>('Passed');
 
-  // Cut data
+  // Cut & Defect Data
   const [cuts, setCuts] = useState<CutInspection[]>([]);
+  const [globalDefects, setGlobalDefects] = useState<GlobalDefect[]>([]);
 
   // UI
   const [saving,  setSaving]  = useState(false);
@@ -194,102 +209,132 @@ export default function CPIPage() {
       return true;
     }), [storeInRecords, selStyle, selCustomer, selSchedule]);
 
-  const componentMatchedRecords = useMemo(() => {
-    if (!selComponent) return matchedRecords;
-    return matchedRecords.filter(r => {
-      const parts = (r.components ?? '').split(',').map((s: string) => s.trim());
-      return parts.includes(selComponent);
-    });
-  }, [matchedRecords, selComponent]);
-
-  const componentStoreIn = useMemo(() => {
-    if (!selComponent) return null;
-    return componentMatchedRecords.find(r => r.components === selComponent)
-      ?? componentMatchedRecords[0]
-      ?? null;
-  }, [componentMatchedRecords, selComponent]);
-
-  const selectedStoreIn = componentStoreIn;
-
+  // Use a composite value so the user selects the EXACT Store-In batch they mean
   const componentOptions = useMemo(() => {
-    const existingCpiStoreInIds = new Set(cpiReports.map(r => r.storeInRecordId));
-    const compMap = new Map<string, string>();
+    const options: { value: string; label: string }[] = [];
 
+    // Only show Eligible items (fresh or partially inspected cuts)
     eligibleCpiItems
       .filter(i =>
         i.styleNo === selStyle &&
         i.customerName === selCustomer &&
-        (selSchedule === '' || (i.scheduleNo ?? '') === selSchedule) &&
-        !existingCpiStoreInIds.has(i.storeInRecordId)
+        (selSchedule === '' || (i.scheduleNo ?? '') === selSchedule)
       )
       .forEach(i => {
-        const parts = (i.components ?? '').split(',').map((s: string) => s.trim()).filter(Boolean);
-        parts.forEach(comp => { if (!compMap.has(comp)) compMap.set(comp, i.storeInRecordId); });
+        const parts = (i.components ?? '').split(',').map(s => s.trim()).filter(Boolean);
+        parts.forEach(comp => {
+          const val = `${i.storeInRecordId}|||${comp}`;
+          const label = `${comp} (Batch: ${i.cutInDate}, IN Qty: ${i.receivedQty})`;
+          if (!options.some(o => o.value === val)) options.push({ value: val, label });
+        });
       });
 
-    matchedRecords.forEach(r => {
-      if (existingCpiStoreInIds.has(r.id)) return;
-      const parts = (r.components ?? '').split(',').map((s: string) => s.trim()).filter(Boolean);
-      parts.forEach(comp => { if (!compMap.has(comp)) compMap.set(comp, r.id); });
-    });
+    return options;
+  }, [eligibleCpiItems, selStyle, selCustomer, selSchedule]);
 
-    return Array.from(compMap.keys()).map(comp => ({ value: comp, label: comp }));
-  }, [eligibleCpiItems, matchedRecords, selStyle, selCustomer, selSchedule, cpiReports]);
+  const selectedStoreIn = useMemo(() => {
+    if (!parsedStoreInId) return null;
+    return storeInRecords.find(r => r.id === parsedStoreInId) || null;
+  }, [parsedStoreInId, storeInRecords]);
+
+  // Detect if an existing report is already saved for this EXACT Store-In Record
+  const existingReport = useMemo(() => {
+    if (!selectedStoreIn) return null;
+    return cpiReports.find(r => r.storeInRecordId === selectedStoreIn.id) || null;
+  }, [selectedStoreIn, cpiReports]);
 
   const eligibleItem = useMemo(() =>
-    eligibleCpiItems.find(i =>
-      i.styleNo === selStyle &&
-      i.customerName === selCustomer &&
-      (selSchedule === '' || (i.scheduleNo ?? '') === selSchedule) &&
-      (!selComponent || i.components === selComponent ||
-        i.components?.split(',').map((s: string) => s.trim()).includes(selComponent))
-    ), [eligibleCpiItems, selStyle, selCustomer, selSchedule, selComponent]);
+    eligibleCpiItems.find(i => i.storeInRecordId === parsedStoreInId), 
+  [eligibleCpiItems, parsedStoreInId]);
 
   const cutsForComp = useMemo(() => {
-    if (!selComponent || !componentStoreIn) return [];
-    const allCuts = componentStoreIn.cuts ?? [];
-    const isMultiComponent = (componentStoreIn.components ?? '').includes(',');
-    const filtered = isMultiComponent
-      ? allCuts.filter((cut: any) =>
-          cut.cutNo?.toLowerCase().startsWith(selComponent.toLowerCase())
-        )
-      : allCuts;
-    return filtered.map((cut: any) => ({ storeIn: componentStoreIn, cut }));
-  }, [componentStoreIn, selComponent]);
+    if (!selComponent || !selectedStoreIn) return [];
+    
+    // We no longer filter by `startsWith("front")`. ALL cuts in this store-in belong here.
+    let filtered = selectedStoreIn.cuts ?? [];
+
+    // Filter out cuts that have ALREADY been appended to the existing report
+    if (existingReport && existingReport.cutInspections) {
+       const inspectedCutNos = new Set(existingReport.cutInspections.map((ci: any) => ci.cutNo));
+       filtered = filtered.filter((cut: any) => !inspectedCutNos.has(cut.cutNo));
+    }
+
+    return filtered.map((cut: any) => ({ storeIn: selectedStoreIn, cut }));
+  }, [selectedStoreIn, selComponent, existingReport]);
 
   useEffect(() => {
-    if (!selComponent || cutsForComp.length === 0) { setCuts([]); return; }
+    if (!selComponent || cutsForComp.length === 0) { setCuts([]); setGlobalDefects([]); return; }
+    
+    // Setup form for the newly loaded cuts
     const loaded: CutInspection[] = cutsForComp.map(({ cut }) => ({
       cutNo:     cut.cutNo,
       cutQty:    cut.cutQty,
       component: selComponent,
       bundles:   cut.bundles?.map((b: any) => ({
         bundleNo: b.bundleNo, qty: b.bundleQty, size: b.size, numberRange: b.numberRange,
+        beforeL_plus: '', beforeL_minus: '', beforeW_plus: '', beforeW_minus: '',
+        afterL_plus:  '', afterL_minus:  '', afterW_plus:  '', afterW_minus:  '',
       })) || [],
-      defects: makeDefects(cut.cutQty),
     }));
     setCuts(loaded);
+    setGlobalDefects(makeGlobalDefects());
     if (selectedStoreIn?.inQty) setReceivedQty(selectedStoreIn.inQty.toString());
   }, [selComponent, cutsForComp.length]);
 
-  // ── Update a single defect cell ───────────────────────────────────────────
-  const updateDefect = useCallback((
-    cutIdx: number, defIdx: number, field: keyof DefectEntry, value: string
-  ) => {
-    setCuts(prev => prev.map((cut, ci) => {
-      if (ci !== cutIdx) return cut;
-      const defects = cut.defects.map((d, di) => {
-        if (di !== defIdx) return d;
-        const upd = { ...d, [field]: value };
-        if (field === 'defectedQty' || field === 'sampleSize') {
-          const defQty  = parseFloat(field === 'defectedQty' ? value : d.defectedQty) || 0;
-          const sampQty = parseFloat(field === 'sampleSize'  ? value : d.sampleSize)  || 0;
-          upd.percentage = sampQty > 0 && defQty >= 0
-            ? ((defQty / sampQty) * 100).toFixed(1) : '';
-        }
-        return upd;
+  // Pre-fill metadata if appending to an existing report
+  useEffect(() => {
+    if (existingReport) {
+       setAuditor(existingReport.cpiAuditor || existingReport.checkedBy || '');
+       setInspectionStatus((existingReport.inspectionStatus as InspectionStatus) || 'Pending');
+    } else {
+       setAuditor('');
+       setInspectionStatus('Passed');
+    }
+    setCpiQty(''); // Always clear CPI Qty so they enter the qty strictly for this new batch
+  }, [existingReport, selComponent]);
+
+  // ── Flatten bundles for side-by-side rendering ────────────────────────────
+  const flatBundles = useMemo(() => {
+    const flat: any[] = [];
+    cuts.forEach((c, cIdx) => {
+      c.bundles.forEach((b, bIdx) => {
+        flat.push({
+          cutIdx: cIdx,
+          bundleIdx: bIdx,
+          isFirstOfCut: bIdx === 0,
+          cutNo: c.cutNo,
+          cutQty: c.cutQty,
+          component: c.component,
+          ...b
+        });
       });
-      return { ...cut, defects };
+    });
+    return flat;
+  }, [cuts]);
+
+  // ── State Updaters ────────────────────────────────────────────────────────
+  const updateGlobalDefect = useCallback((index: number, field: keyof GlobalDefect, value: string) => {
+    setGlobalDefects(prev => prev.map((d, i) => {
+      if (i !== index) return d;
+      const upd = { ...d, [field]: value };
+      if (field === 'defectedQty' || field === 'sampleSize') {
+        const defQty  = parseFloat(field === 'defectedQty' ? value : d.defectedQty) || 0;
+        const sampQty = parseFloat(field === 'sampleSize'  ? value : d.sampleSize)  || 0;
+        upd.percentage = sampQty > 0 && defQty >= 0
+          ? ((defQty / sampQty) * 100).toFixed(1) : '';
+      }
+      return upd;
+    }));
+  }, []);
+
+  const updateBundle = useCallback((cutIdx: number, bundleIdx: number, field: keyof BundleRow, value: string) => {
+    setCuts(prev => prev.map((c, ci) => {
+      if (ci !== cutIdx) return c;
+      const bundles = c.bundles.map((b, bi) => {
+        if (bi !== bundleIdx) return b;
+        return { ...b, [field]: value };
+      });
+      return { ...c, bundles };
     }));
   }, []);
 
@@ -299,18 +344,16 @@ export default function CPIPage() {
       return {
         ...cut,
         bundles: cut.bundles.filter((_, bi) => bi !== bundleIdx),
-        defects: cut.defects.filter((_, di) => di !== bundleIdx),
       };
     }));
   }, []);
 
-  // FIX 5: Reset now includes inspectionStatus
   const handleReset = () => {
-    setSelStyle(''); setSelCustomer(''); setSelSchedule(''); setSelComponent('');
+    setSelStyle(''); setSelCustomer(''); setSelSchedule(''); setSelComponentVal('');
     setDate(new Date().toISOString().slice(0, 10));
     setReceivedQty(''); setCpiQty(''); setAuditor('');
-    setInspectionStatus('Passed');   // ← reset to default
-    setCuts([]); setErrMsg(''); setSuccMsg('');
+    setInspectionStatus('Passed');
+    setCuts([]); setGlobalDefects([]); setErrMsg(''); setSuccMsg('');
   };
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -320,13 +363,52 @@ export default function CPIPage() {
     if (!auditor.trim())   { setErrMsg('Auditor name is required.'); return; }
     const storeIn = selectedStoreIn ?? matchedRecords[0];
     setSaving(true); setErrMsg('');
+    
     try {
-      const totalDefected = cuts.reduce((s, c) =>
-        s + c.defects.reduce((ds, d) => ds + (parseFloat(d.defectedQty) || 0), 0), 0);
-      const totalCutQty = cuts.reduce((s, c) => s + c.cutQty, 0);
+      // 1. Process New Cuts
+      const newTotalDefected = globalDefects.reduce((s, d) => s + (parseFloat(d.defectedQty) || 0), 0);
+      const newTotalCutQty = cuts.reduce((s, c) => s + c.cutQty, 0);
+
+      const newCutInspections = cuts.map(cut => ({
+        cutRecordId:  '',
+        cutNo:        cut.cutNo,
+        cutQty:       cut.cutQty,
+        bundleNos:    cut.bundles.map(b => b.bundleNo).join(', '),
+        sizes:        Array.from(new Set(cut.bundles.map(b => b.size))).join(', '),
+        numberRanges: cut.bundles.map(b => b.numberRange).join(', '),
+        part:         cut.component,
+        sampleSize:   Math.ceil(cut.cutQty * 0.1),
+        defectRows: globalDefects.map((d, i) => {
+          const bundleForThisRow = flatBundles[i];
+          return {
+            defectCode:   DEFECTS[i].code,
+            defectName:   DEFECTS[i].label,
+            check:        d.check,
+            beforeLength: parseFloat(bundleForThisRow?.beforeL_plus)  || 0,
+            beforeWidth:  parseFloat(bundleForThisRow?.beforeW_plus)  || 0,
+            afterLength:  parseFloat(bundleForThisRow?.afterL_plus)   || 0,
+            afterWidth:   parseFloat(bundleForThisRow?.afterW_plus)   || 0,
+            defectedQty:  parseFloat(d.defectedQty)   || 0,
+            percentage:   d.percentage,
+            remarks:      d.remarks,
+          };
+        }),
+        totalDefectedQty: newTotalDefected,
+        totalPercentage:  newTotalCutQty > 0 ? (newTotalDefected / newTotalCutQty * 100).toFixed(1) : '0',
+      }));
+
+      // 2. Combine with Existing Cuts (if appending)
+      const combinedCutInspections = existingReport 
+         ? [...(existingReport.cutInspections || []), ...newCutInspections]
+         : newCutInspections;
+         
+      const combinedTotalDefected = combinedCutInspections.reduce((s, ci) => s + (ci.totalDefectedQty || 0), 0);
+      const combinedTotalCutQty = combinedCutInspections.reduce((s, ci) => s + (ci.cutQty || 0), 0);
+      const combinedCheckedQty = (existingReport ? (existingReport.checkedQty || 0) : 0) + (parseInt(cpiQty) || 0);
 
       const report = {
-        id: '',
+        ...(existingReport || {}),
+        id: existingReport ? existingReport.id : '',
         storeInRecordId: storeIn.id,
         submissionId:    storeIn.submissionId,
         revisionNo:      storeIn.revisionNo ?? 1,
@@ -337,50 +419,34 @@ export default function CPIPage() {
         bodyColour:  eligibleItem?.bodyColour  || storeIn.bodyColour  || '',
         printColour: eligibleItem?.printColour || storeIn.printColour || '',
         receivedQty: parseInt(receivedQty) || 0,
-        cpiQty:      parseInt(cpiQty) || 0,
-        cutInspections: cuts.map(cut => ({
-          cutRecordId:  '',
-          cutNo:        cut.cutNo,
-          cutQty:       cut.cutQty,
-          bundleNos:    cut.bundles.map(b => b.bundleNo).join(', '),
-          sizes:        cut.bundles.map(b => b.size).join(', '),
-          numberRanges: cut.bundles.map(b => b.numberRange).join(', '),
-          part:         cut.component,
-          sampleSize:   Math.ceil(cut.cutQty * 0.1),
-          defectRows: cut.defects.map(d => ({
-            defectCode:   d.defectCode,
-            defectName:   DEFECTS.find(df => df.code === d.defectCode)?.label || d.defectCode,
-            beforeLength: parseFloat(d.beforeL_plus)  || 0,
-            beforeWidth:  parseFloat(d.beforeW_plus)  || 0,
-            afterLength:  parseFloat(d.afterL_plus)   || 0,
-            afterWidth:   parseFloat(d.afterW_plus)   || 0,
-            defectedQty:  parseFloat(d.defectedQty)   || 0,
-            percentage:   d.percentage,
-            remarks:      d.remarks,
-          })),
-          totalDefectedQty: cut.defects.reduce((s, d) => s + (parseFloat(d.defectedQty) || 0), 0),
-          totalPercentage:  cut.cutQty > 0
-            ? (cut.defects.reduce((s, d) => s + (parseFloat(d.defectedQty) || 0), 0) / cut.cutQty * 100).toFixed(1)
-            : '0',
-        })),
-        cuttingQty:          totalCutQty,
-        checkedQty:          parseInt(cpiQty) || 0,
-        rejDamageQty:        totalDefected,
-        rejectionPercentage: totalCutQty > 0 ? (totalDefected / totalCutQty * 100).toFixed(1) : '0',
-        balanceQty:          Math.max(0, totalCutQty - totalDefected),
-        // FIX 3: Use selected inspectionStatus instead of hardcoded 'Passed'
+        cpiQty:      combinedCheckedQty,
+        cutInspections: combinedCutInspections,
+        cuttingQty:          combinedTotalCutQty,
+        checkedQty:          combinedCheckedQty,
+        rejDamageQty:        combinedTotalDefected,
+        rejectionPercentage: combinedTotalCutQty > 0 ? (combinedTotalDefected / combinedTotalCutQty * 100).toFixed(1) : '0',
+        balanceQty:          Math.max(0, combinedTotalCutQty - combinedTotalDefected),
         inspectionStatus,
-        // FIX 4: appRej reflects the status
         appRej:     inspectionStatus === 'Passed' ? 'Approved' : 'Rejected',
         checkedBy:  auditor,
         summaryDate: date,
         cpiAuditor:  auditor,
       };
 
-      await addCPIReport(report as any);
+      // 3. Dispatch to API
+      if (existingReport) {
+        if (!updateCPIReport) throw new Error("updateCPIReport is missing from useQCStore. Please add it to fix this error.");
+        await updateCPIReport(existingReport.id, report as any);
+      } else {
+        await addCPIReport(report as any);
+      }
+      
       await Promise.all([fetchEligibleCpiItems(), fetchReports()]);
-      // FIX 6: Success message includes status
-      setSuccMsg(`CPI Report saved — Status: ${inspectionStatus}.`);
+      
+      const savedStatus = inspectionStatus;
+      handleReset(); 
+      
+      setSuccMsg(`CPI Report ${existingReport ? 'updated' : 'saved'} — Status: ${savedStatus}.`);
       setTimeout(() => setSuccMsg(''), 4000);
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : 'Failed to save.');
@@ -391,69 +457,50 @@ export default function CPIPage() {
   const printColour = eligibleItem?.printColour || selectedStoreIn?.printColour || '—';
   const isReady = selStyle && selCustomer && selComponent && cuts.length > 0;
 
-  // ── Print handler (unchanged) ─────────────────────────────────────────────
+  // ── Print handler ─────────────────────────────────────────────
   const handlePrint = () => {
-    const DEFECT_LIST = [
-      { code: 'F1', label: 'Panel Shrinkage' },
-      { code: 'F2', label: 'Fabric colour variation' },
-      { code: 'F3', label: 'Crush mark' },
-      { code: 'F4', label: 'Shape out panel' },
-      { code: 'F5', label: 'Dust mark' },
-      { code: 'F6', label: 'Stain marks / Oil marks' },
-      { code: 'F7', label: 'Cut holes' },
-      { code: 'F8', label: 'Needle marks' },
-      { code: 'F9', label: 'Incorrect part' },
-      { code: 'F10', label: 'Numbering stickers missing' },
-      { code: 'F11', label: 'Numbering stickers mixed-up' },
-      { code: 'F12', label: 'Size mixed-up' },
-      { code: 'F13', label: 'Wrong Cut Mark' },
-      { code: 'Other', label: 'Other' },
-    ];
-
     const td  = (val: string | number, extra = '') =>
       '<td style="border:1px solid #bbb;padding:2px 4px;text-align:center;font-size:10px;' + extra + '">' + (val ?? '') + '</td>';
     const tdL = (val: string | number) =>
       '<td style="border:1px solid #bbb;padding:2px 4px;text-align:left;font-size:10px;">' + (val ?? '') + '</td>';
 
     let rows = '';
+    const numRows = Math.max(14, flatBundles.length);
     let totalSampleSize = 0;
     let totalDefectedQty = 0;
 
-    cuts.forEach((cut) => {
-      if (!cut.bundles || cut.bundles.length === 0) return;
-      cut.bundles.forEach((bundle, bi) => {
-        const def     = cut.defects?.[bi] ?? ({} as any);
-        const defInfo = DEFECT_LIST[bi % DEFECT_LIST.length];
-        const isFirst = bi === 0;
+    for (let i = 0; i < numRows; i++) {
+      const defInfo = i < 14 ? DEFECTS[i] : null;
+      const def = i < 14 ? globalDefects[i] : null;
+      const bundle = i < flatBundles.length ? flatBundles[i] : null;
 
+      if (def) {
         totalSampleSize  += parseFloat(def.sampleSize)  || 0;
         totalDefectedQty += parseFloat(def.defectedQty) || 0;
+      }
 
-        rows += '<tr>'
-          + td(defInfo?.code ?? '', 'color:#666;font-family:monospace;')
-          + tdL(defInfo?.label ?? '')
-          + td(def.check ?? '')
-          + td(isFirst ? cut.cutNo : '')
-          + td(isFirst ? cut.cutQty : '', 'font-weight:bold;')
-          + td(bundle.bundleNo ?? '')
-          + td(isFirst ? cut.component : '')
-          + td(bundle.size ?? '')
-          + td(def.beforeL_plus ?? '') + td(def.beforeL_minus ?? '')
-          + td(def.beforeW_plus ?? '') + td(def.beforeW_minus ?? '')
-          + td(def.afterL_plus  ?? '') + td(def.afterL_minus  ?? '')
-          + td(def.afterW_plus  ?? '') + td(def.afterW_minus  ?? '')
-          + td(bundle.numberRange ?? '', 'font-size:9px;')
-          + td(def.sampleSize  ?? '')
-          + td(def.defectedQty ?? '')
-          + td(def.percentage  ?? '')
-          + td(def.remarks     ?? '', 'text-align:left;')
-          + '</tr>';
-      });
-    });
+      const checkMark  = def?.check === '✓' ? '&#10003;' : def?.check === '✗' ? '&#10007;' : '';
+      const checkColor = def?.check === '✓' ? 'color:green;font-weight:bold;' : def?.check === '✗' ? 'color:red;font-weight:bold;' : '';
 
-    const blankCount = Math.max(0, 2 - cuts.length);
-    for (let i = 0; i < blankCount; i++) {
-      rows += '<tr>' + Array(21).fill('<td style="border:1px solid #bbb;height:18px;"></td>').join('') + '</tr>';
+      rows += '<tr>'
+        + td(defInfo?.code ?? '', 'color:#666;font-family:monospace;')
+        + tdL(defInfo?.label ?? '')
+        + td(checkMark, checkColor)
+        + td(bundle?.isFirstOfCut ? bundle.cutNo : '')
+        + td(bundle?.isFirstOfCut ? bundle.cutQty : '', 'font-weight:bold;')
+        + td(bundle?.bundleNo ?? '', 'font-size:9px;')
+        + td(bundle?.isFirstOfCut ? bundle.component : '')
+        + td(bundle?.size ?? '')
+        + td(bundle?.beforeL_plus ?? '') + td(bundle?.beforeL_minus ?? '')
+        + td(bundle?.beforeW_plus ?? '') + td(bundle?.beforeW_minus ?? '')
+        + td(bundle?.afterL_plus  ?? '') + td(bundle?.afterL_minus  ?? '')
+        + td(bundle?.afterW_plus  ?? '') + td(bundle?.afterW_minus  ?? '')
+        + td(bundle?.numberRange ?? '', 'font-size:9px;')
+        + td(def?.sampleSize  ?? '')
+        + td(def?.defectedQty ?? '')
+        + td(def?.percentage  ?? '')
+        + td(def?.remarks     ?? '', 'text-align:left;')
+        + '</tr>';
     }
 
     rows += '<tr style="background:#f0f0f0;font-weight:bold;">'
@@ -468,7 +515,6 @@ export default function CPIPage() {
       + td('') + td('')
       + '</tr>';
 
-    // Status badge for print
     const statusColor = inspectionStatus === 'Passed' ? '#16a34a' : inspectionStatus === 'Failed' ? '#dc2626' : '#d97706';
 
     const html = '<!DOCTYPE html><html><head>'
@@ -595,7 +641,7 @@ export default function CPIPage() {
             <button onClick={handleSave} disabled={saving}
               className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50 transition-colors">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {saving ? 'Saving…' : 'Save Report'}
+              {saving ? (existingReport ? 'Updating…' : 'Saving…') : (existingReport ? 'Update Report' : 'Save Report')}
             </button>
           )}
         </div>
@@ -607,18 +653,30 @@ export default function CPIPage() {
       {/* ── Cascading Selection ──────────────────────────────────────────── */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-400">Select Report Scope</p>
+        
+        {existingReport && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <div>
+              An inspection report already exists for this specific batch. You are <strong>appending</strong> new cuts to the existing report. 
+              <br/>
+              Previously inspected cuts: <span className="font-bold">{existingReport.cutInspections?.length || 0}</span>.
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-end gap-4">
           <CascadeSelect label="Style No" value={selStyle}
-            onChange={v => { setSelStyle(v); setSelCustomer(''); setSelSchedule(''); setSelComponent(''); setCuts([]); }}
+            onChange={v => { setSelStyle(v); setSelCustomer(''); setSelSchedule(''); setSelComponentVal(''); setCuts([]); }}
             options={styleOptions} />
           <CascadeSelect label="Customer" value={selCustomer}
-            onChange={v => { setSelCustomer(v); setSelSchedule(''); setSelComponent(''); setCuts([]); }}
+            onChange={v => { setSelCustomer(v); setSelSchedule(''); setSelComponentVal(''); setCuts([]); }}
             options={customerOptions} disabled={!selStyle} />
           <CascadeSelect label="Schedule No (optional)" value={selSchedule}
-            onChange={v => { setSelSchedule(v); setSelComponent(''); setCuts([]); }}
+            onChange={v => { setSelSchedule(v); setSelComponentVal(''); setCuts([]); }}
             options={scheduleOptions} disabled={!selCustomer} />
-          <CascadeSelect label="Component" value={selComponent}
-            onChange={v => setSelComponent(v)}
+          <CascadeSelect label="Component (Store-In Batch)" value={selComponentVal}
+            onChange={v => setSelComponentVal(v)}
             options={componentOptions} disabled={!selCustomer} />
         </div>
 
@@ -640,14 +698,14 @@ export default function CPIPage() {
       </div>
 
       {/* ── Header manual fields ─────────────────────────────────────────── */}
-      {selComponent && (
+      {selComponent && cuts.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-400">Report Header</p>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {[
               { label: 'Date',          type: 'date',   value: date,        set: setDate },
               { label: 'Received Qty *',type: 'number', value: receivedQty, set: setReceivedQty, ph: 'e.g. 880' },
-              { label: 'CPI Qty *',     type: 'number', value: cpiQty,      set: setCpiQty,      ph: 'e.g. 88' },
+              { label: existingReport ? 'CPI Qty (This Batch) *' : 'CPI Qty *', type: 'number', value: cpiQty, set: setCpiQty, ph: 'e.g. 88' },
               { label: 'CPI Auditor *', type: 'text',   value: auditor,     set: setAuditor,     ph: 'Name' },
             ].map(f => (
               <div key={f.label} className="space-y-1">
@@ -660,7 +718,6 @@ export default function CPIPage() {
             ))}
           </div>
 
-          {/* FIX 2: Inspection status selector — added below the header fields */}
           <div className="mt-4 pt-4 border-t border-slate-100">
             <StatusSelector value={inspectionStatus} onChange={setInspectionStatus} />
             {inspectionStatus === 'Failed' && (
@@ -679,7 +736,7 @@ export default function CPIPage() {
         </div>
       )}
 
-      {/* ── Inspection Grid (unchanged) ──────────────────────────────────── */}
+      {/* ── Inspection Grid ──────────────────────────────────── */}
       {cuts.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
 
@@ -737,73 +794,90 @@ export default function CPIPage() {
                 </tr>
               </thead>
               <tbody>
-                {cuts.map((cut, cutIdx) =>
-                  cut.bundles.length > 0
-                    ? cut.bundles.map((bundle, bundleIdx) => {
-                        const def      = cut.defects[bundleIdx] ?? cut.defects[0];
-                        const defIdx   = bundleIdx;
-                        const defInfo  = DEFECTS[bundleIdx % DEFECTS.length];
-                        const isFirst  = bundleIdx === 0;
+                {Array.from({ length: Math.max(14, flatBundles.length) }).map((_, i) => {
+                  const defInfo = i < 14 ? DEFECTS[i] : null;
+                  const def = i < 14 ? globalDefects[i] : null;
+                  const bundle = i < flatBundles.length ? flatBundles[i] : null;
 
-                        return (
-                          <tr key={`${cutIdx}-${bundleIdx}`}
-                            className={`${bundleIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-teal-50/20 transition-colors`}>
-                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-400 font-mono text-[10px]">{defInfo?.code ?? ''}</td>
-                            <td className="border border-slate-200 px-2 py-1 text-slate-700">{defInfo?.label ?? ''}</td>
-                            <td className="border border-slate-200 px-0.5 py-0.5 text-center">
-                              <Cell value={def.check} onChange={v => updateDefect(cutIdx, defIdx, 'check', v)} w="w-6" />
-                            </td>
-                            <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-700">{isFirst ? cut.cutNo : ''}</td>
-                            <td className="border border-slate-200 px-1 py-1 text-center font-bold text-slate-800">{isFirst ? cut.cutQty : ''}</td>
-                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">{bundle?.bundleNo ?? ''}</td>
-                            <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-indigo-700">{isFirst ? cut.component : ''}</td>
-                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-600">{bundle?.size ?? ''}</td>
-                            {(['beforeL_plus','beforeL_minus','beforeW_plus','beforeW_minus'] as const).map(f => (
-                              <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-blue-50/20">
-                                <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
-                              </td>
-                            ))}
-                            {(['afterL_plus','afterL_minus','afterW_plus','afterW_minus'] as const).map(f => (
-                              <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-green-50/20">
-                                <Cell value={def[f]} onChange={v => updateDefect(cutIdx, defIdx, f, v)} w="w-9" />
-                              </td>
-                            ))}
-                            <td className="border border-slate-200 px-1 py-1 text-center text-slate-500 text-[10px]">{bundle?.numberRange ?? ''}</td>
-                            <td className="border border-slate-200 px-0.5 py-0.5">
-                              <Cell value={def.sampleSize} onChange={v => updateDefect(cutIdx, defIdx, 'sampleSize', v)} w="w-12" type="number" />
-                            </td>
-                            <td className="border border-slate-200 px-0.5 py-0.5">
-                              <Cell value={def.defectedQty} onChange={v => updateDefect(cutIdx, defIdx, 'defectedQty', v)} w="w-12" type="number" />
-                            </td>
-                            <td className={`border border-slate-200 px-0.5 py-0.5 ${parseFloat(def.percentage) > 0 ? 'bg-red-50/40' : ''}`}>
-                              <Cell value={def.percentage} onChange={v => updateDefect(cutIdx, defIdx, 'percentage', v)} w="w-10" />
-                            </td>
-                            <td className="border border-slate-200 px-0.5 py-0.5">
-                              <Cell value={def.remarks} onChange={v => updateDefect(cutIdx, defIdx, 'remarks', v)} w="w-24" placeholder="…" />
-                            </td>
-                            <td className="border border-slate-200 px-0.5 py-0.5 text-center">
-                              {cut.bundles.length > 1 && (
-                                <button type="button" onClick={() => deleteBundle(cutIdx, bundleIdx)}
-                                  title="Remove this bundle row"
-                                  className="rounded p-0.5 text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors">
-                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                                    <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                                  </svg>
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    : null
-                )}
+                  return (
+                    <tr key={i} className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-teal-50/20 transition-colors`}>
+                      
+                      {/* Global Defect Columns */}
+                      <td className="border border-slate-200 px-1 py-1 text-center text-slate-400 font-mono text-[10px]">
+                        {defInfo?.code || ''}
+                      </td>
+                      <td className="border border-slate-200 px-2 py-1 text-slate-700 truncate max-w-35" title={defInfo?.label}>
+                        {defInfo?.label || ''}
+                      </td>
+                      <td className="border border-slate-200 px-0.5 py-0.5 text-center">
+                        {def && <TickCrossToggle value={def.check} onChange={v => updateGlobalDefect(i, 'check', v)} />}
+                      </td>
+                      
+                      {/* Bundle specific Columns */}
+                      <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-700">
+                        {bundle?.isFirstOfCut ? bundle.cutNo : ''}
+                      </td>
+                      <td className="border border-slate-200 px-1 py-1 text-center font-bold text-slate-800">
+                        {bundle?.isFirstOfCut ? bundle.cutQty : ''}
+                      </td>
+                      <td className="border border-slate-200 px-1 py-1 text-center text-slate-600 text-[9px] max-w-20 truncate" title={bundle?.bundleNo}>
+                        {bundle?.bundleNo || ''}
+                      </td>
+                      <td className="border border-slate-200 px-1 py-1 text-center font-semibold text-indigo-700">
+                        {bundle?.isFirstOfCut ? bundle.component : ''}
+                      </td>
+                      <td className="border border-slate-200 px-1 py-1 text-center text-slate-600 text-[10px] truncate max-w-12.5">
+                        {bundle?.size || ''}
+                      </td>
+                      
+                      {/* Before / After Printing Dimensions */}
+                      {(['beforeL_plus','beforeL_minus','beforeW_plus','beforeW_minus'] as const).map(f => (
+                        <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-blue-50/20">
+                          {bundle && <Cell value={bundle[f]} onChange={v => updateBundle(bundle.cutIdx, bundle.bundleIdx, f, v)} w="w-9" />}
+                        </td>
+                      ))}
+                      {(['afterL_plus','afterL_minus','afterW_plus','afterW_minus'] as const).map(f => (
+                        <td key={f} className="border border-slate-200 px-0.5 py-0.5 bg-green-50/20">
+                          {bundle && <Cell value={bundle[f]} onChange={v => updateBundle(bundle.cutIdx, bundle.bundleIdx, f, v)} w="w-9" />}
+                        </td>
+                      ))}
+                      
+                      <td className="border border-slate-200 px-1 py-1 text-center text-slate-500 text-[9px] max-w-20 truncate" title={bundle?.numberRange}>
+                        {bundle?.numberRange || ''}
+                      </td>
+                      
+                      {/* Defect Specific Amounts */}
+                      <td className="border border-slate-200 px-0.5 py-0.5 text-center">
+                        {def && <Cell value={def.sampleSize} onChange={v => updateGlobalDefect(i, 'sampleSize', v)} w="w-12" type="number" />}
+                      </td>
+                      <td className="border border-slate-200 px-0.5 py-0.5 text-center">
+                        {def && <Cell value={def.defectedQty} onChange={v => updateGlobalDefect(i, 'defectedQty', v)} w="w-12" type="number" />}
+                      </td>
+                      <td className={`border border-slate-200 px-0.5 py-0.5 text-center ${def && parseFloat(def.percentage) > 0 ? 'bg-red-50/40' : ''}`}>
+                        {def && <Cell value={def.percentage} onChange={v => updateGlobalDefect(i, 'percentage', v)} w="w-10" />}
+                      </td>
+                      <td className="border border-slate-200 px-0.5 py-0.5">
+                        {def && <Cell value={def.remarks} onChange={v => updateGlobalDefect(i, 'remarks', v)} w="w-full min-w-[80px]" placeholder="…" />}
+                      </td>
+                      
+                      <td className="border border-slate-200 px-0.5 py-0.5 text-center">
+                        {bundle && cuts[bundle.cutIdx].bundles.length > 1 && (
+                          <button type="button" onClick={() => deleteBundle(bundle.cutIdx, bundle.bundleIdx)}
+                            className="rounded p-0.5 text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+
                 {/* Totals row */}
                 <tr className="bg-slate-100 font-bold text-[11px]">
                   <td className="border border-slate-300 px-2 py-1.5 text-left font-bold" colSpan={2}>TOTALS</td>
                   <td className="border border-slate-300 px-1 py-1" />
                   <td className="border border-slate-300 px-1 py-1" />
-                  <td className="border border-slate-300 px-1 py-1 font-black text-slate-900">
+                  <td className="border border-slate-300 px-1 py-1 text-center font-black text-slate-900">
                     {cuts.reduce((s, c) => s + c.cutQty, 0)}
                   </td>
                   <td className="border border-slate-300 px-1 py-1" />
@@ -811,12 +885,13 @@ export default function CPIPage() {
                   <td className="border border-slate-300 px-1 py-1" />
                   {Array.from({ length: 8 }).map((_, i) => <td key={i} className="border border-slate-300 px-1 py-1" />)}
                   <td className="border border-slate-300 px-1 py-1" />
-                  <td className="border border-slate-300 px-1 py-1 font-black text-teal-700">
-                    {cuts.reduce((s, c) => s + c.defects.reduce((ds, d) => ds + (parseFloat(d.sampleSize) || 0), 0), 0) || '—'}
+                  <td className="border border-slate-300 px-1 py-1 text-center font-black text-teal-700">
+                    {globalDefects.reduce((s, d) => s + (parseFloat(d.sampleSize) || 0), 0) || '—'}
                   </td>
-                  <td className="border border-slate-300 px-1 py-1 font-black text-red-700">
-                    {cuts.reduce((s, c) => s + c.defects.reduce((ds, d) => ds + (parseFloat(d.defectedQty) || 0), 0), 0) || '—'}
+                  <td className="border border-slate-300 px-1 py-1 text-center font-black text-red-700">
+                    {globalDefects.reduce((s, d) => s + (parseFloat(d.defectedQty) || 0), 0) || '—'}
                   </td>
+                  <td className="border border-slate-300 px-1 py-1" />
                   <td className="border border-slate-300 px-1 py-1" />
                   <td className="border border-slate-300 px-1 py-1" />
                 </tr>
@@ -842,7 +917,7 @@ export default function CPIPage() {
             <div className="flex gap-6">
               <span>Total Cuts: <span className="font-bold">{cuts.length}</span></span>
               <span>Total Qty: <span className="font-bold">{cuts.reduce((s, c) => s + c.cutQty, 0)}</span></span>
-              <span>Total Bundles: <span className="font-bold">{cuts.reduce((s, c) => s + c.bundles.length, 0)}</span></span>
+              <span>Total Bundles: <span className="font-bold">{flatBundles.length}</span></span>
             </div>
           </div>
         </div>
@@ -852,8 +927,17 @@ export default function CPIPage() {
       {selComponent && cuts.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 py-16 text-center">
           <ClipboardList className="mx-auto mb-3 h-12 w-12 text-slate-200" />
-          <p className="text-sm text-slate-400">No cuts found for <strong>{selComponent}</strong> in schedule <strong>{selSchedule}</strong>.</p>
-          <p className="text-xs text-slate-300 mt-1">Ensure the Store-In record exists and cuts are assigned to this component.</p>
+          {existingReport && existingReport.cutInspections?.length > 0 ? (
+            <>
+              <p className="text-sm text-slate-400">All cuts for <strong>{selComponent}</strong> have already been inspected.</p>
+              <p className="text-xs text-slate-300 mt-1">Check the CPI Search page to view or print the completed report.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-slate-400">No cuts found for <strong>{selComponent}</strong> in schedule <strong>{selSchedule}</strong>.</p>
+              <p className="text-xs text-slate-300 mt-1">Ensure the Store-In record exists and cuts are assigned to this component.</p>
+            </>
+          )}
         </div>
       )}
     </motion.div>

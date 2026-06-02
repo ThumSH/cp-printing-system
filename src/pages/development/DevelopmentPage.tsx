@@ -13,7 +13,7 @@ import { useColourMasterStore } from '../../store/colourMasterStore';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { API, getAuthHeaders } from '../../api/client';
 
-const COMPONENT_OPTIONS = ['Front', 'Back', 'Sleeve', 'Pocket', 'Waistband', 'Other'];
+const COMPONENT_OPTIONS = ['Front', 'Back', 'Sleeve', 'Pocket', 'Waistband', 'Yoke', 'Left', 'Right', 'Other'];
 
 interface DevelopmentForm {
   id: string;
@@ -199,11 +199,14 @@ export default function DevelopmentPage() {
   const [artworkFile, setArtworkFile] = useState<File | null>(null);
   const [artworkBlobUrl, setArtworkBlobUrl] = useState('');
   const [uploadingArtwork, setUploadingArtwork] = useState(false);
+  
+  const [isOtherComponent, setIsOtherComponent] = useState(false);
+  const [otherComponentText, setOtherComponentText] = useState('');
 
   useEffect(() => {
     fetchData();
     fetchStyles(true);
-    fetchStoreIn(); // FIX: fetch store-in records to determine lock state
+    fetchStoreIn(); 
   }, []);
 
   const uniqueStyleOptions = useMemo(() => {
@@ -216,16 +219,9 @@ export default function DevelopmentPage() {
     });
   }, [submissions]);
 
-  // ==========================================
-  // FIX: isJobLocked now checks THREE conditions:
-  //   1. SampleStyle is client-approved (prevents dev edits during approval flow)
-  //   2. SampleStyle is submitted to admin (prevents further dev edits)
-  //   3. A StoreIn record exists for this job's submission (physical goods received — hard lock)
-  // ==========================================
   const isJobLocked = (jobId: string): { locked: boolean; reason: string } => {
     const linkedStyles = sampleStyles.filter(s => s.developmentJobId === jobId);
 
-    // Check StoreIn records — hardest lock, physical goods already in warehouse
     for (const style of linkedStyles) {
       const hasStoreIn = storeInRecords.some(si => si.submissionId === style.id);
       if (hasStoreIn) {
@@ -233,7 +229,6 @@ export default function DevelopmentPage() {
       }
     }
 
-    // Check workflow locks
     const isApproved = linkedStyles.some(s => s.clientApproved);
     if (isApproved) {
       return { locked: true, reason: 'Client approved — submit to admin first' };
@@ -279,6 +274,8 @@ export default function DevelopmentPage() {
     setArtworkFile(null);
     setCopyApplied(true);
     setErrors({});
+    setIsOtherComponent(false);
+    setOtherComponentText('');
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -322,7 +319,11 @@ export default function DevelopmentPage() {
     if (!formData.washingStandard.trim())   newErrors.washingStandard   = 'Washing standard is required';
     if (!formData.bodyColour.trim())        newErrors.bodyColour        = 'Body colour is required';
     if (!formData.printColour.trim())       newErrors.printColour       = 'Print colours are required';
-    if (!formData.component)               newErrors.component          = 'Select a component for this job';
+    
+    // Component validation
+    const actualComponent = isOtherComponent ? otherComponentText.trim() : formData.component;
+    if (!actualComponent) newErrors.component = 'Component is required';
+    
     const qty = parseInt(formData.printColourQty);
     if (!formData.printColourQty || isNaN(qty) || qty < 1) newErrors.printColourQty = 'Must be at least 1';
     if (!formData.sampleOrderedDate)        newErrors.sampleOrderedDate  = 'Order date is required';
@@ -353,8 +354,11 @@ export default function DevelopmentPage() {
       setUploadingArtwork(false);
     }
 
+    const finalComponent = isOtherComponent ? otherComponentText.trim() : formData.component;
+
     const jobData = {
       ...formData,
+      component: finalComponent,
       artworkPreviewUrl: serverArtworkUrl,
       id: editingId ?? Math.random().toString(36).substr(2, 9),
     };
@@ -378,10 +382,11 @@ export default function DevelopmentPage() {
     setArtworkBlobUrl('');
     setCopyFromId('');
     setCopyApplied(false);
+    setIsOtherComponent(false);
+    setOtherComponentText('');
   };
 
   const handleEdit = (submission: DevelopmentForm) => {
-    // Double-check lock before allowing edit
     const { locked, reason } = isJobLocked(submission.id);
     if (locked) {
       alert(`This job cannot be edited: ${reason}`);
@@ -390,6 +395,12 @@ export default function DevelopmentPage() {
 
     setFormData(submission);
     setEditingId(submission.id);
+    
+    // Handle "Other" component logic during edit
+    const isStandard = COMPONENT_OPTIONS.includes(submission.component) && submission.component !== 'Other';
+    setIsOtherComponent(!isStandard);
+    setOtherComponentText(!isStandard ? submission.component : '');
+    
     setArtworkFile(null);
     setArtworkBlobUrl(submission.artworkPreviewUrl
       ? submission.artworkPreviewUrl.startsWith('http')
@@ -418,6 +429,8 @@ export default function DevelopmentPage() {
     setArtworkBlobUrl('');
     setCopyFromId('');
     setCopyApplied(false);
+    setIsOtherComponent(false);
+    setOtherComponentText('');
     setErrors({});
   };
 
@@ -516,20 +529,16 @@ export default function DevelopmentPage() {
               { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. SS26' },
               { label: 'Printing Technique', name: 'printingTechnique', type: 'text', placeholder: 'e.g. High Density' },
               { label: 'Washing Standard', name: 'washingStandard', type: 'text', placeholder: 'e.g. 40°C Machine Wash' },
-              // alwaysEditable: true — print colour/qty can differ per component (Front vs Back)
-              // so they stay editable even when copying from an existing style
               { label: 'Print Colour', name: 'printColour', type: 'text', placeholder: 'e.g. White & Red', alwaysEditable: true },
               { label: 'Print Colour QTY', name: 'printColourQty', type: 'number', placeholder: 'e.g. 2', alwaysEditable: true },
               { label: 'Sample Ordered Date', name: 'sampleOrderedDate', type: 'date' },
               { label: 'Sample Delivery', name: 'sampleDeliveryDate', type: 'date' },
             ].map((field) => {
-              // Field is read-only only when copy mode is active AND it isn't flagged alwaysEditable
               const isReadOnly = lockedFields && !(field as any).alwaysEditable;
               return (
               <div key={field.name} className="space-y-1">
                 <label className="block text-sm font-medium text-slate-700">
                   {field.label} <span className="text-red-500">*</span>
-                  {/* Show "Editable" hint badge for editable-while-copied fields */}
                   {lockedFields && (field as any).alwaysEditable && (
                     <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
                       Editable
@@ -636,23 +645,59 @@ export default function DevelopmentPage() {
                 </span>
               )}
             </div>
-            <div className={`flex flex-wrap gap-3 p-4 rounded-lg border ${errors.component ? 'border-red-200 bg-red-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
-              {COMPONENT_OPTIONS.map((opt) => (
-                <button key={opt} type="button"
-                  onClick={() => {
-                    setFormData((prev) => ({ ...prev, component: opt }));
-                    if (errors.component) setErrors((prev) => ({ ...prev, component: '' }));
-                  }}
-                  className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all ${
-                    formData.component === opt
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                      : 'bg-white text-slate-700 border-slate-300 hover:border-indigo-400 hover:text-indigo-600'
-                  }`}
-                >
-                  {formData.component === opt && <CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />}
-                  {opt}
-                </button>
-              ))}
+            
+            <div className={`flex flex-col gap-3 p-4 rounded-lg border ${errors.component ? 'border-red-200 bg-red-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
+              <div className="flex flex-wrap gap-3">
+                {COMPONENT_OPTIONS.map((opt) => (
+                  <button key={opt} type="button"
+                    onClick={() => {
+                      if (opt === 'Other') {
+                        setIsOtherComponent(true);
+                        setFormData((prev) => ({ ...prev, component: 'Other' }));
+                      } else {
+                        setIsOtherComponent(false);
+                        setOtherComponentText('');
+                        setFormData((prev) => ({ ...prev, component: opt }));
+                      }
+                      if (errors.component) setErrors((prev) => ({ ...prev, component: '' }));
+                    }}
+                    className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all ${
+                      (!isOtherComponent && formData.component === opt) || (isOtherComponent && opt === 'Other')
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-300 hover:border-indigo-400 hover:text-indigo-600'
+                    }`}
+                  >
+                    {((!isOtherComponent && formData.component === opt) || (isOtherComponent && opt === 'Other')) && <CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />}
+                    {opt}
+                  </button>
+                ))}
+              </div>
+              
+              {/* Dynamic Input for "Other" Component */}
+              <AnimatePresence>
+                {isOtherComponent && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }} 
+                    animate={{ opacity: 1, height: 'auto' }} 
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-2 flex items-center gap-3">
+                      <input 
+                        type="text" 
+                        value={otherComponentText}
+                        onChange={(e) => {
+                          setOtherComponentText(e.target.value);
+                          if (errors.component) setErrors((prev) => ({ ...prev, component: '' }));
+                        }}
+                        placeholder="Type custom component name..."
+                        className="w-full max-w-sm px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm"
+                        autoFocus
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
@@ -701,7 +746,11 @@ export default function DevelopmentPage() {
               <select value={filterComponent} onChange={e => { setFilterComponent(e.target.value); setShowAllJobs(false); }}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400">
                 <option value="">All components</option>
-                {COMPONENT_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                {/* Dynamically list standard options, plus any custom ones used in jobs */}
+                {Array.from(new Set([
+                  ...COMPONENT_OPTIONS.filter(c => c !== 'Other'),
+                  ...submissions.map(s => (s as any).component).filter(c => c && !COMPONENT_OPTIONS.includes(c))
+                ])).sort().map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               {isFiltered && (
                 <button onClick={() => { setFilterCustomer(''); setFilterStyle(''); setFilterComponent(''); setShowAllJobs(false); }}
@@ -775,7 +824,6 @@ export default function DevelopmentPage() {
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
                           {locked ? (
-                            // FIX: Show specific lock reason as tooltip
                             <span title={reason}
                               className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-400 cursor-not-allowed">
                               <Lock className="h-3 w-3" /> Locked
@@ -799,7 +847,6 @@ export default function DevelopmentPage() {
               </tbody>
             </table>
           </div>
-          {/* FIX: Show more / show less — default 10, expand on demand */}
           {!showAllJobs && hasMore && (
             <div className="border-t border-slate-100 px-6 py-3 flex items-center justify-between bg-slate-50/50">
               <span className="text-xs text-slate-400">Showing 10 of {filteredJobs.length} jobs</span>

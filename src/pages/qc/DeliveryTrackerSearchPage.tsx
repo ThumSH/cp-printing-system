@@ -1,7 +1,7 @@
 // src/pages/qc/DeliveryTrackerSearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, LayoutDashboard, ChevronDown, ChevronRight, Filter, RotateCcw, Clock } from 'lucide-react';
+import { Search, LayoutDashboard, ChevronDown, ChevronRight, Filter, RotateCcw, Clock, Printer } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 
 interface SizeData { size: string; qty: number; pd: number; fd: number; }
@@ -138,7 +138,7 @@ export default function DeliveryTrackerSearchPage() {
                       {isExp ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2"><p className="font-bold text-slate-900">{summary.styleNo}</p><span className="text-xs text-slate-500">{summary.customerName}</span></div>
-                        <p className="text-xs text-slate-500 mt-0.5">FPO: <span className="font-medium text-slate-700">{summary.fpoNo}</span> | Order: {summary.orderQty} | Received: {summary.receivedQty}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">FPO: <span className="font-medium text-slate-700">{summary.fpoNo || '(No Schedule)'}</span> | Order: {summary.orderQty} | Received: {summary.receivedQty}</p>
                       </div>
                       <div className="text-right space-y-0.5 shrink-0">
                         <div className="text-xs">Delivered: <span className="font-bold text-emerald-600">{summary.deliveredQty}</span></div>
@@ -149,6 +149,15 @@ export default function DeliveryTrackerSearchPage() {
                     <AnimatePresence>
                       {isExp && (
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden overflow-x-auto">
+                          
+                          {/* Print Button Header */}
+                          <div className="flex justify-between items-center mb-3">
+                            <h4 className="font-bold text-slate-700">Detailed Report</h4>
+                            <button onClick={() => printTracker(summary)} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-600 transition-colors">
+                              <Printer className="h-3.5 w-3.5" /> Print Report
+                            </button>
+                          </div>
+
                           <table className="w-full text-xs border-collapse mb-4">
                             <thead><tr className="bg-slate-100 text-slate-600">
                               <th className="px-2 py-1.5 text-left font-medium">Date</th><th className="px-2 py-1.5 text-left font-medium">AD</th><th className="px-2 py-1.5 text-left font-medium">Cut</th><th className="px-2 py-1.5 text-right font-medium">FPO Qty</th>
@@ -183,4 +192,158 @@ export default function DeliveryTrackerSearchPage() {
 function StatCard({ label, value, color }: { label: string; value: number; color?: 'orange' | 'blue' | 'green' }) {
   const cc = color === 'orange' ? 'text-orange-700' : color === 'blue' ? 'text-blue-700' : color === 'green' ? 'text-emerald-700' : 'text-slate-700';
   return <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"><p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</p><p className={`text-xl font-black ${cc}`}>{value.toLocaleString()}</p></div>;
+}
+
+// ==========================================
+// PRINT
+// ==========================================
+function printTracker(summary: TrackerSummary) {
+  const sizes = summary.allSizes;
+  let hdrCols = sizes.map(s => `<th class="sz">${s}</th><th class="pd">PD</th><th class="fd">FD</th>`).join('');
+  
+  let bodyRows = '';
+  summary.rows.forEach((r) => {
+    let sizeCells = sizes.map(s => { 
+      const d = r.sizeBreakdown.find(x => x.size === s); 
+      return `<td class="sz">${d?.qty || ''}</td><td class="pd">${d?.pd || ''}</td><td class="fd">${d?.fd || ''}</td>`; 
+    }).join('');
+    
+    bodyRows += `<tr>
+      <td>${r.inDate}</td>
+      <td>${r.deliveryDate}</td>
+      <td class="bold">${r.styleNo}</td>
+      <td>${r.colour}</td>
+      <td class="bold">${r.inAd}</td>
+      <td>${r.ad}</td>
+      <td>${r.scheduleNo || '-'}</td>
+      <td class="c bold">${r.fpoQty}</td>
+      <td class="c">${r.allowedPd || ''}</td>
+      <td class="c bold">${r.cutNo}</td>
+      ${sizeCells}
+      <td class="c bold red">${r.sizePdTotal || ''}</td>
+      <td class="c bold">${r.fdTotal || ''}</td>
+      <td class="c bold ${r.exceeded > 0 ? 'red bg-red' : ''}">${r.exceeded || ''}</td>
+    </tr>`;
+  });
+
+  // Totals
+  let totSz = sizes.map(s => { 
+    const t = summary.sizeTotals.find(x => x.size === s); 
+    return `<td class="sz bold">${t?.qty || ''}</td><td class="pd bold">${t?.pd || ''}</td><td class="fd bold">${t?.fd || ''}</td>`; 
+  }).join('');
+  
+  bodyRows += `<tr class="total">
+    <td colspan="7" style="text-align:right; padding-right: 15px;">TOTALS</td>
+    <td class="c bold">${summary.rows.reduce((s,r)=>s+r.fpoQty,0)}</td>
+    <td></td><td></td>
+    ${totSz}
+    <td class="c bold red">${summary.grandPdTotal || ''}</td>
+    <td class="c bold">${summary.grandFdTotal || ''}</td>
+    <td></td>
+  </tr>`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<title>Delivery Tracker - ${summary.styleNo}</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; font-size: 10px; color: #000; padding-top: 10px; }
+  
+  .hdr { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; border-bottom: 2px solid #000; padding-bottom: 4px; }
+  .hdr h2 { font-size: 16px; font-weight: 900; text-transform: uppercase; margin: 0; }
+  .hdr span { font-size: 12px; font-weight: bold; }
+  
+  .info { display: flex; gap: 20px; margin-bottom: 12px; font-size: 11px; flex-wrap: wrap; }
+  .info span { background: #f8f9fa; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; }
+  .info b { margin-right: 4px; color: #444; }
+  
+  table { width: 100%; border-collapse: collapse; border: 1px solid #000; margin-bottom: 15px; }
+  th, td { border: 1px solid #888; padding: 4px 6px; font-size: 9px; text-align: center; }
+  th { background: #e8e8e8; font-weight: bold; font-size: 9px; }
+  
+  .sz { background: #eef4ff; }
+  .pd { background: #fff0f0; color: #c00; font-size: 9px; font-weight: bold; }
+  .fd { background: #fffbe6; color: #a50; font-size: 9px; font-weight: bold; }
+  
+  .c { text-align: center; }
+  .bold { font-weight: bold; }
+  .red { color: #c00; }
+  .bg-red { background: #fee2e2; }
+  
+  .total td { border-top: 2px solid #000; font-weight: bold; background: #f8f9fa; font-size: 10px; padding-top: 6px; padding-bottom: 6px; }
+  
+  .summary { width: 250px; border: 2px solid #000; border-collapse: collapse; float: right; margin-top: 10px; }
+  .summary td { padding: 6px 10px; border: 1px solid #ccc; font-size: 11px; }
+  .summary .lbl { font-weight: bold; background: #f0f0f0; width: 60%; }
+  .summary .val { font-weight: 900; text-align: right; }
+  .summary .red-row { color: #c00; background: #fff0f0; }
+
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+  <div class="hdr">
+    <h2>DELIVERY TRACKER — ${summary.styleNo} — ${summary.fpoNo || '(No Schedule)'}</h2>
+    <span>${summary.customerName}</span>
+  </div>
+  <div class="info">
+    <span><b>Order Qty:</b>${summary.orderQty}</span>
+    <span><b>Received:</b>${summary.receivedQty}</span>
+    <span><b>Delivered:</b>${summary.deliveredQty}</span>
+    <span><b>Balance:</b>${summary.balanceToRec}</span>
+  </div>
+  
+  <table>
+    <thead>
+      <tr>
+        <th>IN DATE</th>
+        <th>DELIVERY DATE</th>
+        <th>STYLE</th>
+        <th>COLOUR</th>
+        <th>IN AD</th>
+        <th>AD</th>
+        <th>SCHEDULE</th>
+        <th>FPO QTY</th>
+        <th>ALLOWED PD</th>
+        <th>CUT NO</th>
+        ${hdrCols}
+        <th>SIZE PD TOTAL</th>
+        <th>FD TOTAL</th>
+        <th>EXCEEDED</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${bodyRows}
+    </tbody>
+  </table>
+
+  <table class="summary">
+    <tr class="red-row"><td class="lbl">PD TOTAL</td><td class="val">${summary.pdTotal}</td></tr>
+    <tr class="red-row"><td class="lbl">PD %</td><td class="val">${summary.pdPercentage}%</td></tr>
+  </table>
+</body>
+</html>`;
+
+  const ef = document.getElementById('tracker-print-frame') as HTMLIFrameElement | null; 
+  if (ef) ef.remove();
+  
+  const f = document.createElement('iframe'); 
+  f.id = 'tracker-print-frame'; 
+  f.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:1600px;height:1000px'; 
+  document.body.appendChild(f);
+  
+  const d = f.contentDocument || f.contentWindow?.document; 
+  if (d) { 
+    d.open(); 
+    d.write(html); 
+    d.close(); 
+    setTimeout(() => { 
+      f.contentWindow?.print(); 
+      setTimeout(() => f.remove(), 1000); 
+    }, 300); 
+  }
 }
