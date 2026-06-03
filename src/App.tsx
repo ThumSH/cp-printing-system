@@ -31,6 +31,7 @@ import ActivityLogPage from './pages/admin/ActivityLogPage';
 import SplashScreen from './components/SplashScreen';
 import OperatorSelect from './pages/OperatorSelect';
 import ColourMasterPage from './pages/admin/ColourMasterPage';
+import AboutUsPage from './pages/AboutUsPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -71,6 +72,8 @@ function App() {
 
         <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
           <Route index element={<Dashboard />} />
+
+          <Route path="about" element={<AboutUsPage />} />
 
           {/* ── Development ── */}
           <Route path="development">
