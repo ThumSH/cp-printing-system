@@ -221,8 +221,8 @@ export default function CPIPage() {
         (selSchedule === '' || (i.scheduleNo ?? '') === selSchedule)
       )
       .forEach(i => {
-        const parts = (i.components ?? '').split(',').map(s => s.trim()).filter(Boolean);
-        parts.forEach(comp => {
+        const parts = (i.components ?? '').split(',').map((s: string) => s.trim()).filter(Boolean);
+        parts.forEach((comp: any) => {
           const val = `${i.storeInRecordId}|||${comp}`;
           const label = `${comp} (Batch: ${i.cutInDate}, IN Qty: ${i.receivedQty})`;
           if (!options.some(o => o.value === val)) options.push({ value: val, label });

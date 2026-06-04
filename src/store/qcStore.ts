@@ -26,21 +26,12 @@ export const DEFECT_TYPES = [
   { code: 'F12',   name: 'Size mixed-up' },
   { code: 'F13',   name: 'Wrong Cut Mark' },
   { code: 'Other', name: 'Other' },
-] as const;
+];
 
-// ==========================================
-// TYPES
-// ==========================================
-
-export interface CpiDefectRow {
-  sampleSize: string;
-  check: string;
-  check: string;
-  check: string;
-  check: string;
-  check: string;
+export interface DefectRow {
   defectCode: string;
   defectName: string;
+  check: string;
   beforeLength: number;
   beforeWidth: number;
   afterLength: number;
@@ -48,10 +39,11 @@ export interface CpiDefectRow {
   defectedQty: number;
   percentage: string;
   remarks: string;
+  sampleSize?: number; 
 }
 
-export interface CpiCutInspection {
-  cutRecordId: string;
+export interface CutInspection {
+  cutRecordId?: string;
   cutNo: string;
   cutQty: number;
   bundleNos: string;
@@ -59,154 +51,88 @@ export interface CpiCutInspection {
   numberRanges: string;
   part: string;
   sampleSize: number;
-  defectRows: CpiDefectRow[];
+  defectRows: DefectRow[];
   totalDefectedQty: number;
   totalPercentage: string;
 }
 
-export interface CpiBundleInfo {
-  bundleNo: string;
-  bundleQty: number;
-  size: string;
-  numberRange: string;
-}
-
-export interface CpiCutInfo {
-  cutNo: string;
-  cutQty: number;
-  bundles: CpiBundleInfo[];
-}
-
-export interface EligibleCpiItem {
-  storeInRecordId: string;
-  submissionId: string;
-  revisionNo: number;
-  styleNo: string;
-  customerName: string;
-  scheduleNo: string;
-  bodyColour: string;
-  printColour: string;
-  components: string;
-  season: string;
-  receivedQty: number;
-  cutInDate: string;
-  cutCount: number;
-  totalCutQty: number;
-  totalBundleCount: number;
-  cutNo: string;
-  size: string;
-  bundleQty: number;
-  numberRange: string;
-  cuts: CpiCutInfo[];
-}
-
-export type InspectionStatus = 'Pending' | 'Passed' | 'Failed';
-
 export interface CPIReport {
   id: string;
   storeInRecordId: string;
-  submissionId: string;
-  revisionNo: number;
+  submissionId?: string;
+  revisionNo?: number;
   date: string;
   customer: string;
   styleNo: string;
-  scheduleNo: string;
+  scheduleNo?: string;
   bodyColour: string;
   printColour: string;
   receivedQty: number;
   cpiQty: number;
-  cutInspections: CpiCutInspection[];
+  cutInspections: CutInspection[];
   cuttingQty: number;
   checkedQty: number;
   rejDamageQty: number;
   rejectionPercentage: string;
   balanceQty: number;
-  inspectionStatus: InspectionStatus;
+  inspectionStatus: string;
   appRej: string;
   checkedBy: string;
-  summaryDate: string;
-  cpiAuditor: string;
+  cpiAuditor?: string;
+  summaryDate?: string;
 }
 
-// ==========================================
-// HELPER: create empty defect rows for a cut
-// ==========================================
-export function createEmptyDefectRows(): CpiDefectRow[] {
-  return DEFECT_TYPES.map((d) => ({
-    defectCode:    d.code,
-    defectName:    d.name,
-    beforeLength:  0,
-    beforeWidth:   0,
-    afterLength:   0,
-    afterWidth:    0,
-    defectedQty:   0,
-    percentage:    '',
-    remarks:       '',
-  }));
-}
-
-// ==========================================
-// STORE
-// ==========================================
-
-interface QCStore {
-  cpiReports:       CPIReport[];
-  eligibleCpiItems: EligibleCpiItem[];
-  loading:          boolean;
-  error:            string;
-
+export interface QCState {
+  cpiReports: CPIReport[];
+  eligibleCpiItems: any[]; 
+  loading: boolean;
+  error: string | null;
   fetchReports: () => Promise<void>;
   fetchEligibleCpiItems: () => Promise<void>;
-  addCPIReport: (report: CPIReport) => Promise<CPIReport>;
-  updateCPIReport: (id: string, report: CPIReport) => Promise<void>;
+  addCPIReport: (report: Omit<CPIReport, 'id'>) => Promise<void>;
+  updateCPIReport: (id: string, updatedReport: CPIReport) => Promise<void>; // <-- FIX: Added this missing definition
   deleteCPIReport: (id: string) => Promise<void>;
 }
 
 const API_BASE = API.QC;
 
-const sortReports = (reports: CPIReport[]) =>
-  [...reports].sort((a, b) => {
-    // Safe string sort on yyyy-MM-dd
-    const dateDiff = b.date.localeCompare(a.date);
-    if (dateDiff !== 0) return dateDiff;
-    return b.revisionNo - a.revisionNo;
+// Helper to keep reports sorted
+const sortReports = (reports: CPIReport[]) => {
+  return [...reports].sort((a, b) => {
+    // 1. Sort by date descending
+    const dateCmp = (b.date || '').localeCompare(a.date || '');
+    if (dateCmp !== 0) return dateCmp;
+    // 2. Sort by revision descending
+    return (b.revisionNo || 0) - (a.revisionNo || 0);
   });
+};
 
-export const useQCStore = create<QCStore>((set, get) => ({
-  cpiReports:       [],
+export const useQCStore = create<QCState>((set, get) => ({
+  cpiReports: [],
   eligibleCpiItems: [],
-  loading:          false,
-  error:            '',
+  loading: false,
+  error: null,
 
   fetchReports: async () => {
-    set({ loading: true, error: '' });
+    set({ loading: true, error: null });
     try {
       const res = await fetch(`${API_BASE}/reports`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      if (!res.ok) throw new Error('Failed to fetch CPI reports');
       const data: CPIReport[] = await res.json();
-      set({ cpiReports: sortReports(data) });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to fetch QC reports';
-      set({ error: msg });
-      throw e;
-    } finally {
-      set({ loading: false });
+      set({ cpiReports: sortReports(data), loading: false });
+    } catch (error) {
+      set({ error: (error as Error).message, loading: false });
     }
   },
 
   fetchEligibleCpiItems: async () => {
-    set({ loading: true, error: '' });
     try {
-      const res = await fetch(`${API_BASE}/eligible-cpi`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
-      const data: EligibleCpiItem[] = await res.json();
+      const res = await fetch(`${API_BASE}/eligible`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('Failed to fetch eligible CPI items');
+      const data = await res.json();
       set({ eligibleCpiItems: data });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to fetch eligible CPI items';
-      set({ error: msg });
-      throw e;
-    } finally {
-      set({ loading: false });
+    } catch (error) {
+      console.error('fetchEligibleCpiItems error:', error);
     }
   },
 
@@ -216,10 +142,10 @@ export const useQCStore = create<QCStore>((set, get) => ({
       headers: getAuthHeaders(),
       body:    JSON.stringify(report),
     });
-    if (!res.ok) throw new Error(await res.text() || 'Failed to create CPI report');
-    const saved: CPIReport = await res.json();
+    if (!res.ok) throw new Error(await res.text() || 'Failed to add CPI report');
+    const saved = await res.json();
     set((state) => ({ cpiReports: sortReports([saved, ...state.cpiReports]) }));
-    // FIX: Re-fetch eligible so the newly-inspected item leaves the "eligible" list
+    // FIX: Re-fetch eligible items so the successfully inspected ones leave the "Available" list
     get().fetchEligibleCpiItems().catch(console.error);
     return saved;
   },
@@ -251,8 +177,10 @@ export const useQCStore = create<QCStore>((set, get) => ({
       headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to delete CPI report');
-    set((state) => ({ cpiReports: state.cpiReports.filter(r => r.id !== id) }));
-    // FIX: Re-fetch eligible so deleted item returns to the inspectable list
+    set((state) => ({
+      cpiReports: state.cpiReports.filter((r) => r.id !== id),
+    }));
+    // Re-fetch eligible so deleted items drop back into the "available" list
     get().fetchEligibleCpiItems().catch(console.error);
   },
 }));

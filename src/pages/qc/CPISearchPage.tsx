@@ -251,7 +251,7 @@ export default function CPISearchPage() {
                         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4 p-3 rounded-lg bg-white border border-slate-200">
                           <InfoField label="Body Colour" value={report.bodyColour} />
                           <InfoField label="Print Colour" value={report.printColour} />
-                          <InfoField label="Auditor" value={report.cpiAuditor} />
+                          <InfoField label="Auditor" value={report.cpiAuditor || report.checkedBy || ''} />
                           <InfoField label="App/Rej" value={report.appRej} />
                         </div>
 
