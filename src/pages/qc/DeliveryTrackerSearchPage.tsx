@@ -9,7 +9,7 @@ interface TrackerRow {
   inDate: string; deliveryDate: string; styleNo: string; colour: string;
   inAd: string; ad: string; scheduleNo: string; fpoQty: number;
   allowedPd: number; cutNo: string; sizeBreakdown: SizeData[];
-  totalQty: number; sizePdTotal: number; fdTotal: number; exceeded: number;
+  totalQty: number; sizeTotal?: number; sizePdTotal: number; fdTotal: number; exceeded: number;
 }
 interface TrackerSummary {
   storeInRecordId: string; styleNo: string; fpoNo: string; customerName: string; orderQty: number;
@@ -162,18 +162,27 @@ export default function DeliveryTrackerSearchPage() {
                             <thead><tr className="bg-slate-100 text-slate-600">
                               <th className="px-2 py-1.5 text-left font-medium">Date</th><th className="px-2 py-1.5 text-left font-medium">AD</th><th className="px-2 py-1.5 text-left font-medium">Cut</th><th className="px-2 py-1.5 text-right font-medium">FPO Qty</th>
                               {summary.allSizes.map((sz) => <th key={sz} className="px-2 py-1.5 text-center font-medium">{sz}</th>)}
+                              <th className="px-2 py-1.5 text-right font-medium whitespace-nowrap">Size Total</th>
                               <th className="px-2 py-1.5 text-right font-medium">PD</th><th className="px-2 py-1.5 text-right font-medium">FD</th>
                             </tr></thead>
                             <tbody>{summary.rows.map((row, ri) => (
                               <tr key={ri} className="border-b border-slate-100 hover:bg-white">
                                 <td className="px-2 py-1">{row.deliveryDate}</td><td className="px-2 py-1 font-medium">{row.ad}</td><td className="px-2 py-1">{row.cutNo}</td><td className="px-2 py-1 text-right font-bold">{row.fpoQty}</td>
                                 {summary.allSizes.map((sz) => { const d = row.sizeBreakdown.find((s) => s.size === sz); return <td key={sz} className="px-2 py-1 text-center">{d?.qty || '-'}</td>; })}
+                                {/* Row Size Total */}
+                                <td className="px-2 py-1 text-right font-bold bg-slate-50 text-slate-700">
+                                  {row.sizeTotal ?? row.sizeBreakdown.reduce((sum, s) => sum + s.qty, 0)}
+                                </td>
                                 <td className="px-2 py-1 text-right text-red-600 font-bold">{row.sizePdTotal || '-'}</td><td className="px-2 py-1 text-right text-amber-600">{row.fdTotal || '-'}</td>
                               </tr>
                             ))}</tbody>
                             <tfoot><tr className="bg-slate-100 font-bold text-slate-800">
-                              <td colSpan={3} className="px-2 py-1.5">Totals</td><td className="px-2 py-1.5 text-right">{summary.grandTotalQty}</td>
+                              <td colSpan={3} className="px-2 py-1.5">Totals</td><td className="px-2 py-1.5 text-right">{summary.rows.reduce((s, r) => s + r.fpoQty, 0)}</td>
                               {summary.allSizes.map((sz) => { const d = summary.sizeTotals.find((s) => s.size === sz); return <td key={sz} className="px-2 py-1.5 text-center">{d?.qty || '-'}</td>; })}
+                              {/* Grand Size Total */}
+                              <td className="px-2 py-1.5 text-right bg-slate-200">
+                                {summary.rows.reduce((sum, r) => sum + (r.sizeTotal ?? r.sizeBreakdown.reduce((s2, sz) => s2 + sz.qty, 0)), 0)}
+                              </td>
                               <td className="px-2 py-1.5 text-right text-red-600">{summary.grandPdTotal}</td><td className="px-2 py-1.5 text-right text-amber-600">{summary.grandFdTotal}</td>
                             </tr></tfoot>
                           </table>
@@ -208,6 +217,8 @@ function printTracker(summary: TrackerSummary) {
       return `<td class="sz">${d?.qty || ''}</td><td class="pd">${d?.pd || ''}</td><td class="fd">${d?.fd || ''}</td>`; 
     }).join('');
     
+    let rowSizeTotal = r.sizeTotal ?? r.sizeBreakdown.reduce((sum, s) => sum + s.qty, 0);
+
     bodyRows += `<tr>
       <td>${r.inDate}</td>
       <td>${r.deliveryDate}</td>
@@ -220,6 +231,7 @@ function printTracker(summary: TrackerSummary) {
       <td class="c">${r.allowedPd || ''}</td>
       <td class="c bold">${r.cutNo}</td>
       ${sizeCells}
+      <td class="c bold" style="background:#f1f5f9;">${rowSizeTotal || 0}</td>
       <td class="c bold red">${r.sizePdTotal || ''}</td>
       <td class="c bold">${r.fdTotal || ''}</td>
       <td class="c bold ${r.exceeded > 0 ? 'red bg-red' : ''}">${r.exceeded || ''}</td>
@@ -232,11 +244,14 @@ function printTracker(summary: TrackerSummary) {
     return `<td class="sz bold">${t?.qty || ''}</td><td class="pd bold">${t?.pd || ''}</td><td class="fd bold">${t?.fd || ''}</td>`; 
   }).join('');
   
+  let grandSizeTotal = summary.rows.reduce((sum, r) => sum + (r.sizeTotal ?? r.sizeBreakdown.reduce((s2, sz) => s2 + sz.qty, 0)), 0);
+
   bodyRows += `<tr class="total">
     <td colspan="7" style="text-align:right; padding-right: 15px;">TOTALS</td>
     <td class="c bold">${summary.rows.reduce((s,r)=>s+r.fpoQty,0)}</td>
     <td></td><td></td>
     ${totSz}
+    <td class="c bold" style="background:#e2e8f0;">${grandSizeTotal || 0}</td>
     <td class="c bold red">${summary.grandPdTotal || ''}</td>
     <td class="c bold">${summary.grandFdTotal || ''}</td>
     <td></td>
@@ -274,11 +289,15 @@ function printTracker(summary: TrackerSummary) {
   
   .total td { border-top: 2px solid #000; font-weight: bold; background: #f8f9fa; font-size: 10px; padding-top: 6px; padding-bottom: 6px; }
   
-  .summary { width: 250px; border: 2px solid #000; border-collapse: collapse; float: right; margin-top: 10px; }
-  .summary td { padding: 6px 10px; border: 1px solid #ccc; font-size: 11px; }
-  .summary .lbl { font-weight: bold; background: #f0f0f0; width: 60%; }
-  .summary .val { font-weight: 900; text-align: right; }
-  .summary .red-row { color: #c00; background: #fff0f0; }
+  /* Print Summary Box */
+  .summary { width: 280px; border: none; border-collapse: collapse; float: right; margin-top: 20px; font-size: 12px; background: #f8fafc; border-radius: 6px; padding: 10px; }
+  .summary td { padding: 8px 12px; border: none; text-align: left; }
+  .summary .lbl { font-weight: bold; color: #475569; width: 60%; }
+  .summary .val { font-weight: 900; text-align: right; color: #0f172a; }
+  .summary .spacer td { border-bottom: 1px solid #e2e8f0; height: 1px; padding: 0; }
+  .text-emerald { color: #059669; }
+  .text-blue { color: #1d4ed8; }
+  .red-row .lbl, .red-row .val { color: #dc2626; font-size: 14px; }
 
   @media print {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -289,12 +308,6 @@ function printTracker(summary: TrackerSummary) {
   <div class="hdr">
     <h2>DELIVERY TRACKER — ${summary.styleNo} — ${summary.fpoNo || '(No Schedule)'}</h2>
     <span>${summary.customerName}</span>
-  </div>
-  <div class="info">
-    <span><b>Order Qty:</b>${summary.orderQty}</span>
-    <span><b>Received:</b>${summary.receivedQty}</span>
-    <span><b>Delivered:</b>${summary.deliveredQty}</span>
-    <span><b>Balance:</b>${summary.balanceToRec}</span>
   </div>
   
   <table>
@@ -311,6 +324,7 @@ function printTracker(summary: TrackerSummary) {
         <th>ALLOWED PD</th>
         <th>CUT NO</th>
         ${hdrCols}
+        <th>SIZE TOTAL</th>
         <th>SIZE PD TOTAL</th>
         <th>FD TOTAL</th>
         <th>EXCEEDED</th>
@@ -322,7 +336,25 @@ function printTracker(summary: TrackerSummary) {
   </table>
 
   <table class="summary">
-    <tr class="red-row"><td class="lbl">PD TOTAL</td><td class="val">${summary.pdTotal}</td></tr>
+    <tr><td class="lbl">Style #</td><td class="val">${summary.styleNo}</td></tr>
+    <tr><td class="lbl">FPO #</td><td class="val" style="font-weight:normal;">${summary.fpoNo || '(No Schedule)'}</td></tr>
+    
+    <tr class="spacer"><td colspan="2"></td></tr>
+    
+    <tr><td class="lbl" style="font-weight:normal;">Order qty</td><td class="val">${summary.orderQty}</td></tr>
+    <tr><td class="lbl" style="font-weight:normal;">Received qty</td><td class="val">${summary.receivedQty}</td></tr>
+    <tr><td class="lbl" style="font-weight:normal;">Delivered qty</td><td class="val text-emerald">${summary.deliveredQty}</td></tr>
+    
+    <tr class="spacer"><td colspan="2"></td></tr>
+    
+    <tr>
+      <td class="lbl text-blue" style="font-size:14px;">Balance to rec</td>
+      <td class="val text-blue" style="font-size:14px;">${summary.balanceToRec}</td>
+    </tr>
+    
+    <tr class="spacer"><td colspan="2"></td></tr>
+    
+    <tr class="red-row"><td class="lbl" style="text-transform:uppercase;">PD TOTAL</td><td class="val">${summary.pdTotal}</td></tr>
     <tr class="red-row"><td class="lbl">PD %</td><td class="val">${summary.pdPercentage}%</td></tr>
   </table>
 </body>

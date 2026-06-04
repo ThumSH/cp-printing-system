@@ -40,6 +40,7 @@ interface StagedEntry {
   cutInDate: string;
   inQty: number;
   cuts: {
+    tempId: string;
     cutNo: string;
     cutQty: number;
     submissionId: string;
@@ -96,7 +97,7 @@ export default function StoreInPage() {
 
   // Cut builder
   const [activeSubmissionId, setActiveSubmissionId] = useState('');
-  const [activeCutNo, setActiveCutNo] = useState(''); // Added for manual cut numbering
+  const [activeCutNo, setActiveCutNo] = useState(''); 
   const [activeCutBundles, setActiveCutBundles] = useState<BundleFormRow[]>([makeBundleRow(1)]);
   const [activeCutQty, setActiveCutQty] = useState('');
   const [cutQtyConfirmed, setCutQtyConfirmed] = useState(false);
@@ -162,7 +163,7 @@ export default function StoreInPage() {
     return eligibleStoreInItems.filter(
       i => i.styleNo === selectedStyleNo &&
            i.customerName === selectedCustomer &&
-           i.remainingBulkQty > 0   // exclude fully-received submissions
+           i.remainingBulkQty > 0   
     );
   }, [eligibleStoreInItems, selectedStyleNo, selectedCustomer]);
 
@@ -210,7 +211,7 @@ export default function StoreInPage() {
     // 2. Auto-copy cuts from an already populated component
     setSavedCuts(prev => {
        const thisCompHasCuts = prev.some(c => c.submissionId === subId);
-       if (thisCompHasCuts) return prev; // Don't overwrite existing cuts
+       if (thisCompHasCuts) return prev; 
 
        const sourceSubId = styleComponents.find(c =>
           c.submissionId !== subId && prev.some(cut => cut.submissionId === c.submissionId)
@@ -230,7 +231,7 @@ export default function StoreInPage() {
              submissionId: subId,
              component: targetCompName,
              bodyColour: compInfo?.bodyColour ?? '',
-             cutNo: c.cutNo.replace(sourceCompName, targetCompName), // cleanly swaps prefix
+             cutNo: c.cutNo.replace(sourceCompName, targetCompName),
              bundles: c.bundles.map(b => ({ ...b }))
           }));
           return [...prev, ...clonedCuts];
@@ -290,14 +291,6 @@ export default function StoreInPage() {
     const errs: Record<string, string> = {};
     if (!activeSubmissionId) errs.component = 'Select a component for this cut';
     if (!activeCutNo.trim()) errs.cutNo = 'Cut name/number is required';
-
-    // Check for duplicate Cut No inside the same component
-    const duplicateCutNo = savedCuts.some(c => 
-      c.submissionId === activeSubmissionId && 
-      c.tempId !== editingCutTempId && 
-      c.cutNo.toLowerCase() === activeCutNo.trim().toLowerCase()
-    );
-    if (duplicateCutNo) errs.cutNo = 'This cut name already exists for this component';
 
     const cutQtyNum = parseInt(activeCutQty) || 0;
     if (cutQtyNum <= 0) errs.cutQty = 'Cut Qty must be > 0';
@@ -369,7 +362,6 @@ export default function StoreInPage() {
     } else {
       setSavedCuts(prev => {
          const toAdd = [newCut];
-         // Auto-copy to other CONFIRMED components that want to keep in sync
          const otherComps = styleComponents.filter(c => c.submissionId !== activeSubmissionId && isComponentConfirmed(c.submissionId));
 
          otherComps.forEach(otherComp => {
@@ -398,7 +390,11 @@ export default function StoreInPage() {
     setActiveSubmissionId(cut.submissionId);
     setActiveCutNo(cut.cutNo);
     setActiveCutQty(cut.cutQty.toString());
-    setActiveCutBundles(cut.bundles.map(b => ({
+    
+    // Sort bundles naturally before opening in editor
+    const sortedBundles = cut.bundles.slice().sort((a, b) => a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true }));
+    
+    setActiveCutBundles(sortedBundles.map(b => ({
       tempId: crypto.randomUUID(),
       bundleNo: b.bundleNo, bundleQty: b.bundleQty.toString(),
       size: b.size, numberRange: b.numberRange,
@@ -494,6 +490,7 @@ export default function StoreInPage() {
       cutInDate,
       inQty:        compInQty,
       cuts: compCuts.map(c => ({
+        tempId:       c.tempId,
         cutNo:        c.cutNo,
         cutQty:       c.cutQty,
         submissionId: c.submissionId,
@@ -1176,8 +1173,8 @@ export default function StoreInPage() {
                     {isExp && (
                       <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
                         className="border-t border-amber-200 bg-white px-6 py-4 overflow-hidden">
-                        {entry.cuts.map(cut => (
-                          <div key={cut.cutNo} className="mb-3 last:mb-0">
+                        {entry.cuts.map((cut, cutIdx) => (
+                          <div key={cut.tempId + '_' + cutIdx} className="mb-3 last:mb-0">
                             <div className="flex items-center gap-2 mb-1">
                               <Layers className="h-3.5 w-3.5 text-slate-400" />
                               <span className="text-sm font-bold text-slate-700">{cut.cutNo}</span>
@@ -1186,11 +1183,7 @@ export default function StoreInPage() {
                                 type="button"
                                 onClick={e => {
                                   e.stopPropagation();
-                                  // cut.submissionId tells us which component this cut belongs to
-                                  // Find the matching SavedCut by cutNo+submissionId to get its tempId
-                                  const matchedSavedCut = savedCuts.find(
-                                    sc => sc.cutNo === cut.cutNo && sc.submissionId === cut.submissionId
-                                  );
+                                  const matchedSavedCut = savedCuts.find(sc => sc.tempId === cut.tempId);
                                   if (!matchedSavedCut) return;
                                   setActiveSubmissionId(cut.submissionId);
                                   setEditingCutTempId(matchedSavedCut.tempId);
@@ -1214,7 +1207,7 @@ export default function StoreInPage() {
                               <table className="w-full text-xs">
                                 <thead><tr className="text-slate-400"><th className="py-1 text-left">Bundle</th><th className="py-1 text-left">Qty</th><th className="py-1 text-left">Size</th><th className="py-1 text-left">Range</th></tr></thead>
                                 <tbody>
-                                  {cut.bundles.map((b, bi) => (
+                                  {cut.bundles.slice().sort((a, b) => a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true })).map((b, bi) => (
                                     <tr key={bi} className="text-slate-700">
                                       <td className="py-0.5 font-medium">{b.bundleNo}</td>
                                       <td className="py-0.5 font-bold">{b.bundleQty}</td>
@@ -1335,8 +1328,8 @@ export default function StoreInPage() {
                           <MiniStat label="Uncut Balance"  value={record.uncutBalance} />
                           <MiniStat label="Available (Shelf)" value={record.availableQty} color="green" />
                         </div>
-                        {record.cuts.map(cut => (
-                          <div key={cut.id} className="mb-3 last:mb-0">
+                        {record.cuts.map((cut, cutIdx) => (
+                          <div key={cut.id + '_' + cutIdx} className="mb-3 last:mb-0">
                             <div className="flex items-center gap-2 mb-1">
                               <Layers className="h-3.5 w-3.5 text-slate-400" />
                               <span className="text-sm font-bold text-slate-700">{cut.cutNo}</span>
@@ -1346,7 +1339,7 @@ export default function StoreInPage() {
                               <table className="w-full text-xs">
                                 <thead><tr className="text-slate-400"><th className="py-1 text-left">Bundle</th><th className="py-1 text-left">Qty</th><th className="py-1 text-left">Size</th><th className="py-1 text-left">Range</th></tr></thead>
                                 <tbody>
-                                  {cut.bundles.map(b => (
+                                  {cut.bundles.slice().sort((a, b) => a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true })).map(b => (
                                     <tr key={b.id} className="text-slate-700">
                                       <td className="py-0.5 font-medium">{b.bundleNo}</td>
                                       <td className="py-0.5 font-bold">{b.bundleQty}</td>

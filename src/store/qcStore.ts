@@ -33,6 +33,12 @@ export const DEFECT_TYPES = [
 // ==========================================
 
 export interface CpiDefectRow {
+  sampleSize: string;
+  check: string;
+  check: string;
+  check: string;
+  check: string;
+  check: string;
   defectCode: string;
   defectName: string;
   beforeLength: number;

@@ -1,7 +1,7 @@
-// src/pages/gatepass/AdviceNoteSearchPage.tsx
+// src/pages/qc/AdviceNoteSearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Truck, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock } from 'lucide-react';
+import { Search, Truck, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock, Printer } from 'lucide-react'; // <-- Added Printer Icon
 import { useAdviceNoteStore, AdviceNoteRecord, AdviceNoteRow } from '../../store/adviceNoteStore';
 
 const RECENT_LIMIT = 10;
@@ -143,6 +143,19 @@ export default function AdviceNoteSearchPage() {
                     <AnimatePresence>
                       {isExp && rows.length > 0 && (
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden">
+                          
+                          {/* NEW: Action Bar with Print Feature */}
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="font-bold text-slate-800 text-sm">Advice Note Details</h4>
+                            <button 
+                              type="button" 
+                              onClick={(e) => { e.stopPropagation(); printAdviceNote(note); }}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
+                            >
+                              <Printer className="h-3.5 w-3.5" /> Print Advice Note
+                            </button>
+                          </div>
+
                           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4 p-3 rounded-lg bg-white border border-slate-200">
                             <InfoField label="Attn" value={note.attn} /><InfoField label="Component" value={note.component} /><InfoField label="Prep By" value={note.prepByName} /><InfoField label="Remarks" value={note.remarks} />
                           </div>
@@ -168,4 +181,154 @@ function StatCard({ label, value, color }: { label: string; value: number; color
 }
 function InfoField({ label, value }: { label: string; value: string }) {
   return <div className="space-y-0.5"><label className="block text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</label><p className="text-sm font-medium text-slate-700">{value || '-'}</p></div>;
+}
+
+// ==========================================
+// NEW: INTEGRATED PRINT ADVICE NOTE UTILITY
+// ==========================================
+function printAdviceNote(note: AdviceNoteRecord) {
+  const rows = Object.values(note.rows || {});
+
+  // Safe alphanumeric sorting by Cut Form, then Bundle Number sequence
+  rows.sort((a, b) => {
+    if (a.cutForm !== b.cutForm) return a.cutForm.localeCompare(b.cutForm, undefined, { numeric: true });
+    return a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true });
+  });
+
+  const cutGroups = new Map<string, typeof rows>();
+  rows.forEach(r => {
+    const key = r.cutForm;
+    if (!cutGroups.has(key)) cutGroups.set(key, []);
+    cutGroups.get(key)!.push(r);
+  });
+
+  const grandPcs  = rows.reduce((s, r) => s + (r.totalPcs  || 0), 0);
+  const grandPd   = rows.reduce((s, r) => s + (r.pd        || 0), 0);
+  const grandFd   = rows.reduce((s, r) => s + (r.fd        || 0), 0);
+  const grandGood = rows.reduce((s, r) => s + (r.goodQty   || 0), 0);
+
+  // Expanded print structure scaling parameters (Default rows padded to 28)
+  const dataRowCount = rows.length + cutGroups.size;
+  const minDataRows = Math.max(dataRowCount, 28);
+  const blankPad = Math.max(0, minDataRows - dataRowCount);
+
+  let tableRows = '';
+  let rowNo = 1;
+
+  cutGroups.forEach((cutRows, cutNo) => {
+    const subPcs  = cutRows.reduce((s, r) => s + (r.totalPcs || 0), 0);
+    const subPd   = cutRows.reduce((s, r) => s + (r.pd       || 0), 0);
+    const subFd   = cutRows.reduce((s, r) => s + (r.fd       || 0), 0);
+    const subGood = cutRows.reduce((s, r) => s + (r.goodQty  || 0), 0);
+
+    cutRows.forEach(r => {
+      tableRows += `<tr>
+        <td>${String(rowNo++).padStart(2, '0')}</td>
+        <td>${r.colour || ''}</td>
+        <td><b>${r.bundleNo || ''}</b></td>
+        <td>${r.size || ''}</td>
+        <td>${r.cutForm || ''}</td>
+        <td class="comp">${r.component || ''}</td>
+        <td class="bold">${r.totalPcs || ''}</td>
+        <td class="red">${r.pd || '—'}</td>
+        <td class="red">${r.fd || '—'}</td>
+        <td class="bold">${r.goodQty || ''}</td>
+      </tr>`;
+    });
+
+    tableRows += `<tr class="sub-row">
+      <td colspan="5" style="text-align:right;font-style:italic;padding-right:6px;color:#7c5d1e;">Sub-total: ${cutNo}</td>
+      <td>—</td>
+      <td class="bold">${subPcs}</td>
+      <td class="red bold">${subPd || '—'}</td>
+      <td class="red bold">${subFd || '—'}</td>
+      <td class="bold" style="color:#166534;">${subGood}</td>
+    </tr>`;
+  });
+
+  for (let i = 0; i < blankPad; i++) {
+    tableRows += `<tr><td>${String(rowNo++).padStart(2, '0')}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
+  }
+
+  tableRows += `<tr class="total-row">
+    <td colspan="6" style="text-align:right;padding-right:6px;">GRAND TOTAL</td>
+    <td class="bold">${grandPcs}</td>
+    <td class="red bold">${grandPd || '—'}</td>
+    <td class="red bold">${grandFd || '—'}</td>
+    <td class="bold" style="color:#166534;">${grandGood}</td>
+  </tr>`;
+
+  const html = `<!DOCTYPE html><html><head>
+    <title>${note.adNo}</title>
+    <style>
+      @page { size: A4 portrait; margin: 0; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #000; padding: 10mm; }
+      .hdr { display: flex; justify-content: space-between; margin-bottom: 6px; }
+      .hdr-left h1 { font-size: 16px; font-weight: 900; }
+      .hdr-left p, .hdr-right p { margin: 2px 0; font-size: 11px; }
+      .hdr-right { text-align: right; }
+      .ad-block { text-align: center; margin: 8px 0; }
+      .ad-no { font-size: 22px; font-weight: 900; border: 2px solid #000; padding: 4px 16px; display: inline-block; }
+      .info .row { display: flex; margin: 4px 0; font-size: 12px;}
+      .info .lbl { font-weight: 700; min-width: 100px; }
+      .info .val { border-bottom: 1px solid #000; flex: 1; min-height: 16px; padding: 0 4px; }
+      table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-top: 8px; }
+      th, td { border: 0.5px solid #000; padding: 4px; font-size: 11px; text-align: center; height: 22px; }
+      th { background: #e0e0e0; font-weight: 700; font-size: 12px;}
+      .bold { font-weight: 700; }
+      .red { color: #c00; }
+      .comp { color: #1a6b3c; font-weight: 600; }
+      .sub-row td { background: #fff8e7; font-weight: 700; border-top: 1.5px solid #d97706; border-bottom: 1.5px solid #d97706; }
+      .total-row td { border-top: 2px solid #000; font-weight: 700; background: #f0f0f0; }
+      .remarks { margin-top: 8px; font-size: 12px; border-top: 1px solid #000; padding-top: 5px; }
+      .footer { display: flex; justify-content: space-between; margin-top: 24px; }
+      .footer .sig { flex: 1; text-align: center; font-size: 12px; }
+      .footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 24px; }
+      .footer .sig .line { border-top: 1px solid #000; padding-top: 4px; margin: 0 15px; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style></head><body>
+    <div class="hdr">
+      <div class="hdr-left"><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
+      <p>SCREEN PRINTERS FOR TEXTILES</p>
+      <p>E-mail: colourplus@sitnet.lk</p></div>
+      <div class="hdr-right"><p>564, Athurugiriya Road, Kottawa.</p><p>Tel: 011 278 1525</p></div>
+    </div>
+    <div class="ad-block">
+      <span style="font-size:12px;font-weight:700">AD No:</span>
+      <span class="ad-no">${note.adNo}</span>
+      <span style="margin-left:40px;font-size:12px"><b>Date:</b> ${note.deliveryDate}</span>
+    </div>
+    <div class="info">
+      <div class="row"><span class="lbl">Customer:</span><span class="val">${note.customerName}</span>
+      <span class="lbl" style="margin-left:20px">Attn:</span><span class="val">${note.attn}</span></div>
+      <div class="row"><span class="lbl">Style #:</span><span class="val">${note.styleNo}</span></div>
+      <div class="row"><span class="lbl">Address:</span><span class="val">${note.address}</span></div>
+      <div class="row"><span class="lbl">Schedule No:</span><span class="val">${note.scheduleNo || ''}</span></div>
+    </div>
+    <table><thead><tr>
+      <th style="width:24px"></th>
+      <th>COLOUR</th><th>BUN NO.</th><th>SIZE</th><th>CUT FORM</th>
+      <th>COMPONENT</th>
+      <th>TOTAL PCS</th><th>P/D</th><th>F/D</th><th>GOOD QTY</th>
+    </tr></thead><tbody>${tableRows}</tbody></table>
+    <div class="remarks"><b>Remarks.</b> ${note.remarks || ''}</div>
+    <div class="footer">
+      <div class="sig"><div class="lbl">Received by</div><div class="line">${note.receivedByName || ''}</div></div>
+      <div class="sig"><div class="lbl">Prep. & Checked by</div><div class="line">${note.prepByName || ''}</div></div>
+      <div class="sig"><div class="lbl">Authorized by</div><div class="line">${note.authByName || ''}</div></div>
+    </div>
+    </body></html>`;
+
+  const old = document.getElementById('gatepass-print-frame') as HTMLIFrameElement | null;
+  if (old) old.remove();
+  const frame = document.createElement('iframe');
+  frame.id = 'gatepass-print-frame';
+  frame.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:900px;height:1200px';
+  document.body.appendChild(frame);
+  const doc = frame.contentDocument || frame.contentWindow?.document;
+  if (doc) {
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(() => { frame.contentWindow?.print(); setTimeout(() => frame.remove(), 1000); }, 300);
+  }
 }

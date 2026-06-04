@@ -250,7 +250,7 @@ export default function CPIPage() {
   const cutsForComp = useMemo(() => {
     if (!selComponent || !selectedStoreIn) return [];
     
-    // We no longer filter by `startsWith("front")`. ALL cuts in this store-in belong here.
+    // ALL cuts in this store-in belong here.
     let filtered = selectedStoreIn.cuts ?? [];
 
     // Filter out cuts that have ALREADY been appended to the existing report
@@ -293,15 +293,15 @@ export default function CPIPage() {
     setCpiQty(''); // Always clear CPI Qty so they enter the qty strictly for this new batch
   }, [existingReport, selComponent]);
 
-  // ── Flatten bundles for side-by-side rendering ────────────────────────────
+  // ── Flatten bundles for side-by-side rendering (with safe native sorting) ──
   const flatBundles = useMemo(() => {
     const flat: any[] = [];
+    
     cuts.forEach((c, cIdx) => {
       c.bundles.forEach((b, bIdx) => {
         flat.push({
-          cutIdx: cIdx,
-          bundleIdx: bIdx,
-          isFirstOfCut: bIdx === 0,
+          originalCutIdx: cIdx,
+          originalBundleIdx: bIdx,
           cutNo: c.cutNo,
           cutQty: c.cutQty,
           component: c.component,
@@ -309,6 +309,24 @@ export default function CPIPage() {
         });
       });
     });
+
+    // Native alphanumeric sort without mutating original UI state indexing
+    flat.sort((a, b) => {
+      if (a.cutNo !== b.cutNo) return a.cutNo.localeCompare(b.cutNo, undefined, { numeric: true });
+      // Safely check bundleNo existence before localeCompare
+      const aBundle = a.bundleNo || '';
+      const bBundle = b.bundleNo || '';
+      return aBundle.localeCompare(bBundle, undefined, { numeric: true });
+    });
+
+    let currentCutNo = '';
+    flat.forEach(b => {
+      b.isFirstOfCut = b.cutNo !== currentCutNo;
+      currentCutNo = b.cutNo;
+      b.cutIdx = b.originalCutIdx;
+      b.bundleIdx = b.originalBundleIdx;
+    });
+
     return flat;
   }, [cuts]);
 
@@ -468,6 +486,7 @@ export default function CPIPage() {
     const numRows = Math.max(14, flatBundles.length);
     let totalSampleSize = 0;
     let totalDefectedQty = 0;
+    const totalQtyCombined = cuts.reduce((s, c) => s + c.cutQty, 0);
 
     for (let i = 0; i < numRows; i++) {
       const defInfo = i < 14 ? DEFECTS[i] : null;
@@ -487,7 +506,7 @@ export default function CPIPage() {
         + tdL(defInfo?.label ?? '')
         + td(checkMark, checkColor)
         + td(bundle?.isFirstOfCut ? bundle.cutNo : '')
-        + td(bundle?.isFirstOfCut ? bundle.cutQty : '', 'font-weight:bold;')
+        + td(i === 0 && bundle ? totalQtyCombined : '', 'font-weight:bold;')
         + td(bundle?.bundleNo ?? '', 'font-size:9px;')
         + td(bundle?.isFirstOfCut ? bundle.component : '')
         + td(bundle?.size ?? '')
@@ -505,7 +524,7 @@ export default function CPIPage() {
 
     rows += '<tr style="background:#f0f0f0;font-weight:bold;">'
       + td('TOTALS', 'text-align:left;') + td('') + td('') + td('')
-      + td(cuts.reduce((s, c) => s + c.cutQty, 0), 'font-weight:bold;')
+      + td(totalQtyCombined, 'font-weight:bold;')
       + td('') + td('') + td('')
       + td('') + td('') + td('') + td('')
       + td('') + td('') + td('') + td('')
@@ -524,7 +543,7 @@ export default function CPIPage() {
       + 'body { font-family: Arial, sans-serif; font-size: 11px; padding: 10mm; }'
       + 'table { border-collapse: collapse; width: 100%; }'
       + 'th { border: 1px solid #999; padding: 2px 4px; text-align: center; font-size: 10px; background: #e8e8e8; font-weight: bold; }'
-      + '@page { size: A4 landscape; margin: 10mm; }'
+      + '@page { size: A4 landscape; margin: 0; }' // margin: 0 removes browser header/footer
       + '</style></head><body>'
       + '<div style="text-align:center;margin-bottom:6px;">'
       + '<div style="font-weight:bold;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>'
@@ -585,7 +604,7 @@ export default function CPIPage() {
       + '</tbody></table>'
       + '<div style="margin-top:12px;display:flex;justify-content:space-between;font-size:11px;">'
       + '<div>CPI Auditor: <span style="display:inline-block;min-width:150px;border-bottom:1px solid black;">' + auditor + '</span></div>'
-      + '<div style="font-size:10px;color:#555;">Total Cuts: ' + cuts.length + ' | Total Qty: ' + cuts.reduce((s, c) => s + c.cutQty, 0) + '</div>'
+      + '<div style="font-size:10px;color:#555;">Total Cuts: ' + cuts.length + ' | Total Qty: ' + totalQtyCombined + '</div>'
       + '</div>'
       + '</body></html>';
 
@@ -818,7 +837,7 @@ export default function CPIPage() {
                         {bundle?.isFirstOfCut ? bundle.cutNo : ''}
                       </td>
                       <td className="border border-slate-200 px-1 py-1 text-center font-bold text-slate-800">
-                        {bundle?.isFirstOfCut ? bundle.cutQty : ''}
+                        {i === 0 && bundle ? cuts.reduce((s, c) => s + c.cutQty, 0) : ''}
                       </td>
                       <td className="border border-slate-200 px-1 py-1 text-center text-slate-600 text-[9px] max-w-20 truncate" title={bundle?.bundleNo}>
                         {bundle?.bundleNo || ''}

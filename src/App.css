@@ -45,6 +45,17 @@ button, a, input, select, textarea {
  
 /* Print */
 @media print {
+  /* This removes the localhost URL and date headers */
+  @page { 
+    size: auto; 
+    margin: 0mm; 
+  }
+
+  /* Adds a clean margin back so your report isn't touching the edge of the paper */
+  body {
+    margin: 1cm; /* You can adjust this to 0.5cm or 1.5cm depending on your preference */
+  }
+
   aside, header, .no-print { display: none !important; }
   main { margin: 0 !important; padding: 0 !important; }
   .overflow-y-auto { overflow: visible !important; }

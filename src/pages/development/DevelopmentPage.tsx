@@ -527,12 +527,12 @@ export default function DevelopmentPage() {
               { label: 'Customer', name: 'customer', type: 'text', placeholder: 'e.g. Boss' },
               { label: 'Style No', name: 'styleNo', type: 'text', placeholder: 'e.g. BO-9090' },
               { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. SS26' },
-              { label: 'Printing Technique', name: 'printingTechnique', type: 'text', placeholder: 'e.g. High Density' },
-              { label: 'Washing Standard', name: 'washingStandard', type: 'text', placeholder: 'e.g. 40°C Machine Wash' },
+              { label: 'Printing Technique', name: 'printingTechnique', type: 'text', placeholder: 'e.g. High Density', alwaysEditable: true },
+              { label: 'Washing Standard', name: 'washingStandard', type: 'text', placeholder: 'e.g. 40°C Machine Wash', alwaysEditable: true },
               { label: 'Print Colour', name: 'printColour', type: 'text', placeholder: 'e.g. White & Red', alwaysEditable: true },
               { label: 'Print Colour QTY', name: 'printColourQty', type: 'number', placeholder: 'e.g. 2', alwaysEditable: true },
-              { label: 'Sample Ordered Date', name: 'sampleOrderedDate', type: 'date' },
-              { label: 'Sample Delivery', name: 'sampleDeliveryDate', type: 'date' },
+              { label: 'Sample Ordered Date', name: 'sampleOrderedDate', type: 'date', alwaysEditable: true },
+              { label: 'Sample Delivery', name: 'sampleDeliveryDate', type: 'date', alwaysEditable: true },
             ].map((field) => {
               const isReadOnly = lockedFields && !(field as any).alwaysEditable;
               return (
@@ -784,8 +784,8 @@ export default function DevelopmentPage() {
                     const { locked, reason } = isJobLocked(sub.id);
                     return (
                       <motion.tr key={sub.id}
-                        initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }} className="hover:bg-slate-50 transition-colors">
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4">
                           {thumbUrl ? (
                             <img src={thumbUrl} alt="Artwork" className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm" />

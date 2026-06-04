@@ -264,7 +264,17 @@ export default function AdviceNotePage() {
   const rowsByCut = useMemo(() => {
     const groups: { cutNo: string; rows: { row: AdviceNoteRow; globalIdx: number }[] }[] = [];
     const seenCuts = new Set<string>();
-    bundleRows.forEach((row, globalIdx) => {
+    
+    // Create array with original indices
+    const withIndices = bundleRows.map((row, globalIdx) => ({ row, globalIdx }));
+    
+    // Sort natively by cut, then bundle
+    withIndices.sort((a, b) => {
+      if (a.row.cutForm !== b.row.cutForm) return a.row.cutForm.localeCompare(b.row.cutForm, undefined, { numeric: true });
+      return a.row.bundleNo.localeCompare(b.row.bundleNo, undefined, { numeric: true });
+    });
+
+    withIndices.forEach(({ row, globalIdx }) => {
       if (!seenCuts.has(row.cutForm)) {
         seenCuts.add(row.cutForm);
         groups.push({ cutNo: row.cutForm, rows: [] });
@@ -612,7 +622,13 @@ export default function AdviceNotePage() {
           <div className="divide-y divide-slate-100">
             {notesPagination.paginated.map(note => {
               const isExp = expandedNoteId === note.id;
-              const nRows = Object.values(note.rows || {});
+              
+              // Sort natively before displaying
+              const nRows = Object.values(note.rows || {}).sort((a, b) => {
+                if (a.cutForm !== b.cutForm) return a.cutForm.localeCompare(b.cutForm, undefined, { numeric: true });
+                return a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true });
+              });
+
               return (
                 <div key={note.id}>
                   <div className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50/50 cursor-pointer transition-colors"
@@ -707,6 +723,12 @@ export default function AdviceNotePage() {
 function printAdviceNote(note: AdviceNoteRecord) {
   const rows = Object.values(note.rows || {});
 
+  // Sort rows natively before printing
+  rows.sort((a, b) => {
+    if (a.cutForm !== b.cutForm) return a.cutForm.localeCompare(b.cutForm, undefined, { numeric: true });
+    return a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true });
+  });
+
   // Group rows by cut, preserving insertion order
   const cutGroups = new Map<string, typeof rows>();
   rows.forEach(r => {
@@ -722,7 +744,7 @@ function printAdviceNote(note: AdviceNoteRecord) {
 
   // Minimum 28 data rows for print layout (not counting subtotal/total rows)
   const dataRowCount = rows.length + cutGroups.size; // bundles + subtotal rows
-  const minDataRows = Math.max(dataRowCount, 24);
+  const minDataRows = Math.max(dataRowCount, 28);
   const blankPad = Math.max(0, minDataRows - dataRowCount);
 
   let tableRows = '';
@@ -780,29 +802,29 @@ function printAdviceNote(note: AdviceNoteRecord) {
     <style>
       @page { size: A4 portrait; margin: 10mm; }
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; font-size: 10px; color: #000; }
-      .hdr { display: flex; justify-content: space-between; margin-bottom: 4px; }
-      .hdr-left h1 { font-size: 13px; font-weight: 900; }
-      .hdr-left p, .hdr-right p { margin: 1px 0; font-size: 9px; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #000; }
+      .hdr { display: flex; justify-content: space-between; margin-bottom: 6px; }
+      .hdr-left h1 { font-size: 16px; font-weight: 900; }
+      .hdr-left p, .hdr-right p { margin: 2px 0; font-size: 11px; }
       .hdr-right { text-align: right; }
-      .ad-block { text-align: center; margin: 6px 0; }
-      .ad-no { font-size: 18px; font-weight: 900; border: 2px solid #000; padding: 2px 16px; display: inline-block; }
-      .info .row { display: flex; margin: 2px 0; }
-      .info .lbl { font-weight: 700; min-width: 90px; }
-      .info .val { border-bottom: 1px solid #000; flex: 1; min-height: 14px; padding: 0 4px; }
-      table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-top: 6px; }
-      th, td { border: 0.5px solid #000; padding: 2px 3px; font-size: 9px; text-align: center; height: 18px; }
-      th { background: #e0e0e0; font-weight: 700; }
+      .ad-block { text-align: center; margin: 8px 0; }
+      .ad-no { font-size: 22px; font-weight: 900; border: 2px solid #000; padding: 4px 16px; display: inline-block; }
+      .info .row { display: flex; margin: 4px 0; font-size: 12px;}
+      .info .lbl { font-weight: 700; min-width: 100px; }
+      .info .val { border-bottom: 1px solid #000; flex: 1; min-height: 16px; padding: 0 4px; }
+      table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-top: 8px; }
+      th, td { border: 0.5px solid #000; padding: 4px; font-size: 11px; text-align: center; height: 22px; }
+      th { background: #e0e0e0; font-weight: 700; font-size: 12px;}
       .bold { font-weight: 700; }
       .red { color: #c00; }
       .comp { color: #1a6b3c; font-weight: 600; }
       .sub-row td { background: #fff8e7; font-weight: 700; border-top: 1.5px solid #d97706; border-bottom: 1.5px solid #d97706; }
       .total-row td { border-top: 2px solid #000; font-weight: 700; background: #f0f0f0; }
-      .remarks { margin-top: 5px; font-size: 10px; border-top: 1px solid #000; padding-top: 3px; }
-      .footer { display: flex; justify-content: space-between; margin-top: 18px; }
-      .footer .sig { flex: 1; text-align: center; font-size: 10px; }
-      .footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 18px; }
-      .footer .sig .line { border-top: 1px solid #000; padding-top: 2px; margin: 0 10px; }
+      .remarks { margin-top: 8px; font-size: 12px; border-top: 1px solid #000; padding-top: 5px; }
+      .footer { display: flex; justify-content: space-between; margin-top: 24px; }
+      .footer .sig { flex: 1; text-align: center; font-size: 12px; }
+      .footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 24px; }
+      .footer .sig .line { border-top: 1px solid #000; padding-top: 4px; margin: 0 15px; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
     </style></head><body>
     <div class="hdr">
@@ -812,9 +834,9 @@ function printAdviceNote(note: AdviceNoteRecord) {
       <div class="hdr-right"><p>564, Athurugiriya Road, Kottawa.</p><p>Tel: 011 278 1525</p></div>
     </div>
     <div class="ad-block">
-      <span style="font-size:10px;font-weight:700">AD No:</span>
+      <span style="font-size:12px;font-weight:700">AD No:</span>
       <span class="ad-no">${note.adNo}</span>
-      <span style="margin-left:40px;font-size:10px"><b>Date:</b> ${note.deliveryDate}</span>
+      <span style="margin-left:40px;font-size:12px"><b>Date:</b> ${note.deliveryDate}</span>
     </div>
     <div class="info">
       <div class="row"><span class="lbl">Customer:</span><span class="val">${note.customerName}</span>
