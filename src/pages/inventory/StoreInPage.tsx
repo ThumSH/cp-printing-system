@@ -1,7 +1,5 @@
 // src/pages/inventory/StoreInPage.tsx
 import { useState, useEffect, useMemo } from 'react';
-import { useAutoDraft } from '../../hooks/useAutoDraft';
-import DraftRestoredToast from '../../components/DraftRestoredToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PackageOpen, Plus, Trash2, Edit2, AlertCircle, Save, GitBranch,
@@ -257,27 +255,6 @@ export default function StoreInPage() {
   const totalCutQty = savedCuts.reduce((s, c) => s + c.cutQty, 0);
   const uncutBalance = Math.max(0, inQtyNum - totalCutQty);
 
-  // ── Auto-draft ────────────────────────────────────────────────────────────
-  const draftState = useMemo(() => ({
-    selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, cutInDate,
-    componentInQty, savedCuts, stagedEntries, activeCutNo,
-  }), [selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, cutInDate, componentInQty, savedCuts, stagedEntries, activeCutNo]);
-
-  const { draftRestored, clearDraft, dismissDraftNotice } = useAutoDraft(
-    'store-in-form', draftState,
-    (saved) => {
-      if (saved.selectedStyleNo)  setSelectedStyleNo(saved.selectedStyleNo);
-      if (saved.selectedCustomer) setSelectedCustomer(saved.selectedCustomer);
-      if (saved.inAdNo)           setInAdNo(saved.inAdNo);
-      if (saved.scheduleNo)       setScheduleNo(saved.scheduleNo);
-      if (saved.cutInDate)        setCutInDate(saved.cutInDate);
-      if (saved.componentInQty)   setComponentInQty(saved.componentInQty);
-      if (saved.savedCuts)        setSavedCuts(saved.savedCuts);
-      if (saved.stagedEntries)    setStagedEntries(saved.stagedEntries);
-      if (saved.activeCutNo)      setActiveCutNo(saved.activeCutNo);
-    }
-  );
-
   // ── Cut builder ───────────────────────────────────────────────────────────
   const addBundle = () =>
     setActiveCutBundles(prev => [...prev, makeBundleRow(prev.length + 1)]);
@@ -460,7 +437,6 @@ export default function StoreInPage() {
     setActiveCutQty(''); setActiveCutNo(''); setActiveSubmissionId('');
     setEditingCutTempId(null); setEditingRecordId(null);
     setErrors({}); setCutErrors({}); setPageError('');
-    clearDraft();
   };
 
   // ── Stage a single component ─────────────────────────────────────────────
@@ -537,7 +513,6 @@ export default function StoreInPage() {
       }
       const count = stagedEntries.length;
       setStagedEntries([]);
-      clearDraft();
       resetForm();
       await Promise.all([fetchRecords(), fetchEligibleStoreInItems(), fetchBulkBalances()]);
       setSuccessMsg('Successfully saved ' + count + ' entry(ies) to database.');
@@ -650,7 +625,6 @@ export default function StoreInPage() {
   // ==========================================
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-6xl space-y-8 pb-12">
-      <DraftRestoredToast visible={draftRestored} onDismiss={dismissDraftNotice} onDiscard={() => { clearDraft(); resetForm(); }} />
 
       {/* Header */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">

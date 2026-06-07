@@ -287,11 +287,15 @@ function printAdviceNote(note: AdviceNoteRecord) {
       .footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 24px; }
       .footer .sig .line { border-top: 1px solid #000; padding-top: 4px; margin: 0 15px; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-    </style></head><body>
+    </style>
+    </head><body>
     <div class="hdr">
-      <div class="hdr-left"><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
-      <p>SCREEN PRINTERS FOR TEXTILES</p>
-      <p>E-mail: colourplus@sitnet.lk</p></div>
+      <div class="hdr-left" style="display: flex; align-items: center; gap: 10px;">
+        <img src="/logo.svg" alt="Logo" style="height: 40px; width: auto;" />
+        <div><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
+        <p>SCREEN PRINTERS FOR TEXTILES</p>
+        <p>E-mail: colourplus@sitnet.lk</p></div>
+      </div>
       <div class="hdr-right"><p>564, Athurugiriya Road, Kottawa.</p><p>Tel: 011 278 1525</p></div>
     </div>
     <div class="ad-block">

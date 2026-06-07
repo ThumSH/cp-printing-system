@@ -1,9 +1,6 @@
 // src/store/qcStore.ts
 // FIXES:
-//   - addCPIReport:    now re-fetches eligibleCpiItems so inspected item leaves the list
-//   - deleteCPIReport: now re-fetches eligibleCpiItems so deleted item returns to list
-//   - updateCPIReport: now uses server-returned data (not just the passed-in object)
-//                      so backend-recomputed fields (styleNo, customer, etc.) are correct
+//   - Endpoint mismatch fixed: fetchEligibleCpiItems now calls `/eligible-cpi` instead of `/eligible`
 
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
@@ -90,7 +87,7 @@ export interface QCState {
   fetchReports: () => Promise<void>;
   fetchEligibleCpiItems: () => Promise<void>;
   addCPIReport: (report: Omit<CPIReport, 'id'>) => Promise<void>;
-  updateCPIReport: (id: string, updatedReport: CPIReport) => Promise<void>; // <-- FIX: Added this missing definition
+  updateCPIReport: (id: string, updatedReport: CPIReport) => Promise<void>;
   deleteCPIReport: (id: string) => Promise<void>;
 }
 
@@ -127,7 +124,8 @@ export const useQCStore = create<QCState>((set, get) => ({
 
   fetchEligibleCpiItems: async () => {
     try {
-      const res = await fetch(`${API_BASE}/eligible`, { headers: getAuthHeaders() });
+      // FIX: Changed from `/eligible` to `/eligible-cpi` to match the backend C# controller
+      const res = await fetch(`${API_BASE}/eligible-cpi`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error('Failed to fetch eligible CPI items');
       const data = await res.json();
       set({ eligibleCpiItems: data });
@@ -145,7 +143,7 @@ export const useQCStore = create<QCState>((set, get) => ({
     if (!res.ok) throw new Error(await res.text() || 'Failed to add CPI report');
     const saved = await res.json();
     set((state) => ({ cpiReports: sortReports([saved, ...state.cpiReports]) }));
-    // FIX: Re-fetch eligible items so the successfully inspected ones leave the "Available" list
+    // Re-fetch eligible items so the successfully inspected ones leave the "Available" list
     get().fetchEligibleCpiItems().catch(console.error);
     return saved;
   },
@@ -157,7 +155,7 @@ export const useQCStore = create<QCState>((set, get) => ({
       body:    JSON.stringify(updatedReport),
     });
     if (!res.ok) throw new Error(await res.text() || 'Failed to update CPI report');
-    // FIX: Backend returns 204 NoContent on update, so re-fetch the record
+    // Backend returns 204 NoContent on update, so re-fetch the record
     // to ensure backend-recomputed fields (styleNo, customer, etc.) are current
     const detailRes = await fetch(`${API_BASE}/reports`, { headers: getAuthHeaders() });
     if (detailRes.ok) {

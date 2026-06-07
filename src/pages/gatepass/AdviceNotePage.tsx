@@ -42,7 +42,12 @@ export default function AdviceNotePage() {
     addAdviceNote, updateAdviceNote, deleteAdviceNote,
   } = useAdviceNoteStore();
 
+  // Cascading Selection States
+  const [selStyle, setSelStyle]                   = useState('');
+  const [selCustomer, setSelCustomer]             = useState('');
+  const [selComponentFilter, setSelComponentFilter] = useState('');
   const [selectedStoreInId, setSelectedStoreInId] = useState('');
+
   const [selectedCutNo, setSelectedCutNo]         = useState('');
   const [selectedComponent, setSelectedComponent] = useState('');
   const [deliveryDate, setDeliveryDate]           = useState(new Date().toISOString().split('T')[0]);
@@ -79,11 +84,6 @@ export default function AdviceNotePage() {
     [eligibleDispatchItems, selectedStoreInId]
   );
 
-  const availableCuts = useMemo(
-    () => selectedItem ? selectedItem.cuts.filter(c => !addedCutNos.includes(c.cutNo)) : [],
-    [selectedItem, addedCutNos]
-  );
-
   const currentAdNo = editingId
     ? adviceNotes.find(n => n.id === editingId)?.adNo || ''
     : generateAdNo(adviceNotes);
@@ -93,22 +93,133 @@ export default function AdviceNotePage() {
   const totalFd   = bundleRows.reduce((s, r) => s + r.fd, 0);
   const totalGood = bundleRows.reduce((s, r) => s + r.goodQty, 0);
 
-  // ── Cut subtotals (live, recalculates as user edits P/D & F/D) ───────────
   const cutSubtotals = useMemo(() => getCutSubtotals(bundleRows), [bundleRows]);
 
+  // ── Smart Tracking of Already Dispatched Bundles ────────────────────────────
+  const usedBundles = useMemo(() => {
+    const set = new Set<string>();
+    adviceNotes.forEach(n => {
+      if (n.id === editingId) return; 
+      const rows = Object.values(n.rows || {});
+      rows.forEach(r => {
+        set.add(`${n.storeInRecordId}|||${r.cutForm}|||${r.bundleNo}`);
+      });
+    });
+    return set;
+  }, [adviceNotes, editingId]);
+
+  // Only shows styles that have at least one un-dispatched bundle
   const unusedStyles = useMemo(() => {
     return eligibleDispatchItems.filter(item => {
       if (editingId && item.storeInRecordId === selectedStoreInId) return true;
-      return !adviceNotes.some(note => note.storeInRecordId === item.storeInRecordId);
+      return item.cuts.some(c => 
+        c.bundles.some(b => !usedBundles.has(`${item.storeInRecordId}|||${c.cutNo}|||${b.bundleNo}`))
+      );
     });
-  }, [eligibleDispatchItems, adviceNotes, editingId, selectedStoreInId]);
+  }, [eligibleDispatchItems, usedBundles, editingId, selectedStoreInId]);
 
+  // ── Cascading Dropdown Logic ────────────────────────────────────────────────
+  const styleOptions = useMemo(() => {
+    const styles = new Set(unusedStyles.map(u => u.styleNo));
+    return Array.from(styles).sort();
+  }, [unusedStyles]);
+
+  const customerOptions = useMemo(() => {
+    if (!selStyle) return [];
+    const customers = new Set(unusedStyles.filter(u => u.styleNo === selStyle).map(u => u.customerName));
+    return Array.from(customers).sort();
+  }, [unusedStyles, selStyle]);
+
+  const componentOptions = useMemo(() => {
+    if (!selStyle || !selCustomer) return [];
+    const components = new Set(unusedStyles.filter(u => u.styleNo === selStyle && u.customerName === selCustomer).map(u => u.components));
+    return Array.from(components).sort();
+  }, [unusedStyles, selStyle, selCustomer]);
+
+  const storeInOptions = useMemo(() => {
+    if (!selStyle || !selCustomer || !selComponentFilter) return [];
+    return unusedStyles.filter(u => u.styleNo === selStyle && u.customerName === selCustomer && u.components === selComponentFilter);
+  }, [unusedStyles, selStyle, selCustomer, selComponentFilter]);
+
+  // Auto-select customer if only one exists
+  useEffect(() => {
+    if (selStyle && !selCustomer && customerOptions.length === 1 && !editingId) {
+      setSelCustomer(customerOptions[0]);
+    }
+  }, [selStyle, selCustomer, customerOptions, editingId]);
+
+  // Auto-select component if only one exists
+  useEffect(() => {
+    if (selStyle && selCustomer && !selComponentFilter && componentOptions.length === 1 && !editingId) {
+      setSelComponentFilter(componentOptions[0]);
+    }
+  }, [selStyle, selCustomer, selComponentFilter, componentOptions, editingId]);
+
+  // Auto-select batch/schedule if only one exists
+  useEffect(() => {
+    if (selStyle && selCustomer && selComponentFilter && !selectedStoreInId && storeInOptions.length === 1 && !editingId) {
+      setSelectedStoreInId(storeInOptions[0].storeInRecordId);
+    }
+  }, [selStyle, selCustomer, selComponentFilter, selectedStoreInId, storeInOptions, editingId]);
+
+  const handleStyleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelStyle(e.target.value);
+    setSelCustomer('');
+    setSelComponentFilter('');
+    setSelectedStoreInId('');
+    setSelectedCutNo('');
+    setSelectedComponent('');
+    if (!editingId) { setBundleRows([]); setAddedCutNos([]); }
+    if (errors.storeInRecordId) setErrors(p => ({ ...p, storeInRecordId: '' }));
+  };
+
+  const handleCustomerChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelCustomer(e.target.value);
+    setSelComponentFilter('');
+    setSelectedStoreInId('');
+    setSelectedCutNo('');
+    setSelectedComponent('');
+    if (!editingId) { setBundleRows([]); setAddedCutNos([]); }
+    if (errors.storeInRecordId) setErrors(p => ({ ...p, storeInRecordId: '' }));
+  };
+
+  const handleComponentFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelComponentFilter(e.target.value);
+    setSelectedStoreInId('');
+    setSelectedCutNo('');
+    setSelectedComponent('');
+    if (!editingId) { setBundleRows([]); setAddedCutNos([]); }
+    if (errors.storeInRecordId) setErrors(p => ({ ...p, storeInRecordId: '' }));
+  };
+
+  const handleStoreInChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedStoreInId(e.target.value);
+    setSelectedCutNo('');
+    setSelectedComponent('');
+    if (!editingId) { setBundleRows([]); setAddedCutNos([]); }
+    if (errors.storeInRecordId) setErrors(p => ({ ...p, storeInRecordId: '' }));
+  };
+
+  // Only shows cuts that have unused bundles
+  const availableCuts = useMemo(() => {
+    if (!selectedItem) return [];
+    return selectedItem.cuts.filter(c => {
+      if (addedCutNos.includes(c.cutNo)) return false;
+      return c.bundles.some(b => !usedBundles.has(`${selectedItem.storeInRecordId}|||${c.cutNo}|||${b.bundleNo}`));
+    });
+  }, [selectedItem, addedCutNos, usedBundles]);
+
+  // ── Actions ────────────────────────────────────────────────────────────────
   const handleAddCut = () => {
     if (!selectedCutNo) { setErrors(p => ({ ...p, cutNo: 'Select a cut' })); return; }
     if (!selectedComponent) { setErrors(p => ({ ...p, component: 'Select a component' })); return; }
     const cut = selectedItem?.cuts.find(c => c.cutNo === selectedCutNo);
     if (!cut) return;
-    const newRows: AdviceNoteRow[] = cut.bundles.map(b => ({
+
+    // Isolate ONLY the bundles that have not been dispatched yet
+    const unusedBundles = cut.bundles.filter(b => !usedBundles.has(`${selectedItem!.storeInRecordId}|||${cut.cutNo}|||${b.bundleNo}`));
+
+    const newRows: AdviceNoteRow[] = unusedBundles.map(b => ({
       productionRecordId: selectedItem?.productionRecordId || '',
       colour:             selectedItem?.bodyColour || '',
       bundleNo:           b.bundleNo,
@@ -120,6 +231,7 @@ export default function AdviceNotePage() {
       fd:                 0,
       goodQty:            b.bundleQty,
     }));
+
     setBundleRows(prev => [...prev, ...newRows]);
     setAddedCutNos(prev => [...prev, selectedCutNo]);
     setSelectedCutNo(''); setSelectedComponent('');
@@ -151,7 +263,8 @@ export default function AdviceNotePage() {
   };
 
   const resetForm = () => {
-    setSelectedStoreInId(''); setSelectedCutNo(''); setSelectedComponent('');
+    setSelStyle(''); setSelCustomer(''); setSelComponentFilter(''); setSelectedStoreInId(''); 
+    setSelectedCutNo(''); setSelectedComponent('');
     setDeliveryDate(new Date().toISOString().split('T')[0]);
     setAttn(''); setAddress(''); setRemarks('');
     setReceivedByName(''); setPrepByName(''); setAuthByName('');
@@ -161,7 +274,7 @@ export default function AdviceNotePage() {
 
   const validateForm = () => {
     const e: Record<string, string> = {};
-    if (!selectedStoreInId) e.storeInRecordId = 'Select a style';
+    if (!selectedStoreInId) e.storeInRecordId = 'Select a batch/schedule';
     if (!deliveryDate)      e.deliveryDate    = 'Date is required';
     if (!attn.trim())       e.attn            = 'Attn is required';
     if (!address.trim())    e.address         = 'Address is required';
@@ -208,6 +321,13 @@ export default function AdviceNotePage() {
   };
 
   const handleEdit = (note: AdviceNoteRecord) => {
+    const storeInItem = eligibleDispatchItems.find(i => i.storeInRecordId === note.storeInRecordId);
+    if (storeInItem) {
+      setSelStyle(storeInItem.styleNo);
+      setSelCustomer(storeInItem.customerName);
+      setSelComponentFilter(storeInItem.components);
+    }
+
     setSelectedStoreInId(note.storeInRecordId);
     setDeliveryDate(note.deliveryDate);
     setAttn(note.attn); setAddress(note.address);
@@ -259,16 +379,12 @@ export default function AdviceNotePage() {
     };
   }
 
-  // ── Group bundleRows by cut for rendering ─────────────────────────────────
-  // Preserves order cuts were added, groups bundles under each cut
   const rowsByCut = useMemo(() => {
     const groups: { cutNo: string; rows: { row: AdviceNoteRow; globalIdx: number }[] }[] = [];
     const seenCuts = new Set<string>();
     
-    // Create array with original indices
     const withIndices = bundleRows.map((row, globalIdx) => ({ row, globalIdx }));
     
-    // Sort natively by cut, then bundle
     withIndices.sort((a, b) => {
       if (a.row.cutForm !== b.row.cutForm) return a.row.cutForm.localeCompare(b.row.cutForm, undefined, { numeric: true });
       return a.row.bundleNo.localeCompare(b.row.bundleNo, undefined, { numeric: true });
@@ -333,42 +449,90 @@ export default function AdviceNotePage() {
             </div>
           </div>
 
-          {/* Style + Address fields */}
+          {/* Cascading Selection + Address fields */}
           <div className="border-b border-slate-300 bg-blue-50/30 p-5 space-y-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Style Dropdown */}
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">
                   Style <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={selectedStoreInId}
-                  onChange={e => {
-                    setSelectedStoreInId(e.target.value);
-                    setSelectedCutNo(''); setSelectedComponent('');
-                    if (!editingId) { setBundleRows([]); setAddedCutNos([]); }
-                  }}
+                  value={selStyle}
+                  onChange={handleStyleChange}
                   disabled={!!editingId}
-                  className={'w-full rounded border bg-white px-3 py-2 text-sm outline-none ' + (errors.storeInRecordId ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500') + (editingId ? ' cursor-not-allowed bg-slate-100' : '')}>
+                  className={'w-full rounded border bg-white px-3 py-2 text-sm outline-none ' + (errors.storeInRecordId && !selStyle ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500') + (editingId ? ' cursor-not-allowed bg-slate-100' : '')}
+                >
                   <option value="">Select style…</option>
-                  {unusedStyles.map(item => (
+                  {styleOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
+              {/* Customer Dropdown */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                  Customer <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selCustomer}
+                  onChange={handleCustomerChange}
+                  disabled={!!editingId || !selStyle}
+                  className={'w-full rounded border bg-white px-3 py-2 text-sm outline-none ' + (errors.storeInRecordId && !selCustomer ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500') + (editingId || !selStyle ? ' cursor-not-allowed bg-slate-100' : '')}
+                >
+                  <option value="">Select customer…</option>
+                  {customerOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              {/* Component Dropdown */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                  Component <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selComponentFilter}
+                  onChange={handleComponentFilterChange}
+                  disabled={!!editingId || !selCustomer}
+                  className={'w-full rounded border bg-white px-3 py-2 text-sm outline-none ' + (errors.storeInRecordId && !selComponentFilter ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500') + (editingId || !selCustomer ? ' cursor-not-allowed bg-slate-100' : '')}
+                >
+                  <option value="">Select component…</option>
+                  {componentOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              {/* Schedule / Batch Dropdown */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                  Schedule / Batch <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedStoreInId}
+                  onChange={handleStoreInChange}
+                  disabled={!!editingId || !selComponentFilter}
+                  className={'w-full rounded border bg-white px-3 py-2 text-sm outline-none ' + (errors.storeInRecordId ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500') + (editingId || !selComponentFilter ? ' cursor-not-allowed bg-slate-100' : '')}
+                >
+                  <option value="">Select schedule/batch…</option>
+                  {storeInOptions.map(item => (
                     <option key={item.storeInRecordId} value={item.storeInRecordId}>
-                      {item.styleNo} | {item.customerName}{item.scheduleNo ? ' | Sch: ' + item.scheduleNo : ''} | Remaining: {item.remainingDispatchQty}
+                      {item.scheduleNo ? `Sch: ${item.scheduleNo}` : 'No Schedule'} | Rem: {item.remainingDispatchQty}
                     </option>
                   ))}
                 </select>
-                {errors.storeInRecordId && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.storeInRecordId}</p>}
+                {errors.storeInRecordId && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />Select a batch</p>}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">Attn <span className="text-red-500">*</span></label>
-                  <input type="text" value={attn} onChange={e => setAttn(e.target.value)} placeholder="Attention to…"
-                    className={'w-full rounded border px-3 py-2 text-sm outline-none ' + (errors.attn ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500')} />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">Address <span className="text-red-500">*</span></label>
-                  <input type="text" value={address} onChange={e => setAddress(e.target.value)} placeholder="Delivery address…"
-                    className={'w-full rounded border px-3 py-2 text-sm outline-none ' + (errors.address ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500')} />
-                </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">Attn <span className="text-red-500">*</span></label>
+                <input type="text" value={attn} onChange={e => setAttn(e.target.value)} placeholder="Attention to…"
+                  className={'w-full rounded border px-3 py-2 text-sm outline-none ' + (errors.attn ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500')} />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-600">Address <span className="text-red-500">*</span></label>
+                <input type="text" value={address} onChange={e => setAddress(e.target.value)} placeholder="Delivery address…"
+                  className={'w-full rounded border px-3 py-2 text-sm outline-none ' + (errors.address ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500')} />
               </div>
             </div>
 
@@ -405,11 +569,15 @@ export default function AdviceNotePage() {
                     }}
                     className={'w-full rounded border bg-white px-3 py-2 text-sm outline-none ' + (errors.cutNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-orange-500')}>
                     <option value="">Select cut…</option>
-                    {availableCuts.map(c => (
-                      <option key={c.cutNo} value={c.cutNo}>
-                        {c.cutNo}{c.part ? ' — ' + c.part : ''} — Qty: {c.cutQty} — {c.bundles.length} bundle(s)
-                      </option>
-                    ))}
+                    {availableCuts.map(c => {
+                      const unusedB = c.bundles.filter(b => !usedBundles.has(`${selectedItem.storeInRecordId}|||${c.cutNo}|||${b.bundleNo}`));
+                      const qty = unusedB.reduce((s, b) => s + b.bundleQty, 0);
+                      return (
+                        <option key={c.cutNo} value={c.cutNo}>
+                          {c.cutNo}{c.part ? ' — ' + c.part : ''} — Qty: {qty} — {unusedB.length} bundle(s)
+                        </option>
+                      );
+                    })}
                   </select>
                   {errors.cutNo && <p className="text-[11px] text-red-600">{errors.cutNo}</p>}
                 </div>
@@ -800,9 +968,9 @@ function printAdviceNote(note: AdviceNoteRecord) {
   const html = `<!DOCTYPE html><html><head>
     <title>${note.adNo}</title>
     <style>
-      @page { size: A4 portrait; margin: 10mm; }
+      @page { size: A4 portrait; margin: 0; }
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; font-size: 12px; color: #000; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #000; padding: 10mm; }
       .hdr { display: flex; justify-content: space-between; margin-bottom: 6px; }
       .hdr-left h1 { font-size: 16px; font-weight: 900; }
       .hdr-left p, .hdr-right p { margin: 2px 0; font-size: 11px; }
@@ -826,11 +994,15 @@ function printAdviceNote(note: AdviceNoteRecord) {
       .footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 24px; }
       .footer .sig .line { border-top: 1px solid #000; padding-top: 4px; margin: 0 15px; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-    </style></head><body>
+    </style>
+    </head><body>
     <div class="hdr">
-      <div class="hdr-left"><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
-      <p>SCREEN PRINTERS FOR TEXTILES</p>
-      <p>E-mail: colourplus@sitnet.lk</p></div>
+      <div class="hdr-left" style="display: flex; align-items: center; gap: 10px;">
+        <img src="/logo.svg" alt="Logo" style="height: 40px; width: auto;" />
+        <div><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
+        <p>SCREEN PRINTERS FOR TEXTILES</p>
+        <p>E-mail: colourplus@sitnet.lk</p></div>
+      </div>
       <div class="hdr-right"><p>564, Athurugiriya Road, Kottawa.</p><p>Tel: 011 278 1525</p></div>
     </div>
     <div class="ad-block">
