@@ -6,6 +6,22 @@ import { useAdviceNoteStore, AdviceNoteRecord, AdviceNoteRow } from '../../store
 
 const RECENT_LIMIT = 10;
 
+function getAdviceNoteRowsInSavedOrder(rows?: Record<string, AdviceNoteRow>): AdviceNoteRow[] {
+  if (!rows) return [];
+
+  return Object.entries(rows)
+    .map(([key, row], fallbackIndex) => {
+      const match = key.match(/^row_(\d+)$/);
+      return {
+        row,
+        order: match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER + fallbackIndex,
+      };
+    })
+    .sort((a, b) => a.order - b.order)
+    .map(item => item.row);
+}
+
+
 export default function AdviceNoteSearchPage() {
   const { adviceNotes, fetchAdviceNotes } = useAdviceNoteStore();
   const [filterStyle, setFilterStyle] = useState('');
@@ -65,10 +81,7 @@ export default function AdviceNoteSearchPage() {
   const clearFilters = () => { setFilterStyle(''); setFilterCustomer(''); setFilterSchedule(''); setFilterDateFrom(''); setFilterDateTo(''); setExpandedId(null); };
   const activeCount = [filterStyle, filterCustomer, filterSchedule, filterDateFrom, filterDateTo].filter(Boolean).length;
 
-  const getRows = (note: AdviceNoteRecord): AdviceNoteRow[] => {
-    if (!note.rows) return [];
-    return Object.values(note.rows);
-  };
+  const getRows = (note: AdviceNoteRecord): AdviceNoteRow[] => getAdviceNoteRowsInSavedOrder(note.rows);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-6xl space-y-6 pb-12">
@@ -187,13 +200,9 @@ function InfoField({ label, value }: { label: string; value: string }) {
 // NEW: INTEGRATED PRINT ADVICE NOTE UTILITY
 // ==========================================
 function printAdviceNote(note: AdviceNoteRecord) {
-  const rows = Object.values(note.rows || {});
-
-  // Safe alphanumeric sorting by Cut Form, then Bundle Number sequence
-  rows.sort((a, b) => {
-    if (a.cutForm !== b.cutForm) return a.cutForm.localeCompare(b.cutForm, undefined, { numeric: true });
-    return a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true });
-  });
+  // Preserve the exact saved row order in the print report.
+  // Do not sort by Bundle No, because manual orders like b-10, b-3, b-5 must stay unchanged.
+  const rows = getAdviceNoteRowsInSavedOrder(note.rows);
 
   const cutGroups = new Map<string, typeof rows>();
   rows.forEach(r => {

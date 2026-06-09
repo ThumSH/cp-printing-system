@@ -1,9 +1,3 @@
-// src/store/inventoryStore.ts
-// FIXES:
-//   - addStoreInRecord:    now re-fetches eligibleStoreInItems after success (stale data fix)
-//   - deleteStoreInRecord: now re-fetches eligibleStoreInItems after success
-//   - deleteProductionRecord: now re-fetches eligibleProductionItems after success
-//   - batchAddProductionRecords: now re-fetches eligibleProductionItems after success
 
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
@@ -31,6 +25,7 @@ export interface EligibleStoreInItem {
 export interface BundleResponse {
   id: string;
   bundleNo: string;
+  bundleOrder?: number;
   bundleQty: number;
   size: string;
   numberRange: string;
@@ -86,6 +81,7 @@ export interface BulkBalance {
 
 export interface CreateBundleInput {
   bundleNo: string;
+  bundleOrder?: number;
   bundleQty: number;
   size: string;
   numberRange: string;

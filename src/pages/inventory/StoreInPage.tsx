@@ -18,6 +18,15 @@ interface BundleFormRow {
   numberRange: string;
 }
 
+interface BundlePayload {
+  id?: string;
+  bundleNo: string;
+  bundleQty: number;
+  size: string;
+  numberRange: string;
+  bundleOrder?: number;
+}
+
 interface SavedCut {
   tempId: string;
   cutNo: string;
@@ -25,7 +34,7 @@ interface SavedCut {
   submissionId: string;
   bodyColour: string;
   cutQty: number;
-  bundles: { bundleNo: string; bundleQty: number; size: string; numberRange: string }[];
+  bundles: BundlePayload[];
 }
 
 interface StagedEntry {
@@ -42,7 +51,7 @@ interface StagedEntry {
     cutNo: string;
     cutQty: number;
     submissionId: string;
-    bundles: { bundleNo: string; bundleQty: number; size: string; numberRange: string }[];
+    bundles: BundlePayload[];
   }[];
 }
 
@@ -54,9 +63,32 @@ interface StyleScheduleOption {
 
 const makeBundleRow = (idx: number): BundleFormRow => ({
   tempId: crypto.randomUUID(),
-  bundleNo: 'B' + String(idx).padStart(3, '0'),
+  bundleNo: 'b-' + idx,
   bundleQty: '', size: '', numberRange: '',
 });
+
+const normalizeBundleNo = (value: string) => {
+  const raw = value.trim();
+  const match = raw.match(/^b\s*-?\s*(\d+)$/i);
+  return match ? 'b-' + String(parseInt(match[1], 10)) : raw;
+};
+
+type BundleWithOrder<T extends { bundleNo: string }> = T & { bundleOrder?: number };
+
+const orderBundlesForDisplay = <T extends { bundleNo: string }>(bundles: T[]): BundleWithOrder<T>[] => {
+  const bundlesWithOrder = bundles as BundleWithOrder<T>[];
+  const hasSavedOrder = bundlesWithOrder.some(bundle => typeof bundle.bundleOrder === 'number');
+  if (!hasSavedOrder) return bundlesWithOrder;
+
+  return bundlesWithOrder
+    .map((bundle, originalIndex) => ({ bundle, originalIndex }))
+    .sort((a, b) => {
+      const aOrder = a.bundle.bundleOrder ?? a.originalIndex + 1;
+      const bOrder = b.bundle.bundleOrder ?? b.originalIndex + 1;
+      return aOrder === bOrder ? a.originalIndex - b.originalIndex : aOrder - bOrder;
+    })
+    .map(({ bundle }) => bundle);
+};
 
 // ── MiniStat ──────────────────────────────────────────────────────────────────
 function MiniStat({ label, value, color }: {
@@ -301,7 +333,7 @@ export default function StoreInPage() {
         ? 'Bundle total (' + totalBundleQty + ') exceeds cut qty (' + cq + ')'
         : 'Bundle total (' + totalBundleQty + ') must equal cut qty (' + cq + ') — unbundled: ' + (cq - totalBundleQty);
     }
-    const bundleNos = activeCutBundles.map(b => b.bundleNo.trim().toLowerCase());
+    const bundleNos = activeCutBundles.map(b => normalizeBundleNo(b.bundleNo).toLowerCase());
     if (bundleNos.length !== new Set(bundleNos).size) errs.bundles = 'Duplicate bundle numbers';
     activeCutBundles.forEach((b, i) => {
       if (!b.bundleNo.trim())               errs['b_' + i + '_no']    = 'Required';
@@ -325,11 +357,12 @@ export default function StoreInPage() {
       submissionId: activeSubmissionId,
       bodyColour:   comp?.bodyColour ?? '',
       cutQty:       parseInt(activeCutQty) || 0,
-      bundles: activeCutBundles.map(b => ({
-        bundleNo:    b.bundleNo.trim(),
+      bundles: activeCutBundles.map((b, index) => ({
+        bundleNo:    normalizeBundleNo(b.bundleNo),
         bundleQty:   parseInt(b.bundleQty) || 0,
         size:        b.size.trim(),
         numberRange: b.numberRange.trim(),
+        bundleOrder: index + 1,
       })),
     };
     
@@ -368,10 +401,7 @@ export default function StoreInPage() {
     setActiveCutNo(cut.cutNo);
     setActiveCutQty(cut.cutQty.toString());
     
-    // Sort bundles naturally before opening in editor
-    const sortedBundles = cut.bundles.slice().sort((a, b) => a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true }));
-    
-    setActiveCutBundles(sortedBundles.map(b => ({
+    setActiveCutBundles(orderBundlesForDisplay(cut.bundles).map(b => ({
       tempId: crypto.randomUUID(),
       bundleNo: b.bundleNo, bundleQty: b.bundleQty.toString(),
       size: b.size, numberRange: b.numberRange,
@@ -470,7 +500,7 @@ export default function StoreInPage() {
         cutNo:        c.cutNo,
         cutQty:       c.cutQty,
         submissionId: c.submissionId,
-        bundles:      c.bundles,
+        bundles:      orderBundlesForDisplay(c.bundles),
       })),
     };
 
@@ -539,7 +569,7 @@ export default function StoreInPage() {
         inQty:        inQtyNum,
         cuts: savedCuts.map(c => ({
           cutNo: c.cutNo, cutQty: c.cutQty,
-          submissionId: c.submissionId, bundles: c.bundles,
+          submissionId: c.submissionId, bundles: orderBundlesForDisplay(c.bundles),
         })),
       });
       resetForm();
@@ -573,9 +603,10 @@ export default function StoreInPage() {
       submissionId: (c as any).submissionId ?? '',
       bodyColour:   '',
       cutQty:       c.cutQty,
-      bundles:      c.bundles.map(b => ({
-        bundleNo: b.bundleNo, bundleQty: b.bundleQty,
+      bundles:      orderBundlesForDisplay(c.bundles).map((b, index) => ({
+        bundleNo: normalizeBundleNo(b.bundleNo), bundleQty: b.bundleQty,
         size: b.size, numberRange: b.numberRange,
+        bundleOrder: b.bundleOrder ?? index + 1,
       })),
     })));
     setEditingRecordId(record.id);
@@ -979,7 +1010,7 @@ export default function StoreInPage() {
                                     <div className="col-span-3">
                                       <input type="text" value={bundle.bundleNo}
                                         onChange={e => updateBundle(bundle.tempId, 'bundleNo', e.target.value)}
-                                        placeholder="B001"
+                                        placeholder="b-3"
                                         className={'w-full rounded border px-2 py-1.5 text-xs outline-none ' + (cutErrors['b_' + bi + '_no'] ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:ring-1 focus:ring-blue-400')} />
                                     </div>
                                     <div className="col-span-2">
@@ -1164,7 +1195,7 @@ export default function StoreInPage() {
                                   setActiveCutNo(cut.cutNo);
                                   setActiveCutQty(String(cut.cutQty));
                                   setCutQtyConfirmed(true);
-                                  setActiveCutBundles(cut.bundles.map((b, i) => ({
+                                  setActiveCutBundles(orderBundlesForDisplay(cut.bundles).map((b, i) => ({
                                     tempId: b.bundleNo + '_' + i,
                                     bundleNo: b.bundleNo,
                                     bundleQty: String(b.bundleQty),
@@ -1181,7 +1212,7 @@ export default function StoreInPage() {
                               <table className="w-full text-xs">
                                 <thead><tr className="text-slate-400"><th className="py-1 text-left">Bundle</th><th className="py-1 text-left">Qty</th><th className="py-1 text-left">Size</th><th className="py-1 text-left">Range</th></tr></thead>
                                 <tbody>
-                                  {cut.bundles.slice().sort((a, b) => a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true })).map((b, bi) => (
+                                  {orderBundlesForDisplay(cut.bundles).map((b, bi) => (
                                     <tr key={bi} className="text-slate-700">
                                       <td className="py-0.5 font-medium">{b.bundleNo}</td>
                                       <td className="py-0.5 font-bold">{b.bundleQty}</td>
@@ -1313,7 +1344,7 @@ export default function StoreInPage() {
                               <table className="w-full text-xs">
                                 <thead><tr className="text-slate-400"><th className="py-1 text-left">Bundle</th><th className="py-1 text-left">Qty</th><th className="py-1 text-left">Size</th><th className="py-1 text-left">Range</th></tr></thead>
                                 <tbody>
-                                  {cut.bundles.slice().sort((a, b) => a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true })).map(b => (
+                                  {orderBundlesForDisplay(cut.bundles).map(b => (
                                     <tr key={b.id} className="text-slate-700">
                                       <td className="py-0.5 font-medium">{b.bundleNo}</td>
                                       <td className="py-0.5 font-bold">{b.bundleQty}</td>

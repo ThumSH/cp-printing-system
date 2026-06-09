@@ -19,6 +19,23 @@ function generateAdNo(existingNotes: AdviceNoteRecord[]): string {
   return 'AD-' + String(maxNum + 1).padStart(4, '0');
 }
 
+
+// ── Preserve Advice Note row order exactly as saved ────────────────────────────
+function getAdviceNoteRowsInSavedOrder(rows?: Record<string, AdviceNoteRow>): AdviceNoteRow[] {
+  if (!rows) return [];
+
+  return Object.entries(rows)
+    .map(([key, row], fallbackIndex) => {
+      const match = key.match(/^row_(\d+)$/);
+      return {
+        row,
+        order: match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER + fallbackIndex,
+      };
+    })
+    .sort((a, b) => a.order - b.order)
+    .map(item => item.row);
+}
+
 // ── Per-cut subtotal helper ───────────────────────────────────────────────────
 function getCutSubtotals(rows: AdviceNoteRow[]) {
   const map = new Map<string, { pcs: number; pd: number; fd: number; good: number }>();
@@ -335,7 +352,7 @@ export default function AdviceNotePage() {
     setReceivedByName(note.receivedByName);
     setPrepByName(note.prepByName);
     setAuthByName(note.authByName);
-    const rows = Object.values(note.rows || {});
+    const rows = getAdviceNoteRowsInSavedOrder(note.rows);
     setBundleRows(rows);
     setAddedCutNos([...new Set(rows.map(r => r.cutForm))]);
     setEditingId(note.id);
@@ -383,12 +400,9 @@ export default function AdviceNotePage() {
     const groups: { cutNo: string; rows: { row: AdviceNoteRow; globalIdx: number }[] }[] = [];
     const seenCuts = new Set<string>();
     
+    // Do not sort here. Gatepass must follow the exact bundle row order
+    // received from Store-In / saved in the advice note.
     const withIndices = bundleRows.map((row, globalIdx) => ({ row, globalIdx }));
-    
-    withIndices.sort((a, b) => {
-      if (a.row.cutForm !== b.row.cutForm) return a.row.cutForm.localeCompare(b.row.cutForm, undefined, { numeric: true });
-      return a.row.bundleNo.localeCompare(b.row.bundleNo, undefined, { numeric: true });
-    });
 
     withIndices.forEach(({ row, globalIdx }) => {
       if (!seenCuts.has(row.cutForm)) {
@@ -791,11 +805,8 @@ export default function AdviceNotePage() {
             {notesPagination.paginated.map(note => {
               const isExp = expandedNoteId === note.id;
               
-              // Sort natively before displaying
-              const nRows = Object.values(note.rows || {}).sort((a, b) => {
-                if (a.cutForm !== b.cutForm) return a.cutForm.localeCompare(b.cutForm, undefined, { numeric: true });
-                return a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true });
-              });
+              // Preserve the saved row order. Do not auto-sort by bundle number.
+              const nRows = getAdviceNoteRowsInSavedOrder(note.rows);
 
               return (
                 <div key={note.id}>
@@ -889,13 +900,9 @@ export default function AdviceNotePage() {
 // PRINT FUNCTION — with per-cut subtotals
 // ==========================================
 function printAdviceNote(note: AdviceNoteRecord) {
-  const rows = Object.values(note.rows || {});
-
-  // Sort rows natively before printing
-  rows.sort((a, b) => {
-    if (a.cutForm !== b.cutForm) return a.cutForm.localeCompare(b.cutForm, undefined, { numeric: true });
-    return a.bundleNo.localeCompare(b.bundleNo, undefined, { numeric: true });
-  });
+  // Preserve the exact saved row order in the print report.
+  // Do not sort by Bundle No, because manual orders like b-10, b-3, b-5 must stay unchanged.
+  const rows = getAdviceNoteRowsInSavedOrder(note.rows);
 
   // Group rows by cut, preserving insertion order
   const cutGroups = new Map<string, typeof rows>();

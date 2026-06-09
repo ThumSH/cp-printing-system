@@ -293,7 +293,7 @@ export default function CPIPage() {
     setCpiQty(''); // Always clear CPI Qty so they enter the qty strictly for this new batch
   }, [existingReport, selComponent]);
 
-  // ── Flatten bundles for side-by-side rendering (with safe native sorting) ──
+  // ── Flatten bundles for side-by-side rendering (FIFO order natively) ──
   const flatBundles = useMemo(() => {
     const flat: any[] = [];
     
@@ -308,15 +308,6 @@ export default function CPIPage() {
           ...b
         });
       });
-    });
-
-    // Native alphanumeric sort without mutating original UI state indexing
-    flat.sort((a, b) => {
-      if (a.cutNo !== b.cutNo) return a.cutNo.localeCompare(b.cutNo, undefined, { numeric: true });
-      // Safely check bundleNo existence before localeCompare
-      const aBundle = a.bundleNo || '';
-      const bBundle = b.bundleNo || '';
-      return aBundle.localeCompare(bBundle, undefined, { numeric: true });
     });
 
     let currentCutNo = '';
@@ -398,17 +389,21 @@ export default function CPIPage() {
         sampleSize:   Math.ceil(cut.cutQty * 0.1),
         defectRows: globalDefects.map((d, i) => {
           const bundleForThisRow = flatBundles[i];
+          
+          // PACK THE DATA SO THE BACKEND DOES NOT DROP IT
+          const encodedRemarks = `${d.check || ''}|||${d.sampleSize || ''}|||${d.remarks || ''}`;
+
           return {
             defectCode:   DEFECTS[i].code,
             defectName:   DEFECTS[i].label,
-            check:        d.check,
+            check:        d.check, 
             beforeLength: parseFloat(bundleForThisRow?.beforeL_plus)  || 0,
             beforeWidth:  parseFloat(bundleForThisRow?.beforeW_plus)  || 0,
             afterLength:  parseFloat(bundleForThisRow?.afterL_plus)   || 0,
             afterWidth:   parseFloat(bundleForThisRow?.afterW_plus)   || 0,
             defectedQty:  parseFloat(d.defectedQty)   || 0,
             percentage:   d.percentage,
-            remarks:      d.remarks,
+            remarks:      encodedRemarks, 
           };
         }),
         totalDefectedQty: newTotalDefected,
@@ -543,14 +538,11 @@ export default function CPIPage() {
       + 'body { font-family: Arial, sans-serif; font-size: 11px; padding: 10mm; }'
       + 'table { border-collapse: collapse; width: 100%; }'
       + 'th { border: 1px solid #999; padding: 2px 4px; text-align: center; font-size: 10px; background: #e8e8e8; font-weight: bold; }'
-      + '@page { size: A4 landscape; margin: 0; }' // margin: 0 removes browser header/footer
+      + '@page { size: A4 landscape; margin: 0; }' 
       + '</style></head><body>'
-      + '<div style="display:flex; align-items:center; gap: 12px; margin-bottom:6px; border-bottom: 1px solid #ccc; padding-bottom: 6px;">'
-      + '<img src="/logo.svg" alt="Logo" style="height: 40px; width: auto;" />'
-      + '<div>'
-      + '<div style="font-weight:bold;font-size:14px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>'
-      + '<div style="font-size:12px;">Cut Panel Inspection Report (CP Chart No. 002)</div>'
-      + '</div>'
+      + '<div style="text-align:center;margin-bottom:6px;">'
+      + '<div style="font-weight:bold;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>'
+      + '<div style="font-size:11px;">Cut Panel Inspection Report (CP Chart No. 002)</div>'
       + '</div>'
       + '<table style="border:none;margin-bottom:6px;">'
       + '<tr>'

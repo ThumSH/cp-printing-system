@@ -251,7 +251,7 @@ export default function CPISearchPage() {
                         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4 p-3 rounded-lg bg-white border border-slate-200">
                           <InfoField label="Body Colour" value={report.bodyColour} />
                           <InfoField label="Print Colour" value={report.printColour} />
-                          <InfoField label="Auditor" value={report.cpiAuditor || report.checkedBy || ''} />
+                          <InfoField label="Auditor" value={report.cpiAuditor || report.checkedBy} />
                           <InfoField label="App/Rej" value={report.appRej} />
                         </div>
 
@@ -292,12 +292,13 @@ export default function CPISearchPage() {
                                 </thead>
                                 <tbody className="divide-y divide-red-100">
                                   {activeDefects.map((d: any, idx: number) => {
+                                    const actualRemark = d.remarks?.includes('|||') ? d.remarks.split('|||')[2] : (d.remarks || '—');
                                     return (
                                       <tr key={idx}>
                                         <td className="px-3 py-1.5 font-medium text-slate-700">{d.defectName}</td>
                                         <td className="px-3 py-1.5 text-right font-bold text-red-600">{d.defectedQty}</td>
                                         <td className="px-3 py-1.5 text-right text-red-600">{d.percentage}%</td>
-                                        <td className="px-3 py-1.5 text-slate-500">{d.remarks || '—'}</td>
+                                        <td className="px-3 py-1.5 text-slate-500">{actualRemark}</td>
                                       </tr>
                                     );
                                   })}
@@ -312,8 +313,7 @@ export default function CPISearchPage() {
                 </div>
               );
             })}
-          </div>
-        )}
+          </div>)}
       </div>
     </motion.div>
   );
@@ -337,273 +337,124 @@ function InfoField({ label, value }: { label: string; value: string }) {
 // PRINT CPI REPORT LOGIC
 // ==========================================
 function printCPIReport(report: CPIReport) {
-  type AnyRow = Record<string, any>;
-
-  const htmlEscape = (value: unknown) =>
-    String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-
-  const splitList = (value: unknown) =>
-    String(value ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-  const isBlank = (value: unknown) =>
-    value === undefined || value === null || String(value).trim() === '';
-
-  const firstValue = (...values: unknown[]) =>
-    values.find((value) => !isBlank(value));
-
-  const num = (value: unknown) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-
-  const displayNumber = (value: unknown, hideZero = true) => {
-    if (isBlank(value)) return '';
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return String(value);
-    if (hideZero && parsed === 0) return '';
-    return String(value);
-  };
-
-  const normalizeCheck = (value: unknown) => {
-    const raw = String(value ?? '').trim().toLowerCase();
-    if (!raw) return '';
-
-    if (
-      raw === '✓' ||
-      raw === '✔' ||
-      raw === '&#10003;' ||
-      raw === 'true' ||
-      raw === '1' ||
-      raw === 'yes' ||
-      raw === 'y' ||
-      raw === 'pass' ||
-      raw === 'passed' ||
-      raw === 'ok' ||
-      raw === 'tick'
-    ) {
-      return '✓';
-    }
-
-    if (
-      raw === '✗' ||
-      raw === '×' ||
-      raw === 'x' ||
-      raw === '&#10007;' ||
-      raw === 'false' ||
-      raw === '0' ||
-      raw === 'no' ||
-      raw === 'n' ||
-      raw === 'fail' ||
-      raw === 'failed' ||
-      raw === 'cross'
-    ) {
-      return '✗';
-    }
-
-    return String(value ?? '');
-  };
-
-  const getDefectRowValue = (row: AnyRow | undefined, field: string) => {
-    if (!row) return '';
-
-    const aliases: Record<string, string[]> = {
-      check: ['check', 'checked', 'checkMark', 'tick', 'status', 'result'],
-      sampleSize: ['sampleSize', 'sampleQty', 'sample_size', 'sample', 'inspectedQty'],
-      defectedQty: ['defectedQty', 'defectedQuantity', 'defectQty', 'rejectedQty', 'rejDamageQty'],
-      percentage: ['percentage', 'percent', 'defectPercentage'],
-      remarks: ['remarks', 'remark', 'comments', 'comment'],
-      beforeLength: ['beforeLength', 'beforeL_plus', 'beforeLPlus'],
-      beforeLengthMinus: ['beforeLengthMinus', 'beforeL_minus', 'beforeLMinus'],
-      beforeWidth: ['beforeWidth', 'beforeW_plus', 'beforeWPlus'],
-      beforeWidthMinus: ['beforeWidthMinus', 'beforeW_minus', 'beforeWMinus'],
-      afterLength: ['afterLength', 'afterL_plus', 'afterLPlus'],
-      afterLengthMinus: ['afterLengthMinus', 'afterL_minus', 'afterLMinus'],
-      afterWidth: ['afterWidth', 'afterW_plus', 'afterWPlus'],
-      afterWidthMinus: ['afterWidthMinus', 'afterW_minus', 'afterWMinus'],
-    };
-
-    const keys = aliases[field] || [field];
-    return firstValue(...keys.map((key) => row[key])) ?? '';
-  };
-
-  // Keep one defect row per defect code/index. CPIPage saves defectRows inside cutInspections.
-  // Some old reports may have empty rows in the first cut but useful values in another cut,
-  // so this merges the first non-empty value for each defect row.
-  const defectRows: AnyRow[] = DEFECTS.map((_, defectIndex) => {
-    const merged: AnyRow = {};
-
-    (report.cutInspections || []).forEach((cut: any) => {
-      const rows = cut?.defectRows || [];
-      const row =
-        rows.find((r: any) => r?.defectCode === DEFECTS[defectIndex].code) ||
-        rows[defectIndex];
-
-      if (!row) return;
-
-      Object.keys(row).forEach((key) => {
-        if (isBlank(merged[key]) && !isBlank(row[key])) {
-          merged[key] = row[key];
-        }
-      });
-    });
-
-    return merged;
-  });
-
+  
   const flatBundles: any[] = [];
+  (report.cutInspections || []).forEach(c => {
+      const bNos = (c.bundleNos || '').split(',').map(s=>s.trim()).filter(Boolean);
+      const sizes = (c.sizes || '').split(',').map(s=>s.trim()).filter(Boolean);
+      const ranges = (c.numberRanges || '').split(',').map(s=>s.trim()).filter(Boolean);
 
-  (report.cutInspections || []).forEach((cut: any) => {
-    const bundleNos = splitList(cut.bundleNos);
-    const sizes = splitList(cut.sizes);
-    const ranges = splitList(cut.numberRanges);
-
-    bundleNos.forEach((bundleNo, bundleIndex) => {
-      flatBundles.push({
-        cutNo: cut.cutNo || '',
-        cutQty: num(cut.cutQty),
-        component: cut.part || cut.component || '',
-        bundleNo,
-        size: sizes[bundleIndex] || sizes[0] || '',
-        numberRange: ranges[bundleIndex] || ranges[0] || '',
+      bNos.forEach((bNo, bIdx) => {
+          flatBundles.push({
+              cutNo: c.cutNo,
+              cutQty: c.cutQty,
+              component: c.part || '',
+              bundleNo: bNo,
+              size: sizes[bIdx] || sizes[0] || '',
+              numberRange: ranges[bIdx] || ranges[0] || '',
+          });
       });
-    });
-  });
-
-  flatBundles.sort((a, b) => {
-    if (a.cutNo !== b.cutNo) {
-      return String(a.cutNo).localeCompare(String(b.cutNo), undefined, { numeric: true });
-    }
-
-    return String(a.bundleNo || '').localeCompare(String(b.bundleNo || ''), undefined, { numeric: true });
   });
 
   let currentCutNo = '';
-  flatBundles.forEach((bundle, index) => {
-    bundle.isFirstOfCut = bundle.cutNo !== currentCutNo;
-    currentCutNo = bundle.cutNo;
-
-    const defectRow = defectRows[index];
-    bundle.beforeL_plus = displayNumber(getDefectRowValue(defectRow, 'beforeLength'));
-    bundle.beforeL_minus = displayNumber(getDefectRowValue(defectRow, 'beforeLengthMinus'));
-    bundle.beforeW_plus = displayNumber(getDefectRowValue(defectRow, 'beforeWidth'));
-    bundle.beforeW_minus = displayNumber(getDefectRowValue(defectRow, 'beforeWidthMinus'));
-    bundle.afterL_plus = displayNumber(getDefectRowValue(defectRow, 'afterLength'));
-    bundle.afterL_minus = displayNumber(getDefectRowValue(defectRow, 'afterLengthMinus'));
-    bundle.afterW_plus = displayNumber(getDefectRowValue(defectRow, 'afterWidth'));
-    bundle.afterW_minus = displayNumber(getDefectRowValue(defectRow, 'afterWidthMinus'));
+  flatBundles.forEach(b => {
+    b.isFirstOfCut = b.cutNo !== currentCutNo;
+    currentCutNo = b.cutNo;
   });
 
-  const td = (val: unknown, extra = '') =>
-    `<td style="border:1px solid #bbb;padding:2px 4px;text-align:center;font-size:10px;${extra}">${htmlEscape(val)}</td>`;
+  flatBundles.forEach((b, i) => {
+      const dr = report.cutInspections?.[0]?.defectRows?.[i];
+      if (dr) {
+          b.beforeL_plus = dr.beforeLength || '';
+          b.beforeL_minus = '';
+          b.beforeW_plus = dr.beforeWidth || '';
+          b.beforeW_minus = '';
+          b.afterL_plus = dr.afterLength || '';
+          b.afterL_minus = '';
+          b.afterW_plus = dr.afterWidth || '';
+          b.afterW_minus = '';
+      }
+  });
 
-  const tdL = (val: unknown, extra = '') =>
-    `<td style="border:1px solid #bbb;padding:2px 4px;text-align:left;font-size:10px;${extra}">${htmlEscape(val)}</td>`;
+  const td  = (val: string | number, extra = '') =>
+    `<td style="border:1px solid #bbb;padding:2px 4px;text-align:center;font-size:10px;${extra}">${val ?? ''}</td>`;
+  const tdL = (val: string | number) =>
+    `<td style="border:1px solid #bbb;padding:2px 4px;text-align:left;font-size:10px;">${val ?? ''}</td>`;
 
   let rows = '';
   const numRows = Math.max(14, flatBundles.length);
-  let totalSampleSize = 0;
   let totalDefectedQty = 0;
-  const totalQtyCombined = (report.cutInspections || []).reduce((sum: number, cut: any) => sum + num(cut.cutQty), 0);
+  let totalSampleSize = 0;
+  const totalQtyCombined = (report.cutInspections || []).reduce((s, c) => s + (c.cutQty || 0), 0);
 
   for (let i = 0; i < numRows; i++) {
-    const defectInfo = i < 14 ? DEFECTS[i] : null;
-    const defectRow = i < 14 ? defectRows[i] : undefined;
+    const defInfo = i < 14 ? DEFECTS[i] : null;
+    const dr = report.cutInspections?.[0]?.defectRows?.[i]; 
     const bundle = i < flatBundles.length ? flatBundles[i] : null;
 
-    const checkVal = normalizeCheck(getDefectRowValue(defectRow, 'check'));
-    const sampleRaw = getDefectRowValue(defectRow, 'sampleSize');
-    const defectedRaw = getDefectRowValue(defectRow, 'defectedQty');
-    const percentageRaw = getDefectRowValue(defectRow, 'percentage');
-    const remarksRaw = getDefectRowValue(defectRow, 'remarks');
+    let checkVal = dr?.check || '';
+    let sampleVal = dr?.sampleSize || '';
+    let remarkVal = dr?.remarks || '';
 
-    const rowHasSavedData =
-      checkVal !== '' ||
-      !isBlank(sampleRaw) ||
-      num(defectedRaw) > 0 ||
-      !isBlank(remarksRaw) ||
-      (!isBlank(percentageRaw) && String(percentageRaw).trim() !== '0');
-
-    if (rowHasSavedData) {
-      totalSampleSize += num(sampleRaw);
-      totalDefectedQty += num(defectedRaw);
+    // Unpack data hidden inside remarks
+    if (remarkVal.includes('|||')) {
+       const parts = remarkVal.split('|||');
+       checkVal = parts[0] || checkVal;
+       sampleVal = parts[1] || sampleVal;
+       remarkVal = parts[2] || '';
     }
 
-    const checkMark = checkVal === '✓' ? '&#10003;' : checkVal === '✗' ? '&#10007;' : '';
-    const checkColor =
-      checkVal === '✓'
-        ? 'color:green;font-weight:bold;'
-        : checkVal === '✗'
-          ? 'color:red;font-weight:bold;'
-          : '';
+    if (sampleVal && parseFloat(sampleVal as any) > 0) {
+      totalSampleSize += parseFloat(sampleVal as any) || 0;
+    }
+    if (dr) {
+      totalDefectedQty += parseFloat(dr.defectedQty as any) || 0;
+    }
+
+    const checkMark  = checkVal === '✓' ? '&#10003;' : checkVal === '✗' ? '&#10007;' : '';
+    const checkColor = checkVal === '✓' ? 'color:green;font-weight:bold;' : checkVal === '✗' ? 'color:red;font-weight:bold;' : '';
 
     rows += '<tr>'
-      + td(defectInfo?.code ?? '', 'color:#666;font-family:monospace;')
-      + tdL(defectInfo?.label ?? '')
+      + td(defInfo?.code ?? '', 'color:#666;font-family:monospace;')
+      + tdL(defInfo?.label ?? '')
       + td(checkMark, checkColor)
       + td(bundle?.isFirstOfCut ? bundle.cutNo : '')
       + td(i === 0 && bundle ? totalQtyCombined : '', 'font-weight:bold;')
       + td(bundle?.bundleNo ?? '', 'font-size:9px;')
       + td(bundle?.isFirstOfCut ? bundle.component : '')
       + td(bundle?.size ?? '')
-      + td(bundle?.beforeL_plus ?? '')
-      + td(bundle?.beforeL_minus ?? '')
-      + td(bundle?.beforeW_plus ?? '')
-      + td(bundle?.beforeW_minus ?? '')
-      + td(bundle?.afterL_plus ?? '')
-      + td(bundle?.afterL_minus ?? '')
-      + td(bundle?.afterW_plus ?? '')
-      + td(bundle?.afterW_minus ?? '')
+      + td(bundle?.beforeL_plus ?? '') + td(bundle?.beforeL_minus ?? '')
+      + td(bundle?.beforeW_plus ?? '') + td(bundle?.beforeW_minus ?? '')
+      + td(bundle?.afterL_plus  ?? '') + td(bundle?.afterL_minus  ?? '')
+      + td(bundle?.afterW_plus  ?? '') + td(bundle?.afterW_minus  ?? '')
       + td(bundle?.numberRange ?? '', 'font-size:9px;')
-      + td(rowHasSavedData ? displayNumber(sampleRaw) : '')
-      + td(rowHasSavedData ? displayNumber(defectedRaw) : '')
-      + td(rowHasSavedData ? displayNumber(percentageRaw, false) : '')
-      + tdL(rowHasSavedData ? remarksRaw : '')
+      + td(sampleVal) 
+      + td(dr?.defectedQty ?? '')
+      + td(dr?.percentage  ?? '')
+      + td(remarkVal, 'text-align:left;')
       + '</tr>';
   }
 
   rows += '<tr style="background:#f0f0f0;font-weight:bold;">'
-    + td('TOTALS', 'text-align:left;')
-    + td('')
-    + td('')
-    + td('')
+    + td('TOTALS', 'text-align:left;') + td('') + td('') + td('')
     + td(totalQtyCombined, 'font-weight:bold;')
+    + td('') + td('') + td('')
+    + td('') + td('') + td('') + td('')
+    + td('') + td('') + td('') + td('')
     + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td('')
-    + td(totalSampleSize || '', 'font-weight:bold;')
+    + td(totalSampleSize || '', 'font-weight:bold;') 
     + td(totalDefectedQty || '', 'font-weight:bold;')
-    + td('')
-    + td('')
+    + td('') + td('')
     + '</tr>';
 
   const scheduleDisplay = report.scheduleNo ? report.scheduleNo : '(No Schedule)';
   const auditorDisplay = report.cpiAuditor || report.checkedBy || '_______________';
-  const statusColor =
-    report.inspectionStatus === 'Passed'
-      ? '#16a34a'
-      : report.inspectionStatus === 'Failed'
-        ? '#dc2626'
-        : '#d97706';
+  const statusColor = report.inspectionStatus === 'Passed' ? '#16a34a' : report.inspectionStatus === 'Failed' ? '#dc2626' : '#d97706';
+  
+  const totalCutsCount = report.cutInspections?.length || 0;
 
   const html = `<!DOCTYPE html><html><head>
-    <title>CPI Report - ${htmlEscape(report.styleNo)} - ${htmlEscape(scheduleDisplay)}</title>
+    <title>CPI Report - ${report.styleNo} - ${scheduleDisplay}</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: Arial, sans-serif; font-size: 11px; padding: 10mm; }
@@ -611,39 +462,36 @@ function printCPIReport(report: CPIReport) {
       th { border: 1px solid #999; padding: 2px 4px; text-align: center; font-size: 10px; background: #e8e8e8; font-weight: bold; }
       @page { size: A4 landscape; margin: 0; }
     </style></head><body>
-    <div style="display:flex; align-items:center; gap: 12px; margin-bottom:6px; border-bottom: 1px solid #ccc; padding-bottom: 6px;">
-      <img src="/logo.svg" alt="Logo" style="height: 40px; width: auto;" />
-      <div>
-        <div style="font-weight:bold;font-size:14px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>
-        <div style="font-size:12px;">Cut Panel Inspection Report (CP Chart No. 002)</div>
-      </div>
+    <div style="text-align:center;margin-bottom:6px;">
+      <div style="font-weight:bold;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Colour Plus Printing Systems (PVT) Ltd</div>
+      <div style="font-size:11px;">Cut Panel Inspection Report (CP Chart No. 002)</div>
     </div>
     <table style="border:none;margin-bottom:6px;">
       <tr>
         <td style="border:none;width:12%;">Date:</td>
-        <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;">${htmlEscape(report.date)}</td>
+        <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;">${report.date}</td>
         <td style="border:none;width:14%;">Schedule number:</td>
-        <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;">${htmlEscape(scheduleDisplay)}</td>
+        <td style="border:none;border-bottom:1px solid black;width:20%;padding-right:8px;">${scheduleDisplay}</td>
         <td style="border:none;width:12%;">Print colour:</td>
-        <td style="border:none;border-bottom:1px solid black;width:22%;">${htmlEscape(report.printColour)}</td>
+        <td style="border:none;border-bottom:1px solid black;width:22%;">${report.printColour}</td>
       </tr><tr>
         <td style="border:none;">Customer:</td>
-        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${htmlEscape(report.customer)}</td>
+        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${report.customer}</td>
         <td style="border:none;">Cut number:</td>
-        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${htmlEscape((report.cutInspections || []).map((cut: any) => cut.cutNo).join(', '))}</td>
+        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${(report.cutInspections || []).map(c => c.cutNo).join(', ')}</td>
         <td style="border:none;">Received Qty:</td>
-        <td style="border:none;border-bottom:1px solid black;">${htmlEscape(report.receivedQty)}</td>
+        <td style="border:none;border-bottom:1px solid black;">${report.receivedQty}</td>
       </tr><tr>
         <td style="border:none;">Style number:</td>
-        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${htmlEscape(report.styleNo)}</td>
+        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${report.styleNo}</td>
         <td style="border:none;">Body colour:</td>
-        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${htmlEscape(report.bodyColour)}</td>
+        <td style="border:none;border-bottom:1px solid black;padding-right:8px;">${report.bodyColour}</td>
         <td style="border:none;">CPI Qty:</td>
-        <td style="border:none;border-bottom:1px solid black;">${htmlEscape(report.cpiQty)}</td>
+        <td style="border:none;border-bottom:1px solid black;">${report.cpiQty}</td>
       </tr><tr>
         <td style="border:none;">Status:</td>
         <td colspan="5" style="border:none;">
-          <span style="font-weight:bold;color:${statusColor};font-size:12px;">${htmlEscape((report.inspectionStatus || '').toUpperCase())}</span>
+          <span style="font-weight:bold;color:${statusColor};font-size:12px;">${(report.inspectionStatus || '').toUpperCase()}</span>
         </td>
       </tr>
     </table>
@@ -674,8 +522,8 @@ function printCPIReport(report: CPIReport) {
       ${rows}
     </tbody></table>
     <div style="margin-top:12px;display:flex;justify-content:space-between;font-size:11px;">
-      <div>CPI Auditor: <span style="display:inline-block;min-width:150px;border-bottom:1px solid black;">${htmlEscape(auditorDisplay)}</span></div>
-      <div style="font-size:10px;color:#555;">Total Cuts: ${(report.cutInspections || []).length} | Total Qty: ${htmlEscape(totalQtyCombined)}</div>
+      <div>CPI Auditor: <span style="display:inline-block;min-width:150px;border-bottom:1px solid black;">${auditorDisplay}</span></div>
+      <div style="font-size:10px;color:#555;">Total Cuts: ${totalCutsCount} | Total Qty: ${totalQtyCombined}</div>
     </div>
   </body></html>`;
 
@@ -688,11 +536,7 @@ function printCPIReport(report: CPIReport) {
   document.body.appendChild(iframe);
 
   const doc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!doc) {
-    alert('Could not open print frame.');
-    return;
-  }
-
+  if (!doc) { alert('Could not open print frame.'); return; }
   doc.open();
   doc.write(html);
   doc.close();
