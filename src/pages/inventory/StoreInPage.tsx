@@ -1,5 +1,5 @@
 // src/pages/inventory/StoreInPage.tsx
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PackageOpen, Plus, Trash2, Edit2, AlertCircle, Save, GitBranch,
@@ -60,6 +60,34 @@ interface StyleScheduleOption {
   customerName: string;
   scheduleNo: string;
 }
+
+interface StoreInDraftSnapshot {
+  version: number;
+  savedAt: string;
+  selectedStyleNo: string;
+  selectedCustomer: string;
+  inAdNo: string;
+  scheduleNo: string;
+  cutInDate: string;
+  componentInQty: Record<string, string>;
+  confirmedInQty: Record<string, boolean>;
+  activeSubmissionId: string;
+  activeCutNo: string;
+  activeCutBundles: BundleFormRow[];
+  activeCutQty: string;
+  cutQtyConfirmed: boolean;
+  editingCutTempId: string | null;
+  savedCuts: SavedCut[];
+  stagedEntries: StagedEntry[];
+  expandedStagedId: string | null;
+}
+
+const STORE_IN_DRAFT_KEY = 'cp-store-in-page-draft-v3';
+
+const RECENT_STORE_IN_LIMIT = 10;
+
+type BundleFieldName = 'no' | 'qty' | 'size' | 'range';
+type BundleFieldRefs = Partial<Record<BundleFieldName, HTMLInputElement | null>>;
 
 const makeBundleRow = (idx: number): BundleFormRow => ({
   tempId: crypto.randomUUID(),
@@ -154,7 +182,32 @@ export default function StoreInPage() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 25;
+  const pageSize = RECENT_STORE_IN_LIMIT;
+
+  // Fast keyboard/focus workflow
+  const cutQtyInputRef = useRef<HTMLInputElement | null>(null);
+  const saveCutButtonRef = useRef<HTMLButtonElement | null>(null);
+  const bundleInputRefs = useRef<Record<string, BundleFieldRefs>>({});
+  const hasRestoredDraftRef = useRef(false);
+  const skipNextDraftSaveRef = useRef(false);
+
+  const focusInput = (input?: HTMLInputElement | HTMLButtonElement | null) => {
+    window.setTimeout(() => {
+      if (!input) return;
+      input.focus();
+      if (input instanceof HTMLInputElement) input.select();
+    }, 40);
+  };
+
+  const setBundleInputRef = (tempId: string, field: BundleFieldName, el: HTMLInputElement | null) => {
+    bundleInputRefs.current[tempId] = { ...(bundleInputRefs.current[tempId] || {}), [field]: el };
+  };
+
+  const focusBundleField = (tempId: string, field: BundleFieldName) => {
+    window.setTimeout(() => {
+      focusInput(bundleInputRefs.current[tempId]?.[field]);
+    }, 60);
+  };
 
   // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -176,6 +229,106 @@ export default function StoreInPage() {
     load();
   }, [fetchRecords, fetchEligibleStoreInItems, fetchBulkBalances]);
 
+
+  // ── Draft persistence ─────────────────────────────────────────────────────
+  // Keeps unsaved cuts/staging safe when the user accidentally navigates away.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORE_IN_DRAFT_KEY);
+      if (!raw) {
+        hasRestoredDraftRef.current = true;
+        return;
+      }
+
+      const draft = JSON.parse(raw) as Partial<StoreInDraftSnapshot>;
+      skipNextDraftSaveRef.current = true;
+      if (draft.version !== 3) {
+        localStorage.removeItem(STORE_IN_DRAFT_KEY);
+        hasRestoredDraftRef.current = true;
+        return;
+      }
+
+      setSelectedStyleNo(draft.selectedStyleNo || '');
+      setSelectedCustomer(draft.selectedCustomer || '');
+      setInAdNo(draft.inAdNo || '');
+      setScheduleNo(draft.scheduleNo || '');
+      setCutInDate(draft.cutInDate || '');
+      setComponentInQty(draft.componentInQty || {});
+      setConfirmedInQty(draft.confirmedInQty || {});
+      setActiveSubmissionId(draft.activeSubmissionId || '');
+      setActiveCutNo(draft.activeCutNo || '');
+      setActiveCutBundles(draft.activeCutBundles?.length ? draft.activeCutBundles : [makeBundleRow(1)]);
+      setActiveCutQty(draft.activeCutQty || '');
+      setCutQtyConfirmed(!!draft.cutQtyConfirmed);
+      setEditingCutTempId(draft.editingCutTempId || null);
+      setSavedCuts(draft.savedCuts || []);
+      setStagedEntries(draft.stagedEntries || []);
+      setExpandedStagedId(draft.expandedStagedId || null);
+
+      if ((draft.stagedEntries?.length || 0) > 0 || (draft.savedCuts?.length || 0) > 0 || draft.activeSubmissionId) {
+        setSuccessMsg('Unsaved Store-In draft restored.');
+        window.setTimeout(() => setSuccessMsg(''), 3500);
+      }
+    } catch (error) {
+      console.error('Failed to restore Store-In draft:', error);
+      localStorage.removeItem(STORE_IN_DRAFT_KEY);
+    } finally {
+      hasRestoredDraftRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasRestoredDraftRef.current) return;
+    if (skipNextDraftSaveRef.current) {
+      skipNextDraftSaveRef.current = false;
+      return;
+    }
+
+    const hasMeaningfulDraft = Boolean(
+      selectedStyleNo || selectedCustomer || inAdNo || scheduleNo || cutInDate ||
+      Object.values(componentInQty).some(Boolean) || Object.values(confirmedInQty).some(Boolean) ||
+      activeSubmissionId || activeCutNo || activeCutQty || savedCuts.length || stagedEntries.length ||
+      activeCutBundles.some(b => b.bundleNo !== 'b-1' || b.bundleQty || b.size || b.numberRange)
+    );
+
+    try {
+      if (!hasMeaningfulDraft) {
+        localStorage.removeItem(STORE_IN_DRAFT_KEY);
+        return;
+      }
+
+      const draft: StoreInDraftSnapshot = {
+        version: 3,
+        savedAt: new Date().toISOString(),
+        selectedStyleNo,
+        selectedCustomer,
+        inAdNo,
+        scheduleNo,
+        cutInDate,
+        componentInQty,
+        confirmedInQty,
+        activeSubmissionId,
+        activeCutNo,
+        activeCutBundles,
+        activeCutQty,
+        cutQtyConfirmed,
+        editingCutTempId,
+        savedCuts,
+        stagedEntries,
+        expandedStagedId,
+      };
+
+      localStorage.setItem(STORE_IN_DRAFT_KEY, JSON.stringify(draft));
+    } catch (error) {
+      console.error('Failed to save Store-In draft:', error);
+    }
+  }, [
+    selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, cutInDate,
+    componentInQty, confirmedInQty, activeSubmissionId, activeCutNo,
+    activeCutBundles, activeCutQty, cutQtyConfirmed, editingCutTempId,
+    savedCuts, stagedEntries, expandedStagedId,
+  ]);
+
   // ── Cascade options ───────────────────────────────────────────────────────
   const uniqueStyleNos = useMemo(() =>
     Array.from(new Set(eligibleStoreInItems.map(i => i.styleNo))).sort(),
@@ -196,6 +349,10 @@ export default function StoreInPage() {
            i.remainingBulkQty > 0   
     );
   }, [eligibleStoreInItems, selectedStyleNo, selectedCustomer]);
+
+  const visibleBulkBalances = useMemo(() =>
+    bulkBalances.filter(bal => bal.remainingBulkQty > 0),
+    [bulkBalances]);
 
   const existingScheduleOptions = useMemo(() => {
     if (!selectedStyleNo || !selectedCustomer) return [];
@@ -287,9 +444,90 @@ export default function StoreInPage() {
   const totalCutQty = savedCuts.reduce((s, c) => s + c.cutQty, 0);
   const uncutBalance = Math.max(0, inQtyNum - totalCutQty);
 
+  const openCutBuilderForComponent = (comp: EligibleStoreInItem) => {
+    const compCuts = savedCuts.filter(c => c.submissionId === comp.submissionId);
+    const compInQty = getComponentInQty(comp.submissionId);
+    const alreadyCutQty = compCuts.reduce((sum, cut) => sum + cut.cutQty, 0);
+    const suggestedCutQty = Math.max(0, compInQty - alreadyCutQty);
+
+    setActiveSubmissionId(comp.submissionId);
+    setEditingCutTempId(null);
+    setActiveCutBundles([makeBundleRow(1)]);
+    setActiveCutQty(suggestedCutQty > 0 ? String(suggestedCutQty) : '');
+    setCutQtyConfirmed(false);
+    setCutErrors({});
+    setActiveCutNo(`${comp.components} Cut ${compCuts.length + 1}`);
+    window.setTimeout(() => focusInput(cutQtyInputRef.current), 60);
+  };
+
+  const handleConfirmComponentInQty = (comp: EligibleStoreInItem) => {
+    const qty = getComponentInQty(comp.submissionId);
+    if (qty <= 0 || qty > comp.remainingBulkQty) return;
+
+    const sourceCutsExist = savedCuts.some(c => c.submissionId !== comp.submissionId);
+    const alreadyHasCuts = savedCuts.some(c => c.submissionId === comp.submissionId);
+
+    confirmComponentInQty(comp.submissionId);
+
+    // For the first component, immediately open the cut builder and prefill Cut Qty.
+    // For later components, do not open over auto-copied cuts from the first component.
+    if (!sourceCutsExist && !alreadyHasCuts) {
+      openCutBuilderForComponent(comp);
+    }
+  };
+
+  const confirmCutQtyAndPrefillBundle = () => {
+    const cutQtyNum = parseInt(activeCutQty) || 0;
+    if (cutQtyNum <= 0) {
+      setCutErrors(p => ({ ...p, cutQty: 'Cut Qty must be > 0' }));
+      return;
+    }
+
+    setCutQtyConfirmed(true);
+    setCutErrors(p => ({ ...p, cutQty: '' }));
+
+    setActiveCutBundles(prev => {
+      if (prev.length === 0) return [{ ...makeBundleRow(1), bundleQty: String(cutQtyNum) }];
+      const totalEntered = prev.reduce((sum, b) => sum + (parseInt(b.bundleQty) || 0), 0);
+      if (totalEntered > 0) return prev;
+      return prev.map((b, index) => index === 0 ? { ...b, bundleQty: String(cutQtyNum) } : b);
+    });
+
+    const firstBundle = activeCutBundles[0];
+    if (firstBundle) focusBundleField(firstBundle.tempId, 'no');
+  };
+
+  const handleStageComponentClick = (comp: EligibleStoreInItem) => {
+    const otherComponents = styleComponents
+      .filter(c => c.submissionId !== comp.submissionId)
+      .map(c => c.components)
+      .filter(Boolean);
+
+    if (otherComponents.length > 0) {
+      const proceed = window.confirm(
+        `You are about to stage only ${comp.components} to the database queue.\n\n` +
+        `If the next component(s) (${otherComponents.join(', ')}) have not already been confirmed/copied/staged, the copied cut and bundle details will not be available after ${comp.components} is cleared.\n\n` +
+        `Confirm or copy the other components first if you want the same cut/bundle data.\n\n` +
+        `Continue staging only ${comp.components}?`
+      );
+      if (!proceed) return;
+    }
+
+    stageComponent(comp);
+  };
+
   // ── Cut builder ───────────────────────────────────────────────────────────
-  const addBundle = () =>
-    setActiveCutBundles(prev => [...prev, makeBundleRow(prev.length + 1)]);
+  const addBundle = () => {
+    let nextTempId = '';
+    setActiveCutBundles(prev => {
+      const row = makeBundleRow(prev.length + 1);
+      nextTempId = row.tempId;
+      return [...prev, row];
+    });
+    window.setTimeout(() => {
+      if (nextTempId) focusBundleField(nextTempId, 'no');
+    }, 60);
+  };
   const removeBundle = (id: string) =>
     setActiveCutBundles(prev => prev.filter(b => b.tempId !== id));
   const updateBundle = (id: string, field: keyof BundleFormRow, value: string) =>
@@ -465,8 +703,10 @@ export default function StoreInPage() {
     setComponentInQty({}); setConfirmedInQty({});
     setSavedCuts([]); setActiveCutBundles([makeBundleRow(1)]);
     setActiveCutQty(''); setActiveCutNo(''); setActiveSubmissionId('');
+    setCutQtyConfirmed(false);
     setEditingCutTempId(null); setEditingRecordId(null);
     setErrors({}); setCutErrors({}); setPageError('');
+    localStorage.removeItem(STORE_IN_DRAFT_KEY);
   };
 
   // ── Stage a single component ─────────────────────────────────────────────
@@ -523,6 +763,56 @@ export default function StoreInPage() {
 
   const removeStagedEntry = (tempId: string) =>
     setStagedEntries(prev => prev.filter(e => e.tempId !== tempId));
+
+  const handleEditStagedEntry = (entry: StagedEntry) => {
+    const primarySubId = entry.cuts[0]?.submissionId ?? '';
+    if (!primarySubId) return;
+
+    const proceed = window.confirm(
+      `Move ${entry.components} back to the Store-In form for editing?\n\n` +
+      `This will remove it from the staging queue only. It will not affect other staged components and nothing will be saved to the database until you click Save All.`
+    );
+    if (!proceed) return;
+
+    const compInfo = eligibleStoreInItems.find(i => i.submissionId === primarySubId);
+
+    setSelectedStyleNo(entry.styleNo);
+    setSelectedCustomer(entry.customerName);
+    setInAdNo(entry.inAdNo);
+    setScheduleNo(entry.scheduleNo);
+    setCutInDate(entry.cutInDate);
+    setComponentInQty(prev => ({ ...prev, [primarySubId]: String(entry.inQty) }));
+    setConfirmedInQty(prev => ({ ...prev, [primarySubId]: true }));
+    setSavedCuts(prev => {
+      const withoutThisComponent = prev.filter(c => c.submissionId !== primarySubId);
+      const restoredCuts: SavedCut[] = entry.cuts.map(cut => ({
+        tempId: cut.tempId || crypto.randomUUID(),
+        cutNo: cut.cutNo,
+        component: entry.components,
+        submissionId: cut.submissionId,
+        bodyColour: compInfo?.bodyColour ?? '',
+        cutQty: cut.cutQty,
+        bundles: orderBundlesForDisplay(cut.bundles).map((b, index) => ({
+          ...b,
+          bundleOrder: b.bundleOrder ?? index + 1,
+        })),
+      }));
+      return [...withoutThisComponent, ...restoredCuts];
+    });
+    setStagedEntries(prev => prev.filter(e => e.tempId !== entry.tempId));
+    setExpandedStagedId(null);
+    setActiveSubmissionId('');
+    setActiveCutNo('');
+    setActiveCutQty('');
+    setCutQtyConfirmed(false);
+    setActiveCutBundles([makeBundleRow(1)]);
+    setEditingCutTempId(null);
+    setErrors({});
+    setCutErrors({});
+    setSuccessMsg(entry.components + ' moved back to the form for editing.');
+    window.setTimeout(() => setSuccessMsg(''), 3500);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // ── Save to DB ────────────────────────────────────────────────────────────
   const handleSaveToDatabase = async () => {
@@ -643,11 +933,16 @@ export default function StoreInPage() {
     return records;
   }, [storeInRecords, searchText, filterDateFrom, filterDateTo]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+  const hasRecordFilters = !!(searchText.trim() || filterDateFrom || filterDateTo);
+  const recentRecords = useMemo(() =>
+    hasRecordFilters ? filteredRecords : filteredRecords.slice(0, RECENT_STORE_IN_LIMIT),
+    [filteredRecords, hasRecordFilters]);
+
+  const totalPages = Math.max(1, Math.ceil(recentRecords.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedRecords = useMemo(() =>
-    filteredRecords.slice((safePage - 1) * pageSize, safePage * pageSize),
-    [filteredRecords, safePage]);
+    recentRecords.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [recentRecords, safePage]);
 
   const scheduleDatalistId = 'sched-' + selectedStyleNo + '-' + selectedCustomer;
 
@@ -667,9 +962,9 @@ export default function StoreInPage() {
       </div>
 
       {/* Bulk Balance Cards */}
-      {bulkBalances.length > 0 && (
+      {visibleBulkBalances.length > 0 && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {bulkBalances.map(bal => (
+          {visibleBulkBalances.map(bal => (
             <div key={bal.submissionId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -852,6 +1147,12 @@ export default function StoreInPage() {
                             value={componentInQty[comp.submissionId] || ''}
                             readOnly={confirmed}
                             onChange={e => { if (confirmed) return; setCompInQty(comp.submissionId, e.target.value.replace(/[^0-9]/g, '')); }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && !confirmed && compInQty > 0 && !overLimit) {
+                                e.preventDefault();
+                                handleConfirmComponentInQty(comp);
+                              }
+                            }}
                             placeholder="e.g. 500"
                             className={'w-full rounded-lg border px-3 py-2 text-sm font-bold outline-none transition-all ' + (confirmed ? 'border-emerald-200 bg-emerald-50 text-emerald-800 cursor-not-allowed' : overLimit ? 'border-red-400 bg-red-50 text-red-700 focus:ring-2 focus:ring-red-300' : 'border-slate-300 focus:ring-2 focus:ring-orange-500')} />
                           {overLimit && !confirmed && <p className="text-[10px] text-red-600">Exceeds remaining bulk ({remaining})</p>}
@@ -873,7 +1174,7 @@ export default function StoreInPage() {
                       <div className="mt-3 flex items-center gap-2">
                         {!confirmed ? (
                           <button type="button"
-                            onClick={() => confirmComponentInQty(comp.submissionId)}
+                            onClick={() => handleConfirmComponentInQty(comp)}
                             disabled={compInQty <= 0 || overLimit}
                             className="inline-flex items-center gap-1.5 rounded-lg bg-orange-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                             <CheckCircle2 className="h-3.5 w-3.5" /> Confirm IN Qty
@@ -960,6 +1261,7 @@ export default function StoreInPage() {
                                   <label className="block text-[10px] font-medium text-slate-500">Cut Qty <span className="text-red-500">*</span></label>
                                   <div className="flex items-center gap-2">
                                     <input
+                                      ref={cutQtyInputRef}
                                       type="text" inputMode="numeric" pattern="[0-9]*"
                                       value={activeCutQty}
                                       onChange={e => {
@@ -968,18 +1270,17 @@ export default function StoreInPage() {
                                         if (cutErrors.cutQty) setCutErrors(p => ({ ...p, cutQty: '' }));
                                       }}
                                       placeholder="e.g. 100"
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && !cutQtyConfirmed) {
+                                          e.preventDefault();
+                                          confirmCutQtyAndPrefillBundle();
+                                        }
+                                      }}
                                       disabled={cutQtyConfirmed}
                                       className={'w-28 rounded-lg border px-3 py-1.5 text-sm font-bold outline-none ' + (cutQtyConfirmed ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : cutErrors.cutQty ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-indigo-500')} />
                                     {!cutQtyConfirmed ? (
                                       <button type="button"
-                                        onClick={() => {
-                                          if (!activeCutQty || parseInt(activeCutQty) <= 0) {
-                                            setCutErrors(p => ({ ...p, cutQty: 'Cut Qty must be > 0' }));
-                                            return;
-                                          }
-                                          setCutQtyConfirmed(true);
-                                          setCutErrors(p => ({ ...p, cutQty: '' }));
-                                        }}
+                                        onClick={confirmCutQtyAndPrefillBundle}
                                         className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">
                                         Confirm Qty →
                                       </button>
@@ -1009,26 +1310,62 @@ export default function StoreInPage() {
                                   <div key={bundle.tempId} className="grid grid-cols-12 gap-2 items-start">
                                     <div className="col-span-3">
                                       <input type="text" value={bundle.bundleNo}
+                                        ref={el => setBundleInputRef(bundle.tempId, 'no', el)}
                                         onChange={e => updateBundle(bundle.tempId, 'bundleNo', e.target.value)}
+                                        onBlur={e => updateBundle(bundle.tempId, 'bundleNo', normalizeBundleNo(e.target.value))}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            updateBundle(bundle.tempId, 'bundleNo', normalizeBundleNo(bundle.bundleNo));
+                                            focusBundleField(bundle.tempId, 'qty');
+                                          }
+                                        }}
                                         placeholder="b-3"
                                         className={'w-full rounded border px-2 py-1.5 text-xs outline-none ' + (cutErrors['b_' + bi + '_no'] ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:ring-1 focus:ring-blue-400')} />
                                     </div>
                                     <div className="col-span-2">
                                       <input type="text" inputMode="numeric" pattern="[0-9]*"
+                                        ref={el => setBundleInputRef(bundle.tempId, 'qty', el)}
                                         value={bundle.bundleQty}
                                         onChange={e => updateBundle(bundle.tempId, 'bundleQty', e.target.value.replace(/[^0-9]/g, ''))}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            focusBundleField(bundle.tempId, 'size');
+                                          }
+                                        }}
                                         placeholder="100"
                                         className={'w-full rounded border px-2 py-1.5 text-xs font-bold outline-none ' + (cutErrors['b_' + bi + '_qty'] ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:ring-1 focus:ring-blue-400')} />
                                     </div>
                                     <div className="col-span-2">
                                       <input type="text" value={bundle.size}
+                                        ref={el => setBundleInputRef(bundle.tempId, 'size', el)}
                                         onChange={e => updateBundle(bundle.tempId, 'size', e.target.value)}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            focusBundleField(bundle.tempId, 'range');
+                                          }
+                                        }}
                                         placeholder="M"
                                         className={'w-full rounded border px-2 py-1.5 text-xs outline-none ' + (cutErrors['b_' + bi + '_size'] ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:ring-1 focus:ring-blue-400')} />
                                     </div>
                                     <div className="col-span-4">
                                       <input type="text" value={bundle.numberRange}
+                                        ref={el => setBundleInputRef(bundle.tempId, 'range', el)}
                                         onChange={e => updateBundle(bundle.tempId, 'numberRange', e.target.value)}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            const totalBundled = activeCutBundles.reduce((sum, b) => sum + (parseInt(b.bundleQty) || 0), 0);
+                                            const cutQtyNum = parseInt(activeCutQty) || 0;
+                                            if (cutQtyNum > 0 && totalBundled < cutQtyNum) {
+                                              addBundle();
+                                            } else {
+                                              focusInput(saveCutButtonRef.current);
+                                            }
+                                          }
+                                        }}
                                         placeholder="001-100"
                                         className={'w-full rounded border px-2 py-1.5 text-xs outline-none ' + (cutErrors['b_' + bi + '_range'] ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:ring-1 focus:ring-blue-400')} />
                                     </div>
@@ -1058,7 +1395,7 @@ export default function StoreInPage() {
                               </div>}
 
                               <div className="flex gap-2 pt-2 border-t border-slate-200">
-                                <button type="button" onClick={handleSaveCut}
+                                <button type="button" ref={saveCutButtonRef} onClick={handleSaveCut}
                                   disabled={!cutQtyConfirmed}
                                   className={'inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed ' + (editingCutTempId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700')}>
                                   <Save className="h-3.5 w-3.5" />
@@ -1073,16 +1410,7 @@ export default function StoreInPage() {
                             </motion.div>
                           ) : (
                             <button type="button"
-                              onClick={() => {
-                                setActiveSubmissionId(comp.submissionId);
-                                setEditingCutTempId(null);
-                                setActiveCutBundles([makeBundleRow(1)]);
-                                setActiveCutQty('');
-                                setCutErrors({});
-                                // Set a smart default for the manual cut name
-                                const compCuts = savedCuts.filter(c => c.submissionId === comp.submissionId);
-                                setActiveCutNo(`${comp.components} Cut ${compCuts.length + 1}`);
-                              }}
+                              onClick={() => openCutBuilderForComponent(comp)}
                               disabled={compUncut <= 0}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-indigo-300 px-4 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                               <Plus className="h-3.5 w-3.5" />
@@ -1095,7 +1423,7 @@ export default function StoreInPage() {
                             <div className="pt-3 border-t border-slate-200 mt-2">
                               <button
                                 type="button"
-                                onClick={() => stageComponent(comp)}
+                                onClick={() => handleStageComponentClick(comp)}
                                 className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-700 transition-colors shadow-sm">
                                 <TableProperties className="h-3.5 w-3.5" />
                                 Stage {comp.components} to Database Queue
@@ -1169,6 +1497,14 @@ export default function StoreInPage() {
                       <div className="text-xs">IN: <span className="font-bold text-orange-600">{entry.inQty}</span></div>
                       <div className="text-xs">Cuts: <span className="font-bold">{entry.cuts.length}</span></div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); handleEditStagedEntry(entry); }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors shrink-0"
+                      title="Move this staged component back to the form for editing"
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </button>
                     <button onClick={e => { e.stopPropagation(); removeStagedEntry(entry.tempId); }}
                       className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 shrink-0">
                       <Trash2 className="h-4 w-4" />
@@ -1184,29 +1520,7 @@ export default function StoreInPage() {
                               <Layers className="h-3.5 w-3.5 text-slate-400" />
                               <span className="text-sm font-bold text-slate-700">{cut.cutNo}</span>
                               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">Qty: {cut.cutQty}</span>
-                              <button
-                                type="button"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  const matchedSavedCut = savedCuts.find(sc => sc.tempId === cut.tempId);
-                                  if (!matchedSavedCut) return;
-                                  setActiveSubmissionId(cut.submissionId);
-                                  setEditingCutTempId(matchedSavedCut.tempId);
-                                  setActiveCutNo(cut.cutNo);
-                                  setActiveCutQty(String(cut.cutQty));
-                                  setCutQtyConfirmed(true);
-                                  setActiveCutBundles(orderBundlesForDisplay(cut.bundles).map((b, i) => ({
-                                    tempId: b.bundleNo + '_' + i,
-                                    bundleNo: b.bundleNo,
-                                    bundleQty: String(b.bundleQty),
-                                    size: b.size,
-                                    numberRange: b.numberRange,
-                                  })));
-                                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                                }}
-                                className="ml-auto inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors">
-                                <Pencil className="h-3 w-3" /> Edit
-                              </button>
+                              <span className="ml-auto text-[10px] text-slate-400">Use the component Edit button above to modify this staged entry</span>
                             </div>
                             <div className="ml-6 border-l-2 border-slate-200 pl-4">
                               <table className="w-full text-xs">
@@ -1266,7 +1580,7 @@ export default function StoreInPage() {
                   </div>
                   <button type="button" onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setSearchText(''); setCurrentPage(1); }}
                     className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Clear</button>
-                  <div className="ml-auto text-xs text-slate-500">Showing {filteredRecords.length} of {storeInRecords.length}</div>
+                  <div className="ml-auto text-xs text-slate-500">Showing {recentRecords.length} of {storeInRecords.length}</div>
                 </div>
               </motion.div>
             )}
@@ -1284,7 +1598,7 @@ export default function StoreInPage() {
 
         {storeInRecords.length === 0 ? (
           <div className="py-16 text-center text-slate-400"><PackageOpen className="mx-auto mb-3 h-12 w-12 opacity-20" /><p>No store-in records yet.</p></div>
-        ) : filteredRecords.length === 0 ? (
+        ) : recentRecords.length === 0 ? (
           <div className="py-12 text-center text-slate-400">No records match your search.</div>
         ) : (
           <div className="divide-y divide-slate-100">

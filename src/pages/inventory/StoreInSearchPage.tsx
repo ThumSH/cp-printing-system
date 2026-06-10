@@ -3,11 +3,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, PackageOpen, ChevronDown, ChevronRight, Layers,
-  GitBranch, Filter, CalendarDays, RotateCcw, Clock,
+  GitBranch, Filter, CalendarDays, RotateCcw,
 } from 'lucide-react';
 import { useInventoryStore } from '../../store/inventoryStore';
 
-const RECENT_LIMIT = 10;
 
 export default function StoreInSearchPage() {
   const {
@@ -122,16 +121,11 @@ export default function StoreInSearchPage() {
     return records;
   }, [storeInRecords, filterStyle, filterCustomer, filterSchedule, filterDateFrom, filterDateTo]);
 
-  // Display records: if no filters → most recent 10, else → all matching
+  // Display records only after the user applies at least one filter.
   const displayRecords = useMemo(() => {
-    if (!hasFilters) {
-      // Sort by cutInDate descending and take the last 10
-      return [...storeInRecords]
-        .sort((a, b) => (b.cutInDate || '').localeCompare(a.cutInDate || ''))
-        .slice(0, RECENT_LIMIT);
-    }
+    if (!hasFilters) return [];
     return filteredRecords;
-  }, [hasFilters, storeInRecords, filteredRecords]);
+  }, [hasFilters, filteredRecords]);
 
   // Summary stats (based on what's displayed)
   const summary = useMemo(() => ({
@@ -345,7 +339,7 @@ export default function StoreInSearchPage() {
           RESULTS TABLE
           ========================================== */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        {/* Table header — shows whether viewing recent or filtered */}
+        {/* Table header */}
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between">
           {hasFilters ? (
             <p className="text-sm font-medium text-slate-700">
@@ -353,11 +347,11 @@ export default function StoreInSearchPage() {
             </p>
           ) : (
             <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-slate-400" />
+              <Search className="h-4 w-4 text-slate-400" />
               <p className="text-sm font-medium text-slate-700">
-                Recent {Math.min(RECENT_LIMIT, storeInRecords.length)} of {storeInRecords.length} records
+                Apply a filter to view Store-In records
               </p>
-              <span className="text-xs text-slate-400">(use filters above to search all)</span>
+              <span className="text-xs text-slate-400">No records are shown before filtering.</span>
             </div>
           )}
         </div>
@@ -367,7 +361,7 @@ export default function StoreInSearchPage() {
         ) : displayRecords.length === 0 ? (
           <div className="py-16 text-center text-slate-400">
             <PackageOpen className="mx-auto mb-3 h-12 w-12 opacity-20" />
-            <p>{hasFilters ? 'No records match your filters.' : 'No store-in records yet.'}</p>
+            <p>{hasFilters ? 'No records match your filters.' : 'Select a style, customer, schedule, or date filter to view records.'}</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
