@@ -22,6 +22,124 @@ interface TrackerSummary {
 const API_BASE = API.DELIVERY_TRACKER;
 const getHeaders = getAuthHeaders;
 
+
+// ── Scheduled tracker grouping ───────────────────────────────────────────────
+// Only groups reports that have a real schedule/FPO number. No-schedule reports
+// are returned as individual trackers to keep the existing no-schedule flow unchanged.
+const getTrackerSchedule = (summary: TrackerSummary) =>
+  (summary.fpoNo || summary.rows.find(r => (r.scheduleNo || '').trim())?.scheduleNo || '').trim();
+
+const getRowSizeTotal = (row: TrackerRow) =>
+  row.sizeTotal ?? row.sizeBreakdown.reduce((sum, size) => sum + (size.qty || 0), 0);
+
+const prepareTrackerRows = (rows: TrackerRow[]) =>
+  rows.map(row => ({
+    ...row,
+    sizeTotal: getRowSizeTotal(row),
+  }));
+
+const getAllSizes = (summaries: TrackerSummary[], rows: TrackerRow[]) =>
+  Array.from(new Set([
+    ...summaries.flatMap(summary => summary.allSizes || []),
+    ...rows.flatMap(row => row.sizeBreakdown.map(size => size.size)),
+  ])).filter(Boolean);
+
+const buildSizeTotals = (rows: TrackerRow[], allSizes: string[]): SizeData[] =>
+  allSizes.map(size => ({
+    size,
+    qty: rows.reduce((sum, row) => sum + (row.sizeBreakdown.find(item => item.size === size)?.qty || 0), 0),
+    pd: rows.reduce((sum, row) => sum + (row.sizeBreakdown.find(item => item.size === size)?.pd || 0), 0),
+    fd: rows.reduce((sum, row) => sum + (row.sizeBreakdown.find(item => item.size === size)?.fd || 0), 0),
+  }));
+
+const recalculateSummaryTotals = (summary: TrackerSummary): TrackerSummary => {
+  const rows = prepareTrackerRows(summary.rows);
+  const allSizes = getAllSizes([summary], rows);
+  const grandTotalQty = rows.reduce((sum, row) => sum + (row.totalQty || getRowSizeTotal(row)), 0);
+  const grandPdTotal = rows.reduce((sum, row) => sum + (row.sizePdTotal || 0), 0);
+  const grandFdTotal = rows.reduce((sum, row) => sum + (row.fdTotal || 0), 0);
+
+  return {
+    ...summary,
+    rows,
+    allSizes,
+    sizeTotals: buildSizeTotals(rows, allSizes),
+    grandTotalQty,
+    grandPdTotal,
+    grandFdTotal,
+    pdTotal: grandPdTotal,
+    pdPercentage: grandTotalQty > 0 ? ((grandPdTotal / grandTotalQty) * 100).toFixed(2) : '0.00',
+  };
+};
+
+const groupScheduledTrackerSummaries = (summaries: TrackerSummary[]): TrackerSummary[] => {
+  const buckets: { firstIndex: number; key: string; items: TrackerSummary[] }[] = [];
+  const bucketByKey = new Map<string, { firstIndex: number; key: string; items: TrackerSummary[] }>();
+
+  summaries.forEach((summary, index) => {
+    const schedule = getTrackerSchedule(summary);
+
+    // Important: if there is no schedule, do not merge it with any other report.
+    if (!schedule) {
+      buckets.push({
+        firstIndex: index,
+        key: `no-schedule-${summary.storeInRecordId}-${index}`,
+        items: [summary],
+      });
+      return;
+    }
+
+    const key = [summary.styleNo, summary.customerName, schedule]
+      .map(part => (part || '').trim().toLowerCase())
+      .join('|||');
+
+    let bucket = bucketByKey.get(key);
+    if (!bucket) {
+      bucket = { firstIndex: index, key, items: [] };
+      bucketByKey.set(key, bucket);
+      buckets.push(bucket);
+    }
+
+    bucket.items.push({ ...summary, fpoNo: summary.fpoNo || schedule });
+  });
+
+  return buckets
+    .sort((a, b) => a.firstIndex - b.firstIndex)
+    .map(bucket => {
+      if (bucket.items.length === 1) {
+        return recalculateSummaryTotals(bucket.items[0]);
+      }
+
+      const first = bucket.items[0];
+      const schedule = getTrackerSchedule(first);
+      const rows = prepareTrackerRows(bucket.items.flatMap(summary =>
+        summary.rows.map(row => ({
+          ...row,
+          scheduleNo: row.scheduleNo || schedule,
+        }))
+      ));
+      const allSizes = getAllSizes(bucket.items, rows);
+      const orderQty = Math.max(...bucket.items.map(summary => summary.orderQty || 0));
+      const deliveredQty = bucket.items.reduce((sum, summary) => sum + (summary.deliveredQty || 0), 0);
+      const receivedQty = bucket.items.reduce((sum, summary) => sum + (summary.receivedQty || 0), 0);
+      const summedBalance = bucket.items.reduce((sum, summary) => sum + (summary.balanceToRec || 0), 0);
+
+      return recalculateSummaryTotals({
+        ...first,
+        // Keep the first real Store-In ID so the existing Save API remains compatible.
+        storeInRecordId: first.storeInRecordId,
+        fpoNo: schedule,
+        orderQty,
+        receivedQty,
+        deliveredQty,
+        balanceToRec: orderQty > 0 ? Math.max(0, orderQty - deliveredQty) : summedBalance,
+        rows,
+        allSizes,
+        sizeTotals: buildSizeTotals(rows, allSizes),
+      });
+    });
+};
+
 // ── Dropdown helper ────────────────────────────────────────
 function CascadeSelect({ label, value, onChange, options, disabled = false, placeholder = "— Select —" }: {
   label: string; value: string; onChange: (v: string) => void;
@@ -75,7 +193,7 @@ export default function DeliveryTrackerPage() {
         }))
       }));
 
-      setSummaries(data);
+      setSummaries(groupScheduledTrackerSummaries(data));
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load.'); }
     finally { setLoading(false); }
   };
