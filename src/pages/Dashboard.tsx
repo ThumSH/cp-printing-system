@@ -539,57 +539,68 @@ function AuditDashboard({ data, styles }: { data: DashboardData; styles: StyleOv
 }
 
 function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleOverview[] }) {
-  const totalToday = data.worker.todaySeating + data.worker.todayPrinting + data.worker.todayCuring +
-    data.worker.todayChecking + data.worker.todayPacking + data.worker.todayDispatch;
-  const workerStyles = styles.filter(s => s.workerEntries > 0 || s.totalWorkerOutput > 0);
+  const worker = data.worker ?? {} as DashboardData['worker'];
+
   const todayBreakdown = [
-    { label: 'Seating',  value: data.worker.todaySeating,  color: '#3b82f6' },
-    { label: 'Printing', value: data.worker.todayPrinting, color: '#8b5cf6' },
-    { label: 'Curing',   value: data.worker.todayCuring,   color: '#f59e0b' },
-    { label: 'Checking', value: data.worker.todayChecking, color: '#14b8a6' },
-    { label: 'Packing',  value: data.worker.todayPacking,  color: '#6366f1' },
-    { label: 'Dispatch', value: data.worker.todayDispatch, color: '#10b981' },
+    { label: 'Seating',  value: Number(worker.todaySeating)  || 0, color: '#3b82f6' },
+    { label: 'Printing', value: Number(worker.todayPrinting) || 0, color: '#8b5cf6' },
+    { label: 'Curing',   value: Number(worker.todayCuring)   || 0, color: '#f59e0b' },
+    { label: 'Checking', value: Number(worker.todayChecking) || 0, color: '#14b8a6' },
+    { label: 'Packing',  value: Number(worker.todayPacking)  || 0, color: '#6366f1' },
+    { label: 'Dispatch', value: Number(worker.todayDispatch) || 0, color: '#10b981' },
   ];
+
+  const totalToday = todayBreakdown.reduce((sum, item) => sum + item.value, 0);
+  const totalDailyOutput = Number(worker.totalDailyOutput) || 0;
+  const todayOutput = Number(worker.todayOutput) || 0;
+  const pendingDowntime = Number(worker.pendingDowntime) || 0;
+  const workerStyles = styles.filter(s => (Number(s.workerEntries) || 0) > 0 || (Number(s.totalWorkerOutput) || 0) > 0);
+
   return (
     <div className="space-y-5">
       <div className="rounded-xl bg-linear-to-r from-slate-800 to-slate-700 p-5 text-white">
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-xs font-medium text-slate-300 uppercase tracking-widest">Today's Output</p>
-            <p className="text-4xl font-black mt-1">{totalToday} <span className="text-lg font-normal text-slate-300">pcs</span></p>
+            <p className="text-4xl font-black mt-1">{totalToday.toLocaleString()} <span className="text-lg font-normal text-slate-300">pcs</span></p>
           </div>
           <div className="text-right">
             <p className="text-xs text-slate-400">Entries logged</p>
-            <p className="text-2xl font-black">{data.worker.todayOutput}</p>
+            <p className="text-2xl font-black">{todayOutput.toLocaleString()}</p>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
           {todayBreakdown.map(item => (
             <div key={item.label} className="rounded-lg bg-white/10 p-2.5 text-center">
               <div className="w-2 h-2 rounded-full mx-auto mb-1.5" style={{ backgroundColor: item.color }} />
-              <p className="text-sm font-black">{item.value}</p>
+              <p className="text-sm font-black">{item.value.toLocaleString()}</p>
               <p className="text-[9px] text-slate-300 font-medium mt-0.5">{item.label}</p>
             </div>
           ))}
         </div>
       </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <KpiCard icon={Factory}       label="Total Entries (All Time)"  value={data.worker.totalDailyOutput}  color="blue"  href="/worker"          delay={0.05} />
-        <KpiCard icon={Layers}        label="Styles Worked On"          value={workerStyles.length}           color="purple"                         delay={0.1}  />
-        <KpiCard icon={Clock}         label="Pending Downtime Reports"  value={data.worker.pendingDowntime}   color={data.worker.pendingDowntime > 0 ? 'amber' : 'slate'} href="/worker/downtime" delay={0.15} />
+        <KpiCard icon={Factory} label="Total Entries (All Time)" value={totalDailyOutput.toLocaleString()} color="blue" href="/worker" delay={0.05} />
+        <KpiCard icon={Layers}  label="Styles Worked On" value={workerStyles.length} color="purple" delay={0.1} />
+        <KpiCard icon={Clock}   label="Pending Downtime Reports" value={pendingDowntime} color={pendingDowntime > 0 ? 'amber' : 'slate'} href="/worker/downtime" delay={0.15} />
       </div>
+
       <Card title="Today's Output — By Section" icon={BarChart2}
-        action={<span className="text-xs font-bold text-slate-700">{totalToday} total pcs</span>}>
+        action={<span className="text-xs font-bold text-slate-700">{totalToday.toLocaleString()} total pcs</span>}>
         <MiniBarChart data={todayBreakdown} height={150} />
       </Card>
+
       {workerStyles.length > 0 && (
         <Card title="Work Per Style — Qty & Remaining" icon={Layers}>
           <div className="space-y-3">
             {workerStyles.map(s => {
-              const remaining = Math.max(0, s.bulkQty - s.totalWorkerOutput);
-              const pct = s.bulkQty > 0 ? Math.min(100, Math.round(s.totalWorkerOutput / s.bulkQty * 100)) : 0;
+              const totalWorkerOutput = Number(s.totalWorkerOutput) || 0;
+              const bulkQty = Number(s.bulkQty) || 0;
+              const remaining = Math.max(0, bulkQty - totalWorkerOutput);
+              const pct = bulkQty > 0 ? Math.min(100, Math.round(totalWorkerOutput / bulkQty * 100)) : 0;
               return (
-                <div key={s.styleNo} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                <div key={`${s.styleNo}-${s.customerName}`} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <span className="font-bold text-sm text-slate-800">{s.styleNo}</span>
@@ -598,23 +609,24 @@ function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleO
                     <StageBadge stage={s.stage} />
                   </div>
                   <div className="grid grid-cols-3 gap-3 mb-2.5 text-center">
-                    <div><p className="text-xs text-slate-400">Total Output</p><p className="text-lg font-black text-blue-700">{s.totalWorkerOutput.toLocaleString()}</p></div>
-                    <div><p className="text-xs text-slate-400">Bulk Qty</p><p className="text-lg font-black text-slate-700">{s.bulkQty.toLocaleString()}</p></div>
+                    <div><p className="text-xs text-slate-400">Total Output</p><p className="text-lg font-black text-blue-700">{totalWorkerOutput.toLocaleString()}</p></div>
+                    <div><p className="text-xs text-slate-400">Bulk Qty</p><p className="text-lg font-black text-slate-700">{bulkQty.toLocaleString()}</p></div>
                     <div><p className="text-xs text-slate-400">Remaining</p><p className={`text-lg font-black ${remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{remaining.toLocaleString()}</p></div>
                   </div>
-                  <MiniProgress value={s.totalWorkerOutput} max={s.bulkQty} color={pct >= 100 ? '#10b981' : pct >= 50 ? '#3b82f6' : '#f59e0b'} />
+                  <MiniProgress value={totalWorkerOutput} max={bulkQty} color={pct >= 100 ? '#10b981' : pct >= 50 ? '#3b82f6' : '#f59e0b'} />
                 </div>
               );
             })}
           </div>
         </Card>
       )}
-      {data.worker.pendingDowntime > 0 && (
+
+      {pendingDowntime > 0 && (
         <Link to="/worker/downtime" className="block rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 p-4">
           <div className="flex items-center gap-3">
             <Clock className="h-5 w-5 text-amber-600 shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-bold text-amber-800">You have {data.worker.pendingDowntime} pending downtime report{data.worker.pendingDowntime > 1 ? 's' : ''}</p>
+              <p className="text-sm font-bold text-amber-800">You have {pendingDowntime} pending downtime report{pendingDowntime > 1 ? 's' : ''}</p>
               <p className="text-xs text-amber-600">These need manager approval.</p>
             </div>
             <ArrowRight className="h-4 w-4 text-amber-600" />
@@ -917,8 +929,13 @@ export default function Dashboard() {
     : '';
 
   const stageCount = styles.reduce((acc, s) => { acc[s.stage] = (acc[s.stage] || 0) + 1; return acc; }, {} as Record<string, number>);
-  const totalWorkerToday = data.worker.todaySeating + data.worker.todayPrinting + data.worker.todayCuring +
-    data.worker.todayChecking + data.worker.todayPacking + data.worker.todayDispatch;
+  const totalWorkerToday =
+    (Number(data.worker?.todaySeating) || 0) +
+    (Number(data.worker?.todayPrinting) || 0) +
+    (Number(data.worker?.todayCuring) || 0) +
+    (Number(data.worker?.todayChecking) || 0) +
+    (Number(data.worker?.todayPacking) || 0) +
+    (Number(data.worker?.todayDispatch) || 0);
   
   // FIX: Admin now tracks data.development.pendingSubmissions specifically to catch new submissions
   const pendingApprovals = Number(data.development?.pendingSubmissions) || Number(data.approvals?.pending) || 0;
@@ -1081,6 +1098,12 @@ export default function Dashboard() {
                   { label: 'Check', value: data.worker.todayChecking, color: '#14b8a6' },
                   { label: 'Pack',  value: data.worker.todayPacking,  color: '#6366f1' },
                   { label: 'Disp',  value: data.worker.todayDispatch, color: '#10b981' },
+              { label: 'Seat',  value: data.worker?.todaySeating || 0,  color: '#3b82f6' },
+              { label: 'Print', value: data.worker?.todayPrinting || 0, color: '#8b5cf6' },
+              { label: 'Cure',  value: data.worker?.todayCuring || 0,   color: '#f59e0b' },
+              { label: 'Check', value: data.worker?.todayChecking || 0, color: '#14b8a6' },
+              { label: 'Pack',  value: data.worker?.todayPacking || 0,  color: '#6366f1' },
+              { label: 'Disp',  value: data.worker?.todayDispatch || 0, color: '#10b981' },
                 ]} height={130} />
               </Card>
             </div>

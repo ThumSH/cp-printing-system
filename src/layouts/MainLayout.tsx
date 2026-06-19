@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Users, LogOut, Activity, Truck, FileText,
   Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList,
-  Factory, Clock, Menu, X, History, Palette, FlaskConical,Info,
+  Factory, Clock, Menu, X, History, Palette, FlaskConical,Info,Receipt,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
@@ -97,6 +97,14 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'System Developer',
     items: [
       { name: 'About Us', href: '/about', icon: Info, roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores', 'Worker'] },
+    ],
+  },
+  //report-search
+   {
+    label: 'Report',
+    items: [
+      { name: 'Report', href: '/report', icon: Receipt, roles: ['Admin'] },
+      { name: 'Report Search', href: '/report-search', icon: Receipt, roles: ['Admin'] },
     ],
   },
 ];

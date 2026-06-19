@@ -17,6 +17,7 @@ export default function StoreInSearchPage() {
   // Filters
   const [filterStyle, setFilterStyle] = useState('');       // "styleNo|||customerName"
   const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterComponent, setFilterComponent] = useState('');
   const [filterSchedule, setFilterSchedule] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
@@ -65,6 +66,26 @@ export default function StoreInSearchPage() {
     return Array.from(set).sort();
   }, [storeInRecords]);
 
+  // Unique components (scoped to selected style/customer/schedule)
+  const components = useMemo(() => {
+    let records = storeInRecords;
+    if (filterStyle) {
+      const [sn, cn] = filterStyle.split('|||');
+      records = records.filter((r) => r.styleNo === sn && r.customerName === cn);
+    }
+    if (filterCustomer) {
+      records = records.filter((r) => r.customerName === filterCustomer);
+    }
+    if (filterComponent) {
+      records = records.filter((r) => r.components === filterComponent);
+    }
+    if (filterSchedule) {
+      records = records.filter((r) => r.scheduleNo === filterSchedule);
+    }
+    const set = new Set(records.map((r) => r.components).filter(Boolean));
+    return Array.from(set).sort();
+  }, [storeInRecords, filterStyle, filterCustomer, filterSchedule]);
+
   // Schedule numbers (scoped to selected style/customer)
   const scheduleNos = useMemo(() => {
     let records = storeInRecords;
@@ -95,7 +116,7 @@ export default function StoreInSearchPage() {
   }, [filterStyle, storeInRecords]);
 
   // Is any filter active?
-  const hasFilters = !!(filterStyle || filterCustomer || filterSchedule || filterDateFrom || filterDateTo);
+  const hasFilters = !!(filterStyle || filterCustomer || filterComponent || filterSchedule || filterDateFrom || filterDateTo);
 
   // Filtered records
   const filteredRecords = useMemo(() => {
@@ -108,6 +129,9 @@ export default function StoreInSearchPage() {
     if (filterCustomer) {
       records = records.filter((r) => r.customerName === filterCustomer);
     }
+    if (filterComponent) {
+      records = records.filter((r) => r.components === filterComponent);
+    }
     if (filterSchedule) {
       records = records.filter((r) => r.scheduleNo === filterSchedule);
     }
@@ -119,7 +143,7 @@ export default function StoreInSearchPage() {
     }
 
     return records;
-  }, [storeInRecords, filterStyle, filterCustomer, filterSchedule, filterDateFrom, filterDateTo]);
+  }, [storeInRecords, filterStyle, filterCustomer, filterComponent, filterSchedule, filterDateFrom, filterDateTo]);
 
   // Display records only after the user applies at least one filter.
   const displayRecords = useMemo(() => {
@@ -139,6 +163,7 @@ export default function StoreInSearchPage() {
   const clearFilters = () => {
     setFilterStyle('');
     setFilterCustomer('');
+    setFilterComponent('');
     setFilterSchedule('');
     setFilterDateFrom('');
     setFilterDateTo('');
@@ -146,7 +171,7 @@ export default function StoreInSearchPage() {
   };
 
   // Active filter count (for badge)
-  const activeFilterCount = [filterStyle, filterCustomer, filterSchedule, filterDateFrom, filterDateTo].filter(Boolean).length;
+  const activeFilterCount = [filterStyle, filterCustomer, filterComponent, filterSchedule, filterDateFrom, filterDateTo].filter(Boolean).length;
 
   // ==========================================
   // RENDER
@@ -211,6 +236,7 @@ export default function StoreInSearchPage() {
               value={filterStyle}
               onChange={(e) => {
                 setFilterStyle(e.target.value);
+                setFilterComponent('');
                 setFilterSchedule('');
               }}
               className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
@@ -242,6 +268,25 @@ export default function StoreInSearchPage() {
             >
               <option value="">All Customers</option>
               {customers.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Component */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">Component</label>
+            <select
+              value={filterComponent}
+              onChange={(e) => setFilterComponent(e.target.value)}
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
+                filterComponent
+                  ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200'
+                  : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'
+              }`}
+            >
+              <option value="">All Components</option>
+              {components.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>

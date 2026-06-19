@@ -354,6 +354,45 @@ export default function StoreInPage() {
     bulkBalances.filter(bal => bal.remainingBulkQty > 0),
     [bulkBalances]);
 
+  const bulkBalanceSummary = useMemo(() => {
+    const uniqueActiveStyles = new Set(
+      visibleBulkBalances.map(bal => bal.styleNo + '|||' + bal.customerName)
+    ).size;
+
+    return {
+      uniqueActiveStyles,
+      totalRemaining: visibleBulkBalances.reduce((sum, bal) => sum + bal.remainingBulkQty, 0),
+      totalReceived: visibleBulkBalances.reduce((sum, bal) => sum + bal.totalInQty, 0),
+      totalApproved: visibleBulkBalances.reduce((sum, bal) => sum + bal.approvedBulkQty, 0),
+    };
+  }, [visibleBulkBalances]);
+
+  const getBulkBalanceComponentInfo = (bal: (typeof bulkBalances)[number]) => {
+    const raw = bal as any;
+    const matchedEligible = eligibleStoreInItems.find(item => item.submissionId === bal.submissionId);
+
+    const componentName = String(
+      raw.component ||
+      raw.components ||
+      raw.Component ||
+      raw.Components ||
+      matchedEligible?.components ||
+      ''
+    ).trim();
+
+    const bodyColour = String(
+      raw.bodyColour ||
+      raw.BodyColour ||
+      matchedEligible?.bodyColour ||
+      ''
+    ).trim();
+
+    return {
+      componentName: componentName || 'Component not set',
+      bodyColour,
+    };
+  };
+
   const existingScheduleOptions = useMemo(() => {
     if (!selectedStyleNo || !selectedCustomer) return [];
     const fromRecords = storeInRecords
@@ -961,36 +1000,78 @@ export default function StoreInPage() {
         </div>
       </div>
 
-      {/* Bulk Balance Cards */}
+      {/* Bulk Balance Strip — compact one-row overview so many styles do not push the form down */}
       {visibleBulkBalances.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {visibleBulkBalances.map(bal => (
-            <div key={bal.submissionId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium text-slate-500">{bal.customerName}</p>
-                  <p className="text-sm font-bold text-slate-900">{bal.styleNo}</p>
-                  {(bal as any).component && (
-                    <span className="inline-block mt-0.5 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full">
-                      {(bal as any).component}
-                    </span>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Remaining bulk</p>
-                  <p className={'text-lg font-black ' + (bal.remainingBulkQty > 0 ? 'text-blue-700' : 'text-emerald-600')}>{bal.remainingBulkQty}</p>
-                </div>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-blue-500 transition-all"
-                  style={{ width: Math.min(100, bal.approvedBulkQty > 0 ? (bal.totalInQty / bal.approvedBulkQty) * 100 : 0) + '%' }} />
-              </div>
-              <div className="mt-1 flex justify-between text-[10px] text-slate-400">
-                <span>Received: {bal.totalInQty}</span>
-                <span>Approved: {bal.approvedBulkQty}</span>
-              </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-slate-800">Bulk Balance Overview</p>
+              <p className="text-xs text-slate-500">
+                {visibleBulkBalances.length} active component balance{visibleBulkBalances.length !== 1 ? 's' : ''}
+                {' '}across {bulkBalanceSummary.uniqueActiveStyles} style{bulkBalanceSummary.uniqueActiveStyles !== 1 ? 's' : ''}. Scroll sideways to view all.
+              </p>
             </div>
-          ))}
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-600">
+                Received <span className="font-black text-slate-900">{bulkBalanceSummary.totalReceived}</span>
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-600">
+                Approved <span className="font-black text-slate-900">{bulkBalanceSummary.totalApproved}</span>
+              </span>
+              <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+                Remaining <span className="font-black">{bulkBalanceSummary.totalRemaining}</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto pb-1">
+            <div className="flex min-w-max gap-3 pr-2">
+              {visibleBulkBalances.map(bal => {
+                const receivedPercent = Math.min(
+                  100,
+                  bal.approvedBulkQty > 0 ? (bal.totalInQty / bal.approvedBulkQty) * 100 : 0
+                );
+                const { componentName, bodyColour } = getBulkBalanceComponentInfo(bal);
+
+                return (
+                  <div
+                    key={bal.submissionId}
+                    className="w-[240px] shrink-0 rounded-lg border border-slate-200 bg-slate-50/70 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-medium text-slate-500">{bal.customerName}</p>
+                        <p className="truncate text-sm font-black text-slate-900">{bal.styleNo}</p>
+                        <div className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5">
+                          <span className="shrink-0 text-[8px] font-black uppercase tracking-wide text-indigo-400">Component</span>
+                          <span className="truncate text-[10px] font-black text-indigo-700">{componentName}</span>
+                        </div>
+                        {bodyColour && (
+                          <p className="mt-1 truncate text-[10px] font-medium text-slate-500">{bodyColour}</p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[9px] uppercase tracking-wide text-slate-400">Remaining</p>
+                        <p className="text-lg font-black text-blue-700">{bal.remainingBulkQty}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white ring-1 ring-slate-100">
+                      <div
+                        className="h-full rounded-full bg-blue-500 transition-all"
+                        style={{ width: receivedPercent + '%' }}
+                      />
+                    </div>
+
+                    <div className="mt-2 flex justify-between text-[10px] text-slate-400">
+                      <span>Received: <span className="font-bold text-slate-600">{bal.totalInQty}</span></span>
+                      <span>Approved: <span className="font-bold text-slate-600">{bal.approvedBulkQty}</span></span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

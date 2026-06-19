@@ -32,6 +32,8 @@ import SplashScreen from './components/SplashScreen';
 import OperatorSelect from './pages/OperatorSelect';
 import ColourMasterPage from './pages/admin/ColourMasterPage';
 import AboutUsPage from './pages/AboutUsPage';
+import ReconciliationReportPage from './pages/report/ReconciliationReportPage';
+import ReconciliationReportSearchPage from './pages/report/ReconciliationReportSearchPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -74,6 +76,8 @@ function App() {
           <Route index element={<Dashboard />} />
 
           <Route path="about" element={<AboutUsPage />} />
+          <Route path="report" element={<ReconciliationReportPage />} />
+          <Route path="report-search" element={<ReconciliationReportSearchPage />} />
 
           {/* ── Development ── */}
           <Route path="development">
