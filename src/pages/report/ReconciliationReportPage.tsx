@@ -379,8 +379,7 @@ export default function ReconciliationReportPage() {
     const baseRows: Array<Omit<SentRow, 'sampleTesting' | 'rtn' | 'goodQty' | 'goodTotal'>> = [];
 
     notes.forEach(note => {
-      const storeIn = storeInById.get(note.storeInRecordId);
-      const adNoFromStoreIn = storeIn?.inAdNo || '';
+      const adviceNoteAdNo = note.adviceNoteAdNo || '';
 
       const rows = getAdviceRowsInSavedOrder(note.rows);
       const groupedByCut = new Map<string, { total: number; pd: number; fd: number }>();
@@ -400,7 +399,7 @@ export default function ReconciliationReportPage() {
         baseRows.push({
           key: `${note.id}|||${cutNo}`,
           date: note.deliveryDate || '',
-          adNo: adNoFromStoreIn, // IMPORTANT: only Store-In AD No is used here.
+          adNo: adviceNoteAdNo, // Gatepass / Advice Note AD No printed on the bill.
           cutNo,
           total: value.total,
           pd: value.pd,
@@ -816,7 +815,7 @@ export default function ReconciliationReportPage() {
             </table>
           </div>
 
-          <div className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">AD No in both sections is taken from Store-In IN-AD No. Advice Note AD No is not used in this report.</div>
+          <div className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">Received Details AD No is taken from Store-In IN-AD No. Sent Details AD No is taken from the Gatepass / Advice Note bill AD No.</div>
         </div>
       )}
 

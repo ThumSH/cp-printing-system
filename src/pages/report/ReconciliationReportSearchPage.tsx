@@ -146,8 +146,8 @@ function printSavedReport(report: ReconciliationSavedReport) {
     <thead>
       <tr><th class="section" colspan="5">Received Details</th><th class="section" colspan="10">Sent Details</th></tr>
       <tr>
-        <th>Date</th><th>AD No</th><th>Cut No</th><th>Qty</th><th>Total</th>
-        <th>Date</th><th>AD No</th><th>Cut No</th><th>Total</th><th>PD</th><th>FD</th><th>Sample / Testing</th><th>RTN</th><th>Good Qty</th><th>Good Total</th>
+        <th>Date</th><th>Store-In AD No</th><th>Cut No</th><th>Qty</th><th>Total</th>
+        <th>Date</th><th>Gatepass AD No</th><th>Cut No</th><th>Total</th><th>PD</th><th>FD</th><th>Sample / Testing</th><th>RTN</th><th>Good Qty</th><th>Good Total</th>
       </tr>
     </thead>
     <tbody>${rowHtml}</tbody>
@@ -370,7 +370,10 @@ export default function ReconciliationReportSearchPage() {
                       {isExpanded && (
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden border-t border-slate-100 bg-slate-50/50 px-6 py-4">
                           <div className="mb-3 flex items-center justify-between">
-                            <h4 className="font-bold text-slate-700">Saved Report Details</h4>
+                            <div>
+                              <h4 className="font-bold text-slate-700">Saved Report Details</h4>
+                              <p className="text-[11px] text-slate-400">Received AD No = Store-In IN-AD No · Sent AD No = Gatepass bill AD No</p>
+                            </div>
                             <button type="button" onClick={() => printSavedReport(report)} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700">
                               <Printer className="h-3.5 w-3.5" /> Print Report
                             </button>
@@ -384,8 +387,8 @@ export default function ReconciliationReportSearchPage() {
                                   <th colSpan={10} className="border border-slate-300 bg-slate-100 px-2 py-2 text-center text-[11px] font-black uppercase text-slate-700">Sent Details</th>
                                 </tr>
                                 <tr className="bg-white text-[10px] uppercase tracking-wide text-slate-500">
-                                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">AD No</th><th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th>
-                                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">AD No</th><th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th><th className="border border-slate-300 px-2 py-2 text-right">PD</th><th className="border border-slate-300 px-2 py-2 text-right">FD</th><th className="border border-slate-300 px-2 py-2 text-right">Sample/Testing</th><th className="border border-slate-300 px-2 py-2 text-right">RTN</th><th className="border border-slate-300 px-2 py-2 text-right">Good Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Good Total</th>
+                                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">Store-In AD No</th><th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th>
+                                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">Gatepass AD No</th><th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th><th className="border border-slate-300 px-2 py-2 text-right">PD</th><th className="border border-slate-300 px-2 py-2 text-right">FD</th><th className="border border-slate-300 px-2 py-2 text-right">Sample/Testing</th><th className="border border-slate-300 px-2 py-2 text-right">RTN</th><th className="border border-slate-300 px-2 py-2 text-right">Good Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Good Total</th>
                                 </tr>
                               </thead>
                               <tbody>

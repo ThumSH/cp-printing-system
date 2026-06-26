@@ -1036,7 +1036,7 @@ export default function StoreInPage() {
                 return (
                   <div
                     key={bal.submissionId}
-                    className="w-[240px] shrink-0 rounded-lg border border-slate-200 bg-slate-50/70 p-3"
+                    className="w-60 shrink-0 rounded-lg border border-slate-200 bg-slate-50/70 p-3"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">

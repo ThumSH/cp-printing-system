@@ -103,8 +103,8 @@ const NAV_GROUPS: NavGroup[] = [
    {
     label: 'Report',
     items: [
-      { name: 'Report', href: '/report', icon: Receipt, roles: ['Admin'] },
-      { name: 'Report Search', href: '/report-search', icon: Receipt, roles: ['Admin'] },
+      { name: 'Report', href: '/report', icon: Receipt, roles: ['Admin', 'QC', 'Gatepass', 'Stores'] },
+      { name: 'Report Search', href: '/report-search', icon: Receipt, roles: ['Admin', 'QC', 'Gatepass', 'Stores'] },
     ],
   },
 ];
