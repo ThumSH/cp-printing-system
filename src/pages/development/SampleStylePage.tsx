@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette, Plus, ChevronDown, ChevronRight, MessageSquare,
   CheckCircle2, AlertCircle, Send, Building2, Lock, Calendar,
-  GitBranch, Image, ArrowRight, PackagePlus, Info, X,
+  GitBranch, Image, ArrowRight, PackagePlus, Info, X, Edit2, Trash2, Save,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 import { useSampleStyleStore, SampleStyle, SampleStyleRevision } from '../../store/sampleStyleStore';
@@ -24,6 +24,8 @@ function imgSrc(path?: string | null): string {
 }
 
 function StatusBadge({ style }: { style: SampleStyle }) {
+  if (style.adminStatus === 'Rejected')
+    return <span className="rounded-full bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5">Rejected by Admin</span>;
   if (style.submittedToAdmin && style.adminStatus === 'Approved')
     return <span className="rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5">Admin Approved ✓</span>;
   if (style.submittedToAdmin)
@@ -145,13 +147,25 @@ function ColourChipSelect({
   );
 }
 
+type RejectedEditForm = {
+  customer: string;
+  styleNo: string;
+  season: string;
+  printingTechnique: string;
+  bodyColour: string;
+  printColour: string;
+  printColourQty: string;
+  washingStandard: string;
+  component: string;
+};
+
 // ==========================================
 // MAIN PAGE
 // ==========================================
 export default function SampleStylePage() {
   const {
     styles, loading,
-    fetchStyles, addRevision, toggleClientApprove, submitToAdmin, revise,
+    fetchStyles, addRevision, toggleClientApprove, submitToAdmin, revise, updateRejectedStyle, deleteStyle,
   } = useSampleStyleStore();
 
   const [pageError, setPageError]   = useState('');
@@ -189,6 +203,13 @@ export default function SampleStylePage() {
   const [reviseComments, setReviseComments] = useState('');
   const [isRevising, setIsRevising]     = useState(false);
   const [reviseError, setReviseError]   = useState('');
+
+  // Edit rejected style inline
+  const [editingRejectedId, setEditingRejectedId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<RejectedEditForm | null>(null);
+  const [editError, setEditError] = useState('');
+  const [isSavingRejectedEdit, setIsSavingRejectedEdit] = useState(false);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
   useEffect(() => { fetchStyles(true); }, []); // eslint-disable-line
 
@@ -295,6 +316,69 @@ export default function SampleStylePage() {
     finally { setIsRevising(false); }
   };
 
+  const startRejectedEdit = (style: SampleStyle) => {
+    setEditingRejectedId(style.id);
+    setExpandedId(style.id);
+    setEditError('');
+    setEditForm({
+      customer: style.customer || '',
+      styleNo: style.styleNo || '',
+      season: style.season || '',
+      printingTechnique: style.printingTechnique || '',
+      bodyColour: style.bodyColour || '',
+      printColour: style.printColour || '',
+      printColourQty: style.printColourQty || '',
+      washingStandard: style.washingStandard || '',
+      component: style.component || '',
+    });
+  };
+
+  const cancelRejectedEdit = () => {
+    setEditingRejectedId(null);
+    setEditForm(null);
+    setEditError('');
+  };
+
+  const setEditField = (field: keyof RejectedEditForm, value: string) => {
+    setEditForm(prev => prev ? { ...prev, [field]: value } : prev);
+    setEditError('');
+  };
+
+  const saveRejectedEdit = async () => {
+    if (!editingRejectedId || !editForm) return;
+    if (!editForm.customer.trim() || !editForm.styleNo.trim() || !editForm.component.trim()) {
+      setEditError('Customer, Style No, and Component are required.');
+      return;
+    }
+    setIsSavingRejectedEdit(true);
+    setEditError('');
+    try {
+      await updateRejectedStyle(editingRejectedId, editForm);
+      cancelRejectedEdit();
+      setSuccessMsg('Rejected style updated and recorded as a new revision. You can resubmit it to admin now.');
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : 'Failed to update rejected style.');
+    } finally {
+      setIsSavingRejectedEdit(false);
+    }
+  };
+
+  const handleDeleteRejectedStyle = async (style: SampleStyle) => {
+    if (!window.confirm(`Delete rejected style ${style.styleNo} — ${style.component}?`)) return;
+    setDeleteBusyId(style.id);
+    try {
+      await deleteStyle(style.id);
+      if (editingRejectedId === style.id) cancelRejectedEdit();
+      setSuccessMsg('Rejected style deleted.');
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Failed to delete rejected style.');
+    } finally {
+      setDeleteBusyId(null);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-4xl space-y-6 pb-12">
 
@@ -336,8 +420,10 @@ export default function SampleStylePage() {
 
           {group.components.map(style => {
             const isExpanded     = expandedId === style.id;
+            const isRejected     = style.adminStatus === 'Rejected' && !style.submittedToAdmin;
+            const isEditingRejected = editingRejectedId === style.id;
             const canAddRevision = !style.clientApproved && !style.submittedToAdmin;
-            const canSubmit      = style.clientApproved && !style.submittedToAdmin;
+            const canSubmit      = style.clientApproved && !style.submittedToAdmin && !isEditingRejected;
             const canRevise      = style.submittedToAdmin && style.adminStatus === 'Approved';
 
             return (
@@ -369,13 +455,25 @@ export default function SampleStylePage() {
 
                   {/* Action buttons */}
                   <div className="flex gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                    {isRejected && (
+                      <>
+                        <button onClick={() => startRejectedEdit(style)} disabled={isEditingRejected}
+                          className="inline-flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-colors disabled:opacity-50">
+                          <Edit2 className="h-3.5 w-3.5" /> Edit
+                        </button>
+                        <button onClick={() => handleDeleteRejectedStyle(style)} disabled={deleteBusyId === style.id}
+                          className="inline-flex items-center gap-1 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50">
+                          <Trash2 className="h-3.5 w-3.5" /> {deleteBusyId === style.id ? 'Deleting…' : 'Delete'}
+                        </button>
+                      </>
+                    )}
                     {canAddRevision && (
                       <button onClick={() => { setAddingRevFor(style.id); setRevComment(''); setExpandedId(style.id); }}
                         className="inline-flex items-center gap-1 rounded-lg border border-blue-300 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 transition-colors">
                         <Plus className="h-3.5 w-3.5" /> Add Revision
                       </button>
                     )}
-                    {!style.submittedToAdmin && (
+                    {!style.submittedToAdmin && !isRejected && (
                       <button onClick={() => handleClientApprove(style)} disabled={isApproving}
                         className={'inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ' +
                           (style.clientApproved ? 'bg-teal-100 text-teal-700 hover:bg-teal-200' : 'bg-emerald-600 text-white hover:bg-emerald-700')}>
@@ -386,7 +484,7 @@ export default function SampleStylePage() {
                     {canSubmit && (
                       <button onClick={() => { setSubmitModal(style); setRcMeetingDate(''); setBoardSet(''); setBulkQty(''); setDevComments(''); setSubmitError(''); }}
                         className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors">
-                        <Building2 className="h-3.5 w-3.5" /> Submit to Admin
+                        <Building2 className="h-3.5 w-3.5" /> {isRejected ? 'Resubmit to Admin' : 'Submit to Admin'}
                       </button>
                     )}
                     {canRevise && (
@@ -453,6 +551,50 @@ export default function SampleStylePage() {
                             </div>
                           </div>
                         </div>
+
+                        {isRejected && (
+                          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                            <p className="font-bold">Rejected by Admin</p>
+                            <p className="mt-1 text-xs">{style.adminRemarks || 'No rejection note provided.'}</p>
+                          </div>
+                        )}
+
+                        {isEditingRejected && editForm && (
+                          <div className="rounded-xl border border-amber-200 bg-white p-4 space-y-4 shadow-sm">
+                            <div className="flex items-center justify-between gap-3 border-b border-amber-100 pb-3">
+                              <div>
+                                <p className="text-sm font-bold text-amber-800">Edit rejected style</p>
+                                <p className="text-xs text-slate-500">Update the fields, save, then fill the submit modal again. Field changes are saved as a new revision automatically.</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button type="button" onClick={saveRejectedEdit} disabled={isSavingRejectedEdit}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-50">
+                                  <Save className="h-3.5 w-3.5" />{isSavingRejectedEdit ? 'Saving…' : 'Save Changes'}
+                                </button>
+                                <button type="button" onClick={cancelRejectedEdit}
+                                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Customer</label><input value={editForm.customer} onChange={e => setEditField('customer', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Style No</label><input value={editForm.styleNo} onChange={e => setEditField('styleNo', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Component</label><input value={editForm.component} onChange={e => setEditField('component', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Season</label><input value={editForm.season} onChange={e => setEditField('season', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Print Colour</label><input value={editForm.printColour} onChange={e => setEditField('printColour', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Print Qty</label><input value={editForm.printColourQty} onChange={e => setEditField('printColourQty', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Technique</label><input value={editForm.printingTechnique} onChange={e => setEditField('printingTechnique', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Washing</label><input value={editForm.washingStandard} onChange={e => setEditField('washingStandard', e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+                              <div className="md:col-span-2"><ColourChipSelect label="Body Colour" value={editForm.bodyColour} onChange={v => setEditField('bodyColour', v)} /></div>
+                            </div>
+
+                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                              Artwork editing is disabled for this correction. Any saved field change will automatically add a new revision history row.
+                            </div>
+
+                            {editError && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{editError}</p>}
+                          </div>
+                        )}
 
                         {/* Revision history — FULL, no truncation, comment prominent */}
                         <div>
@@ -615,7 +757,7 @@ export default function SampleStylePage() {
               className="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-3 border-b border-slate-100 px-6 py-4">
                 <div className="rounded-xl bg-indigo-100 p-2.5"><Building2 className="h-5 w-5 text-indigo-700" /></div>
-                <div><h3 className="text-base font-bold text-slate-900">Submit to Admin</h3>
+                <div><h3 className="text-base font-bold text-slate-900">{submitModal.adminStatus === 'Rejected' ? 'Resubmit to Admin' : 'Submit to Admin'}</h3>
                   <p className="text-xs text-slate-500">Fill in submission details.</p></div>
               </div>
               <div className="px-6 py-5 space-y-4 max-h-[80vh] overflow-y-auto">
@@ -657,7 +799,7 @@ export default function SampleStylePage() {
                     className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
                   <button onClick={handleSubmitToAdmin} disabled={isSubmitting || !rcMeetingDate || !bulkQty}
                     className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                    <Building2 className="h-4 w-4" />{isSubmitting ? 'Submitting…' : 'Submit to Admin'}
+                    <Building2 className="h-4 w-4" />{isSubmitting ? 'Submitting…' : submitModal.adminStatus === 'Rejected' ? 'Resubmit to Admin' : 'Submit to Admin'}
                   </button>
                 </div>
               </div>
