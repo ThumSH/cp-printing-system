@@ -30,7 +30,7 @@ export interface SampleStyle {
   clientApproved: boolean;
   clientApprovedAt?: string;
   clientApprovedBy?: string;
-  adminStatus: 'Pending' | 'Approved';
+  adminStatus: 'Pending' | 'Approved' | 'Rejected';
   adminRemarks?: string;
   adminActionAt?: string;
   adminActionBy?: string;
@@ -43,6 +43,19 @@ export interface SampleStyle {
   submittedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+
+export interface UpdateRejectedStyleInput {
+  customer: string;
+  styleNo: string;
+  season: string;
+  printingTechnique: string;
+  bodyColour: string;
+  printColour: string;
+  printColourQty: string;
+  washingStandard: string;
+  component: string;
 }
 
 interface SampleStyleStore {
@@ -61,7 +74,9 @@ interface SampleStyleStore {
     bulkQty: string;
     developerComments?: string;
   }) => Promise<SampleStyle>;
-  adminAction: (id: string, status: 'Approved' | 'Pending', remarks?: string) => Promise<SampleStyle>;
+  adminAction: (id: string, status: 'Approved' | 'Pending' | 'Rejected', remarks?: string) => Promise<SampleStyle>;
+  updateRejectedStyle: (id: string, data: UpdateRejectedStyleInput) => Promise<SampleStyle>;
+  deleteStyle: (id: string) => Promise<void>;
 
   /**
    * Add extra bulk qty and optionally replace body colour on an EXISTING approved style.
@@ -155,6 +170,24 @@ export const useSampleStyleStore = create<SampleStyleStore>((set, get) => ({
     const updated = normalize(await res.json());
     set(s => ({ styles: s.styles.map(x => x.id === id ? updated : x) }));
     return updated;
+  },
+
+  updateRejectedStyle: async (id, data) => {
+    const res = await fetch(`${BASE}/${id}/rejectededit`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const updated = normalize(await res.json());
+    set(s => ({ styles: s.styles.map(x => x.id === id ? updated : x) }));
+    return updated;
+  },
+
+  deleteStyle: async (id) => {
+    const res = await fetch(`${BASE}/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    set(s => ({ styles: s.styles.filter(x => x.id !== id) }));
   },
 
   // FIX: Uses PATCH (not POST) → updates existing ApprovalRecord in place.

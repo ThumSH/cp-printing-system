@@ -35,6 +35,13 @@ function unique(arr: string[]) {
 }
 
 function StatusBadge({ style }: { style: SampleStyle }) {
+  if (style.adminStatus === 'Rejected') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+        <X className="h-3 w-3" /> Admin Rejected
+      </span>
+    );
+  }
   if (style.adminStatus === 'Approved') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
@@ -140,9 +147,15 @@ function DetailPanel({ style }: { style: SampleStyle }) {
       )}
 
       {/* Admin action */}
-      {style.adminStatus === 'Approved' && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm space-y-1">
-          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Admin Approved</p>
+      {(style.adminStatus === 'Approved' || style.adminStatus === 'Rejected') && (
+        <div className={(style.adminStatus === 'Approved'
+          ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm space-y-1'
+          : 'rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm space-y-1')}>
+          <p className={(style.adminStatus === 'Approved'
+            ? 'text-xs font-bold text-emerald-700 uppercase tracking-wide'
+            : 'text-xs font-bold text-red-700 uppercase tracking-wide')}>
+            {style.adminStatus === 'Approved' ? 'Admin Approved' : 'Admin Rejected'}
+          </p>
           <div className="flex gap-4 text-xs text-slate-600">
             <span>By: <span className="font-semibold">{style.adminActionBy || '—'}</span></span>
             <span>At: <span className="font-semibold">{style.adminActionAt?.slice(0, 10) || '—'}</span></span>
