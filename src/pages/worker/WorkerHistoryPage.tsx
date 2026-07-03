@@ -178,10 +178,19 @@ export default function WorkerHistoryPage() {
     setExpandedId(null);
   };
 
-  // Sum across all 6 stages for a record — our "pieces handled" metric
-  const sumAll = (r: DailyOutputRecord) =>
-    (r.totalSeating || 0) + (r.totalPrinting || 0) + (r.totalCuring || 0) +
-    (r.totalChecking || 0) + (r.totalPacking || 0) + (r.totalDispatch || 0);
+  // Stage allocations are independent. Do not sum all stages together.
+  const stageValues = (r: DailyOutputRecord) => [
+    r.totalSeating || 0,
+    r.totalPrinting || 0,
+    r.totalCuring || 0,
+    r.totalChecking || 0,
+    r.totalPacking || 0,
+    r.totalDispatch || 0,
+  ];
+
+  const maxStageAllocated = (r: DailyOutputRecord) => Math.max(...stageValues(r));
+  const lowestStageRemaining = (r: DailyOutputRecord) =>
+    Math.min(...stageValues(r).map(v => Math.max(0, r.orderQty - v)));
 
   return (
     <motion.div
@@ -320,7 +329,8 @@ export default function WorkerHistoryPage() {
           <div className="divide-y divide-slate-100">
             {records.map((r) => {
               const isExpanded = expandedId === r.id;
-              const totalHandled = sumAll(r);
+              const maxAllocated = maxStageAllocated(r);
+              const lowestRemaining = lowestStageRemaining(r);
               return (
                 <div key={r.id}>
                   {/* Summary row */}
@@ -355,10 +365,10 @@ export default function WorkerHistoryPage() {
                         Issue: <span className="font-bold text-orange-600">{r.orderQty}</span>
                       </div>
                       <div className="text-xs">
-                        Handled: <span className="font-bold text-emerald-700">{totalHandled}</span>
+                        Max stage: <span className="font-bold text-emerald-700">{maxAllocated}</span>
                       </div>
                       <div className="text-xs text-slate-500">
-                        {r.timeSlots?.length || 0} slot{(r.timeSlots?.length || 0) !== 1 ? 's' : ''}
+                        Lowest rem: <span className="font-bold text-blue-700">{lowestRemaining}</span> · {r.timeSlots?.length || 0} slot{(r.timeSlots?.length || 0) !== 1 ? 's' : ''}
                       </div>
                     </div>
                   </div>

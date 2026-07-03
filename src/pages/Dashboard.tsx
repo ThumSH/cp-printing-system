@@ -12,7 +12,7 @@ import {
   Boxes, Gauge, Building2, ListFilter,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { MiniBarChart, PieChart, MiniDonut, ProgressBar, HorizontalBarChart } from '../components/MiniChart';
+import { PieChart, MiniDonut, ProgressBar, HorizontalBarChart } from '../components/MiniChart';
 import { StoreInRecord } from '../store/inventoryStore';
 import { useDashboardStore, DashboardData, StyleOverview } from '../store/dashboardStore';
 
@@ -178,6 +178,57 @@ function MiniProgress({ value, max, color = '#3b82f6' }: { value: number; max: n
       <span className="text-[10px] font-semibold text-slate-500 whitespace-nowrap">
         {value.toLocaleString()} / {max.toLocaleString()}
       </span>
+    </div>
+  );
+}
+
+function WorkerStageBarChart({
+  data,
+  height = 150,
+}: {
+  data: { label: string; value: number; color: string }[];
+  height?: number;
+}) {
+  const safeData = data.map(item => ({
+    ...item,
+    value: Math.max(0, Number(item.value) || 0),
+  }));
+  const maxValue = Math.max(1, ...safeData.map(item => item.value));
+  const total = safeData.reduce((sum, item) => sum + item.value, 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-4 py-3" style={{ height }}>
+        {safeData.map(item => {
+          const pct = maxValue > 0 ? Math.min(100, (item.value / maxValue) * 100) : 0;
+          const barHeight = item.value > 0 ? Math.max(8, pct) : 2;
+
+          return (
+            <div key={item.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2">
+              <span className="text-[10px] font-black text-slate-700">
+                {item.value.toLocaleString()}
+              </span>
+              <div className="flex h-full w-full max-w-10 items-end rounded-t-md bg-white/70">
+                <div
+                  className="w-full rounded-t-md transition-all duration-300 ease-out"
+                  style={{
+                    height: `${barHeight}%`,
+                    backgroundColor: item.value > 0 ? item.color : '#cbd5e1',
+                  }}
+                />
+              </div>
+              <span className="truncate text-[10px] font-semibold text-slate-500">
+                {item.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {total === 0 && (
+        <p className="text-center text-xs text-slate-400">
+          No worker output recorded for today yet.
+        </p>
+      )}
     </div>
   );
 }
@@ -588,7 +639,7 @@ function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleO
 
       <Card title="Today's Output — By Section" icon={BarChart2}
         action={<span className="text-xs font-bold text-slate-700">{totalToday.toLocaleString()} total pcs</span>}>
-        <MiniBarChart data={todayBreakdown} height={150} />
+        <WorkerStageBarChart data={todayBreakdown} height={170} />
       </Card>
 
       {workerStyles.length > 0 && (
@@ -1090,21 +1141,18 @@ export default function Dashboard() {
                 </div>
               </Card>
               <Card title="Worker Output" icon={Factory} className="lg:col-span-2"
-                action={<span className="text-xs font-bold text-slate-700">{totalWorkerToday} pcs</span>}>
-                <MiniBarChart data={[
-                  { label: 'Seat',  value: data.worker.todaySeating,  color: '#3b82f6' },
-                  { label: 'Print', value: data.worker.todayPrinting, color: '#8b5cf6' },
-                  { label: 'Cure',  value: data.worker.todayCuring,   color: '#f59e0b' },
-                  { label: 'Check', value: data.worker.todayChecking, color: '#14b8a6' },
-                  { label: 'Pack',  value: data.worker.todayPacking,  color: '#6366f1' },
-                  { label: 'Disp',  value: data.worker.todayDispatch, color: '#10b981' },
-              { label: 'Seat',  value: data.worker?.todaySeating || 0,  color: '#3b82f6' },
-              { label: 'Print', value: data.worker?.todayPrinting || 0, color: '#8b5cf6' },
-              { label: 'Cure',  value: data.worker?.todayCuring || 0,   color: '#f59e0b' },
-              { label: 'Check', value: data.worker?.todayChecking || 0, color: '#14b8a6' },
-              { label: 'Pack',  value: data.worker?.todayPacking || 0,  color: '#6366f1' },
-              { label: 'Disp',  value: data.worker?.todayDispatch || 0, color: '#10b981' },
-                ]} height={130} />
+                action={<span className="text-xs font-bold text-slate-700">{totalWorkerToday.toLocaleString()} pcs</span>}>
+                <WorkerStageBarChart
+                  data={[
+                    { label: 'Seat',  value: data.worker?.todaySeating  || 0, color: '#3b82f6' },
+                    { label: 'Print', value: data.worker?.todayPrinting || 0, color: '#8b5cf6' },
+                    { label: 'Cure',  value: data.worker?.todayCuring   || 0, color: '#f59e0b' },
+                    { label: 'Check', value: data.worker?.todayChecking || 0, color: '#14b8a6' },
+                    { label: 'Pack',  value: data.worker?.todayPacking  || 0, color: '#6366f1' },
+                    { label: 'Disp',  value: data.worker?.todayDispatch || 0, color: '#10b981' },
+                  ]}
+                  height={150}
+                />
               </Card>
             </div>
 

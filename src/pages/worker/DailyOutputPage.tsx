@@ -65,10 +65,24 @@ interface EligibleStyle {
   cutNo: string;
   lineNo: string;
   component: string;
-  bodyColour: string; 
-  originalQty: number; // <-- FIX: Mapped to true original issue qty from DB
-  orderQty: number;    // Note: Backend sends the REMAINING qty in this field
+  bodyColour: string;
+  originalQty: number; // true production issue qty from DB
+  orderQty: number;    // backward-compatible: max remaining qty across stages
   dispatchedQty: number;
+
+  seatingAllocated?: number;
+  printingAllocated?: number;
+  curingAllocated?: number;
+  checkingAllocated?: number;
+  packingAllocated?: number;
+  dispatchAllocated?: number;
+
+  seatingRemaining?: number;
+  printingRemaining?: number;
+  curingRemaining?: number;
+  checkingRemaining?: number;
+  packingRemaining?: number;
+  dispatchRemaining?: number;
 }
 
 interface DailyOutputRecord {
@@ -111,6 +125,33 @@ const SECTIONS: { key: keyof LockedFields; label: string; color: string; bgColor
   { key: 'packing', label: 'Packing', color: 'text-indigo-700', bgColor: 'bg-indigo-50' },
   { key: 'dispatch', label: 'Dispatch', color: 'text-emerald-700', bgColor: 'bg-emerald-50' },
 ];
+
+const STAGE_BAR_CLASSES: Record<keyof LockedFields, string> = {
+  seating: 'bg-blue-600',
+  printing: 'bg-purple-600',
+  curing: 'bg-orange-500',
+  checking: 'bg-teal-600',
+  packing: 'bg-indigo-600',
+  dispatch: 'bg-emerald-600',
+};
+
+type StageKey = keyof LockedFields;
+type StageTotals = Record<StageKey, number>;
+
+const emptyStageTotals = (): StageTotals => ({
+  seating: 0,
+  printing: 0,
+  curing: 0,
+  checking: 0,
+  packing: 0,
+  dispatch: 0,
+});
+
+const maxStageValue = (totals: StageTotals) =>
+  Math.max(...SECTIONS.map(sec => totals[sec.key]));
+
+const minStageValue = (totals: StageTotals) =>
+  Math.min(...SECTIONS.map(sec => totals[sec.key]));
 
 // ==========================================
 // COMPONENT
@@ -283,7 +324,7 @@ export default function DailyOutputPage() {
   }), [timeSlots]);
 
   const persistedElsewhere = useMemo(() => {
-    if (!selectedItem) return { seating: 0, printing: 0, curing: 0, checking: 0, packing: 0, dispatch: 0 };
+    if (!selectedItem) return emptyStageTotals();
     // Only tally sums from records that aren't currently being edited
     const other = records.filter(r => r.productionRecordId === selectedItem.productionRecordId && r.id !== activeRecordId);
     return {
@@ -305,23 +346,29 @@ export default function DailyOutputPage() {
     dispatch: persistedElsewhere.dispatch + totals.dispatch,
   }), [persistedElsewhere, totals]);
 
-  const totalAllocated = 
-    allocated.seating + 
-    allocated.printing + 
-    allocated.curing + 
-    allocated.checking + 
-    allocated.packing + 
-    allocated.dispatch;
+  const stageRemaining = useMemo<StageTotals>(() => ({
+    seating: Math.max(0, issueQty - allocated.seating),
+    printing: Math.max(0, issueQty - allocated.printing),
+    curing: Math.max(0, issueQty - allocated.curing),
+    checking: Math.max(0, issueQty - allocated.checking),
+    packing: Math.max(0, issueQty - allocated.packing),
+    dispatch: Math.max(0, issueQty - allocated.dispatch),
+  }), [issueQty, allocated]);
 
-  const realRemaining = issueQty - totalAllocated;
-  const isOverLimit = totalAllocated > issueQty;
-  const remaining = realRemaining;
+  const overLimitStages = useMemo(
+    () => SECTIONS.filter(sec => allocated[sec.key] > issueQty).map(sec => sec.label),
+    [allocated, issueQty]
+  );
+
+  const isOverLimit = overLimitStages.length > 0;
+  const maxAllocated = maxStageValue(allocated);
+  const lowestRemaining = minStageValue(stageRemaining);
 
   const updateSlot = (index: number, field: keyof TimeSlot, value: string) => {
     setTimeSlots((prev) => prev.map((slot, i) => {
       if (i !== index) return slot;
       if (field === 'timeFrom' || field === 'timeTo') return { ...slot, [field]: value };
-      return { ...slot, [field]: parseInt(value) || 0 };
+      return { ...slot, [field]: Math.max(0, parseInt(value) || 0) };
     }));
   };
 
@@ -565,7 +612,7 @@ export default function DailyOutputPage() {
                       {'Line ' + (l.lineNo || '—')}
                       {comp ? ' · ' + comp : ''}
                       {colour ? ' · ' + colour : ''}
-                      {' — Issued ' + l.originalQty + ' (Rem: ' + l.orderQty + ')'}
+                      {' — Issued ' + l.originalQty + ' (Open stage rem: ' + l.orderQty + ')'}
                     </option>
                   );
                 })}
@@ -613,29 +660,72 @@ export default function DailyOutputPage() {
         </div>
 
         {selectedItem && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="space-y-3">
             <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
               <div className="flex items-center gap-2 text-xs font-semibold text-orange-600 uppercase tracking-wide">
                 <Package className="h-3.5 w-3.5" /> Issue Qty
               </div>
               <p className="mt-1 text-2xl font-black text-orange-700">{issueQty}</p>
-              <p className="text-[11px] text-slate-500">Total given from production</p>
-            </div>
-            
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 uppercase tracking-wide">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Total Distributed
-              </div>
-              <p className="mt-1 text-2xl font-black text-emerald-700">{totalAllocated}</p>
-              <p className="text-[11px] text-slate-500">Sum of pieces across all stages</p>
+              <p className="text-[11px] text-slate-500">
+                This qty is the independent allocation limit for each stage. Seating, Printing, Curing, Checking, Packing, and Dispatch each have their own {issueQty} qty limit.
+              </p>
             </div>
 
-            <div className={`rounded-lg border p-4 ${remaining <= 0 ? 'border-slate-200 bg-slate-50' : 'border-blue-200 bg-blue-50'}`}>
-              <div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-wide ${remaining <= 0 ? 'text-slate-600' : 'text-blue-600'}`}>
-                <TrendingDown className="h-3.5 w-3.5" /> Remaining
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
+              {SECTIONS.map((sec) => {
+                const used = allocated[sec.key];
+                const rem = stageRemaining[sec.key];
+                const over = used > issueQty;
+                return (
+                  <div key={sec.key} className={`rounded-lg border p-4 ${over ? 'border-red-300 bg-red-50' : rem <= 0 ? 'border-slate-200 bg-slate-50' : 'border-blue-200 bg-blue-50'}`}>
+                    <div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-wide ${over ? 'text-red-600' : rem <= 0 ? 'text-slate-600' : 'text-blue-600'}`}>
+                      <TrendingDown className="h-3.5 w-3.5" /> {sec.label}
+                    </div>
+                    <p className={`mt-1 text-xl font-black ${over ? 'text-red-700' : rem <= 0 ? 'text-slate-700' : 'text-blue-700'}`}>
+                      {rem}
+                    </p>
+                    <p className="text-[11px] text-slate-500">remaining for allocation</p>
+                    <p className="mt-1 text-[10px] text-slate-400">{used} / {issueQty} allocated</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 uppercase tracking-wide">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Stage Progress
               </div>
-              <p className={`mt-1 text-2xl font-black ${remaining <= 0 ? 'text-slate-700' : 'text-blue-700'}`}>{remaining}</p>
-              <p className="text-[11px] text-slate-500">{remaining <= 0 ? (remaining < 0 ? 'Overage / Excess' : 'All pieces distributed ✓') : `${issueQty} - ${totalAllocated}`}</p>
+
+              <div className="mt-3 space-y-2">
+                {SECTIONS.map((sec) => {
+                  const used = allocated[sec.key];
+                  const rem = stageRemaining[sec.key];
+                  const pct = issueQty > 0 ? Math.min(100, Math.max(0, (used / issueQty) * 100)) : 0;
+                  const over = used > issueQty;
+
+                  return (
+                    <div key={sec.key} className="rounded-md bg-white/80 p-2">
+                      <div className="mb-1 flex items-center justify-between gap-3">
+                        <span className={`text-xs font-bold ${sec.color}`}>{sec.label}</span>
+                        <span className={`text-[11px] font-semibold ${over ? 'text-red-600' : 'text-slate-500'}`}>
+                          {used.toLocaleString()} / {issueQty.toLocaleString()} allocated · {rem.toLocaleString()} remaining
+                        </span>
+                      </div>
+                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ease-out ${over ? 'bg-red-500' : STAGE_BAR_CLASSES[sec.key]}`}
+                          style={{ width: `${over ? 100 : pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p className="mt-3 text-sm text-slate-600">
+                Highest stage allocation: <span className="font-bold text-emerald-700">{maxAllocated}</span>.
+                Lowest remaining stage balance: <span className="font-bold text-blue-700">{lowestRemaining}</span>.
+              </p>
             </div>
           </div>
         )}
@@ -644,9 +734,9 @@ export default function DailyOutputPage() {
           <div className="rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 flex items-center gap-3">
             <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-bold text-red-700">Issue Qty Exceeded</p>
+              <p className="text-sm font-bold text-red-700">Stage Qty Exceeded</p>
               <p className="text-xs text-red-600">
-                The total number of pieces distributed across all stages exceeds your Issue Qty ({issueQty}). Please verify your distribution.
+                {overLimitStages.join(', ')} exceeds the independent Issue Qty limit ({issueQty}). Each stage must be {issueQty} or less.
               </p>
             </div>
           </div>
@@ -680,14 +770,16 @@ export default function DailyOutputPage() {
                       </td>
                       {SECTIONS.map((sec) => {
                         const isFieldLocked = slot.lockedFields[sec.key];
+                        const stageOver = allocated[sec.key] > issueQty;
                         return (
                           <td key={sec.key} className="border-r border-slate-200 p-0">
                             <input
                               type="number"
+                              min={0}
                               value={(slot[sec.key] as number) || ''}
                               onChange={(e) => updateSlot(idx, sec.key, e.target.value)}
                               disabled={isFieldLocked}
-                              className={`w-full bg-transparent py-1.5 text-center text-sm font-medium outline-none ${isFieldLocked ? 'cursor-not-allowed text-slate-400 font-bold bg-slate-50' : 'focus:bg-teal-50 hover:bg-slate-50'}`}
+                              className={`w-full bg-transparent py-1.5 text-center text-sm font-medium outline-none ${isFieldLocked ? 'cursor-not-allowed text-slate-400 font-bold bg-slate-50' : stageOver ? 'bg-red-50 text-red-700 focus:bg-red-50' : 'focus:bg-teal-50 hover:bg-slate-50'}`}
                               placeholder="0"
                             />
                           </td>
@@ -751,8 +843,8 @@ export default function DailyOutputPage() {
                     <th className="px-4 py-2.5 text-left">Component</th>
                     <th className="px-4 py-2.5 text-left">Table</th>
                     <th className="px-4 py-2.5 text-right">Issue</th>
-                    <th className="px-4 py-2.5 text-right">Distributed</th>
-                    <th className="px-4 py-2.5 text-right">Remaining</th>
+                    <th className="px-4 py-2.5 text-right">Max Stage</th>
+                    <th className="px-4 py-2.5 text-right">Lowest Rem.</th>
                     <th className="px-4 py-2.5 text-left">Worker</th>
                     <th className="px-4 py-2.5 text-right"></th>
                   </tr>
@@ -760,15 +852,16 @@ export default function DailyOutputPage() {
                 <tbody className="divide-y divide-slate-50">
                   {workerPagination.paginated.map((r) => {
                     const rec = r as DailyOutputRecord;
-                    const recCompleted = 
-                      (rec.totalSeating || 0) +
-                      (rec.totalPrinting || 0) +
-                      (rec.totalCuring || 0) +
-                      (rec.totalChecking || 0) +
-                      (rec.totalPacking || 0) +
-                      (rec.totalDispatch || 0);
-
-                    const rem = rec.orderQty - recCompleted;
+                    const recStageTotals = {
+                      seating: rec.totalSeating || 0,
+                      printing: rec.totalPrinting || 0,
+                      curing: rec.totalCuring || 0,
+                      checking: rec.totalChecking || 0,
+                      packing: rec.totalPacking || 0,
+                      dispatch: rec.totalDispatch || 0,
+                    };
+                    const recCompleted = Math.max(...Object.values(recStageTotals));
+                    const rem = Math.min(...Object.values(recStageTotals).map(v => Math.max(0, rec.orderQty - v)));
                     
                     return (
                       <tr key={rec.id} className="hover:bg-slate-50/50">
