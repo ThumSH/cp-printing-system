@@ -5,6 +5,7 @@ import {
   Palette, Plus, ChevronDown, ChevronRight, MessageSquare,
   CheckCircle2, AlertCircle, Send, Building2, Lock, Calendar,
   GitBranch, Image, ArrowRight, PackagePlus, Info, X, Edit2, Trash2, Save,
+  Filter, RotateCcw,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 import { useSampleStyleStore, SampleStyle, SampleStyleRevision } from '../../store/sampleStyleStore';
@@ -21,6 +22,25 @@ function imgSrc(path?: string | null): string {
   if (!path) return '';
   if (path.startsWith('http')) return path;
   return `${API.BASE}/api/samplestyle/image?path=${encodeURIComponent(path)}`;
+}
+
+// Used only for the new date-range filters. It is defensive so the page keeps
+// working even if older records do not have createdAt/updatedAt populated.
+function styleFilterDateKey(style: SampleStyle): string {
+  const raw =
+    (style as any).createdAt ||
+    (style as any).updatedAt ||
+    style.rcMeetingDate ||
+    style.revisions?.[0]?.createdAt ||
+    '';
+
+  if (!raw) return '';
+  const value = String(raw);
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
 }
 
 function StatusBadge({ style }: { style: SampleStyle }) {
@@ -172,8 +192,13 @@ export default function SampleStylePage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAll, setShowAll]       = useState(false);
-  const [filterCustomer] = useState('');
-  const [filterStatus]     = useState('');
+
+  // Filters — added only for this page view. No save/approval/revision logic is changed.
+  const [filterStyle, setFilterStyle]       = useState('');
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo]     = useState('');
+  const [filterStatus]                      = useState('');
 
   // Add revision state
   const [addingRevFor, setAddingRevFor]     = useState<string | null>(null);
@@ -229,19 +254,63 @@ export default function SampleStylePage() {
     }));
   }, [styles]);
 
+  const styleOptions = useMemo(() => {
+    return allGrouped
+      .map(g => ({ key: g.key, styleNo: g.styleNo, customer: g.customer, count: g.components.length }))
+      .sort((a, b) => a.styleNo.localeCompare(b.styleNo));
+  }, [allGrouped]);
+
+  const customerOptions = useMemo(() => {
+    return Array.from(new Set(allGrouped.map(g => g.customer).filter(Boolean))).sort();
+  }, [allGrouped]);
+
+  const clearFilters = () => {
+    setFilterStyle('');
+    setFilterCustomer('');
+    setFilterDateFrom('');
+    setFilterDateTo('');
+    setExpandedId(null);
+    setShowAll(false);
+  };
+
+  const activeFilterCount = [filterStyle, filterCustomer, filterDateFrom, filterDateTo].filter(Boolean).length;
+
   const grouped = useMemo(() => {
     let list = allGrouped;
-    if (filterCustomer) list = list.filter(g => g.customer === filterCustomer);
+
+    if (filterStyle) {
+      list = list.filter(g => g.key === filterStyle);
+    }
+
+    if (filterCustomer) {
+      list = list.filter(g => g.customer === filterCustomer);
+    }
+
+    if (filterDateFrom || filterDateTo) {
+      list = list
+        .map(g => ({
+          ...g,
+          components: g.components.filter(style => {
+            const dateKey = styleFilterDateKey(style);
+            if (!dateKey) return false;
+            if (filterDateFrom && dateKey < filterDateFrom) return false;
+            if (filterDateTo && dateKey > filterDateTo) return false;
+            return true;
+          }),
+        }))
+        .filter(g => g.components.length > 0);
+    }
+
     if (filterStatus === 'approved')     list = list.filter(g => g.components.every(s => s.clientApproved));
     if (filterStatus === 'submitted')    list = list.filter(g => g.components.some(s => s.submittedToAdmin));
     if (filterStatus === 'in_progress')  list = list.filter(g => g.components.some(s => s.revisions.length > 0 && !s.clientApproved));
     if (filterStatus === 'no_revisions') list = list.filter(g => g.components.every(s => s.revisions.length === 0));
     return list;
-  }, [allGrouped, filterCustomer, filterStatus]);
+  }, [allGrouped, filterStyle, filterCustomer, filterDateFrom, filterDateTo, filterStatus]);
 
   const displayedGroups = showAll ? grouped : grouped.slice(0, 10);
   const hasMore = grouped.length > 10;
-  const isFiltered = !!(filterCustomer || filterStatus);
+  const isFiltered = !!(filterStyle || filterCustomer || filterDateFrom || filterDateTo || filterStatus);
 
   // ── Add revision ──────────────────────────────────────────────────────────
   const handleAddRevision = async (styleId: string) => {
@@ -406,6 +475,104 @@ export default function SampleStylePage() {
         </div>
       )}
       {loading && <div className="text-center py-12 text-slate-400">Loading styles…</div>}
+
+      {/* Filters — style, customer, and date range only */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-slate-500" />
+            <h3 className="text-sm font-bold text-slate-700">Filters</h3>
+            {activeFilterCount > 0 && (
+              <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">
+                {activeFilterCount} active
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={clearFilters}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              activeFilterCount > 0
+                ? 'bg-red-50 border border-red-200 text-red-700 hover:bg-red-100'
+                : 'bg-slate-50 border border-slate-200 text-slate-400 cursor-default'
+            }`}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Clear All
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">Style</label>
+            <select
+              value={filterStyle}
+              onChange={e => { setFilterStyle(e.target.value); setExpandedId(null); setShowAll(false); }}
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
+                filterStyle
+                  ? 'border-purple-400 bg-purple-50/50 ring-1 ring-purple-200'
+                  : 'border-slate-300 bg-white focus:ring-2 focus:ring-purple-500'
+              }`}
+            >
+              <option value="">All Styles</option>
+              {styleOptions.map(s => (
+                <option key={s.key} value={s.key}>
+                  {s.styleNo} — {s.customer} ({s.count} component{s.count !== 1 ? 's' : ''})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">Customer</label>
+            <select
+              value={filterCustomer}
+              onChange={e => { setFilterCustomer(e.target.value); setExpandedId(null); setShowAll(false); }}
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
+                filterCustomer
+                  ? 'border-purple-400 bg-purple-50/50 ring-1 ring-purple-200'
+                  : 'border-slate-300 bg-white focus:ring-2 focus:ring-purple-500'
+              }`}
+            >
+              <option value="">All Customers</option>
+              {customerOptions.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">
+              <Calendar className="mr-1 inline h-3 w-3" /> Date From
+            </label>
+            <input
+              type="date"
+              value={filterDateFrom}
+              onChange={e => { setFilterDateFrom(e.target.value); setExpandedId(null); setShowAll(false); }}
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
+                filterDateFrom
+                  ? 'border-purple-400 bg-purple-50/50 ring-1 ring-purple-200'
+                  : 'border-slate-300 bg-white focus:ring-2 focus:ring-purple-500'
+              }`}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">
+              <Calendar className="mr-1 inline h-3 w-3" /> Date To
+            </label>
+            <input
+              type="date"
+              value={filterDateTo}
+              onChange={e => { setFilterDateTo(e.target.value); setExpandedId(null); setShowAll(false); }}
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
+                filterDateTo
+                  ? 'border-purple-400 bg-purple-50/50 ring-1 ring-purple-200'
+                  : 'border-slate-300 bg-white focus:ring-2 focus:ring-purple-500'
+              }`}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* Style groups */}
       {displayedGroups.map(group => (
