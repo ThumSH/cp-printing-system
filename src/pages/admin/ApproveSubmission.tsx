@@ -265,6 +265,32 @@ export default function ApproveSubmission() {
     return <Clock className="h-4 w-4" />;
   };
 
+  // IMPORTANT: after an admin rejection correction, SampleStyle is the source of truth.
+  // DevelopmentJob can be stale in the admin page cache, so show SampleStyle first
+  // and only fall back to DevelopmentJob for legacy/date/artwork fields.
+  const selectedStyleDetails = useMemo(() => {
+    const ss = (selectedSubmission as any)?.sampleStyle;
+    const job = selectedSubmission?.job;
+    const first = (...values: any[]) =>
+      values.find((v) => typeof v === 'string' && v.trim().length > 0)?.trim?.() || '';
+
+    return {
+      sampleStyle: ss,
+      job,
+      customer: first(ss?.customer, job?.customer, selectedSubmission?.customerName),
+      styleNo: first(ss?.styleNo, job?.styleNo, selectedSubmission?.styleNo),
+      season: first(ss?.season, job?.season),
+      printingTechnique: first(ss?.printingTechnique, job?.printingTechnique),
+      washingStandard: first(ss?.washingStandard, job?.washingStandard),
+      bodyColour: first(ss?.bodyColour, job?.bodyColour),
+      printColour: first(ss?.printColour, job?.printColour),
+      printColourQty: first(ss?.printColourQty, job?.printColourQty),
+      sampleOrderedDate: first(job?.sampleOrderedDate),
+      sampleDeliveryDate: first(job?.sampleDeliveryDate),
+      component: first(ss?.component, job?.component, (selectedSubmission as any)?.componentName),
+    };
+  }, [selectedSubmission]);
+
   return (
     <div className="space-y-8">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -494,35 +520,48 @@ export default function ApproveSubmission() {
                     <h3 className="text-lg font-semibold text-slate-900">Full Style Details</h3>
                   </div>
 
-                  {selectedSubmission.job ? (
-                    <>
-                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <InfoCard icon={User2} label="Customer" value={selectedSubmission.job.customer || '-'} />
-                        <InfoCard icon={Shirt} label="Style No" value={selectedSubmission.job.styleNo || '-'} />
-                        <InfoCard icon={Layers3} label="Season" value={selectedSubmission.job.season || '-'} />
-                        <InfoCard icon={Palette} label="Printing Technique" value={selectedSubmission.job.printingTechnique || '-'} />
-                        <InfoCard icon={Palette} label="Washing Standard" value={selectedSubmission.job.washingStandard || '-'} />
-                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                          <p className="text-xs text-slate-500 mb-1.5">Body Colour</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(selectedSubmission.job.bodyColour || '').split(',').map(c => c.trim()).filter(Boolean).map(c => (
-                              <span key={c} className="rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs font-semibold text-indigo-700">{c}</span>
-                            ))}
-                          </div>
+                {(selectedStyleDetails.sampleStyle || selectedStyleDetails.job) ? (
+                  <>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <InfoCard icon={User2} label="Customer" value={selectedStyleDetails.customer || '-'} />
+                      <InfoCard icon={Shirt} label="Style No" value={selectedStyleDetails.styleNo || '-'} />
+                      <InfoCard icon={Layers3} label="Season" value={selectedStyleDetails.season || '-'} />
+                      <InfoCard icon={Palette} label="Printing Technique" value={selectedStyleDetails.printingTechnique || '-'} />
+                      <InfoCard icon={Palette} label="Washing Standard" value={selectedStyleDetails.washingStandard || '-'} />
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500 mb-1.5">Body Colour</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {String(
+                                    (selectedSubmission as any).sampleStyle?.bodyColour ||
+                                    selectedSubmission.job?.bodyColour ||
+                                    ''
+                                  )
+                          .split(',')
+                          .map((c: string) => c.trim())
+                          .filter((c: string) => Boolean(c))
+                          .map((c: string) => (
+                            <span
+                              key={c}
+                              className="rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs font-semibold text-indigo-700"
+                            >
+                              {c}
+                            </span>
+                          ))}
                         </div>
-                        <InfoCard icon={Palette} label="Print Colour" value={selectedSubmission.job.printColour || '-'} />
-                        <InfoCard icon={Layers3} label="Print Colour Qty" value={selectedSubmission.job.printColourQty || '-'} />
-                        <InfoCard icon={CalendarDays} label="Sample Ordered Date" value={selectedSubmission.job.sampleOrderedDate || '-'} />
-                        <InfoCard icon={CalendarDays} label="Sample Delivery Date" value={selectedSubmission.job.sampleDeliveryDate || '-'} />
+                        </div>
+                        <InfoCard icon={Palette} label="Print Colour" value={selectedStyleDetails.printColour || '-'} />
+                        <InfoCard icon={Layers3} label="Print Colour Qty" value={selectedStyleDetails.printColourQty || '-'} />
+                        <InfoCard icon={CalendarDays} label="Sample Ordered Date" value={selectedStyleDetails.sampleOrderedDate || '-'} />
+                        <InfoCard icon={CalendarDays} label="Sample Delivery Date" value={selectedStyleDetails.sampleDeliveryDate || '-'} />
                       </div>
 
                       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
                         <div className="rounded-xl border border-slate-200 p-4">
                           <p className="mb-2 text-sm font-semibold text-slate-800">Component</p>
                           <div className="flex flex-wrap gap-2">
-                            {selectedSubmission.job.component ? (
+                            {selectedStyleDetails.component ? (
                               <span className="rounded-full bg-indigo-50 border border-indigo-200 px-3 py-1 text-xs font-semibold text-indigo-700">
-                                {selectedSubmission.job.component}
+                                {selectedStyleDetails.component}
                               </span>
                             ) : (
                               <span className="text-sm text-slate-500">No component specified</span>

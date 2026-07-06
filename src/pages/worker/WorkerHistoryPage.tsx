@@ -4,10 +4,11 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import {
   History, Search, Filter, RotateCcw, ChevronDown, ChevronRight,
   CalendarDays, ChevronLeft, ChevronsLeft, ChevronsRight, Clock,
-  User as UserIcon, Package, X,
+  User as UserIcon, Package, X, ArrowRight, CheckCircle2,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 
@@ -55,6 +56,8 @@ interface PaginatedResponse {
 }
 
 export default function WorkerHistoryPage() {
+  const navigate = useNavigate();
+
   // Filters
   const [searchText, setSearchText] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -178,19 +181,72 @@ export default function WorkerHistoryPage() {
     setExpandedId(null);
   };
 
-  // Stage allocations are independent. Do not sum all stages together.
-  const stageValues = (r: DailyOutputRecord) => [
-    r.totalSeating || 0,
-    r.totalPrinting || 0,
-    r.totalCuring || 0,
-    r.totalChecking || 0,
-    r.totalPacking || 0,
-    r.totalDispatch || 0,
+  const allKnownRecords = useMemo(() => {
+    const map = new Map<string, DailyOutputRecord>();
+    [...allRecords, ...records].forEach((record) => {
+      if (record.id) map.set(record.id, record);
+    });
+    return Array.from(map.values());
+  }, [allRecords, records]);
+
+  const getAggregateStageTotals = useCallback((record: DailyOutputRecord) => {
+    const relatedRecords = allKnownRecords.filter(
+      (r) => r.productionRecordId === record.productionRecordId
+    );
+    const source = relatedRecords.length > 0 ? relatedRecords : [record];
+
+    return {
+      seating: source.reduce((sum, r) => sum + (r.totalSeating || 0), 0),
+      printing: source.reduce((sum, r) => sum + (r.totalPrinting || 0), 0),
+      curing: source.reduce((sum, r) => sum + (r.totalCuring || 0), 0),
+      checking: source.reduce((sum, r) => sum + (r.totalChecking || 0), 0),
+      packing: source.reduce((sum, r) => sum + (r.totalPacking || 0), 0),
+      dispatch: source.reduce((sum, r) => sum + (r.totalDispatch || 0), 0),
+    };
+  }, [allKnownRecords]);
+
+  const stageValues = (totals: ReturnType<typeof getAggregateStageTotals>) => [
+    totals.seating,
+    totals.printing,
+    totals.curing,
+    totals.checking,
+    totals.packing,
+    totals.dispatch,
   ];
 
-  const maxStageAllocated = (r: DailyOutputRecord) => Math.max(...stageValues(r));
-  const lowestStageRemaining = (r: DailyOutputRecord) =>
-    Math.min(...stageValues(r).map(v => Math.max(0, r.orderQty - v)));
+  const maxStageAllocated = (totals: ReturnType<typeof getAggregateStageTotals>) =>
+    Math.max(...stageValues(totals));
+
+  const lowestStageRemaining = (
+    record: DailyOutputRecord,
+    totals: ReturnType<typeof getAggregateStageTotals>
+  ) => Math.min(...stageValues(totals).map((value) => Math.max(0, record.orderQty - value)));
+
+  const isAllocationComplete = (
+    record: DailyOutputRecord,
+    totals = getAggregateStageTotals(record)
+  ) => record.orderQty > 0 && stageValues(totals).every((value) => value >= record.orderQty);
+
+  const continueAllocation = (record: DailyOutputRecord) => {
+    if (!record.productionRecordId) {
+      setPageError('This history record is missing its production record link and cannot be resumed.');
+      return;
+    }
+
+    if (isAllocationComplete(record)) {
+      setPageError('This production allocation is already completed. No remaining qty is available to continue.');
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('productionRecordId', record.productionRecordId);
+    if (record.tableNo) params.set('tableNo', record.tableNo);
+    if (record.date) params.set('sourceDate', record.date);
+    if (record.id) params.set('sourceRecordId', record.id);
+
+    navigate(`/worker?${params.toString()}`);
+  };
+
 
   return (
     <motion.div
@@ -206,7 +262,7 @@ export default function WorkerHistoryPage() {
         <div className="flex-1">
           <h2 className="text-2xl font-bold text-slate-900">Worker History</h2>
           <p className="text-sm text-slate-500">
-            Search allocated quantities per day and time slot. Showing top {PAGE_SIZE} most recent.
+            Search old allocations and continue unfinished styles directly from here. Showing top {PAGE_SIZE} most recent.
           </p>
         </div>
       </div>
@@ -329,8 +385,11 @@ export default function WorkerHistoryPage() {
           <div className="divide-y divide-slate-100">
             {records.map((r) => {
               const isExpanded = expandedId === r.id;
-              const maxAllocated = maxStageAllocated(r);
-              const lowestRemaining = lowestStageRemaining(r);
+              const aggregateTotals = getAggregateStageTotals(r);
+              const maxAllocated = maxStageAllocated(aggregateTotals);
+              const lowestRemaining = lowestStageRemaining(r, aggregateTotals);
+              const allocationComplete = isAllocationComplete(r, aggregateTotals);
+              const canContinue = !!r.productionRecordId && !allocationComplete;
               return (
                 <div key={r.id}>
                   {/* Summary row */}
@@ -359,6 +418,37 @@ export default function WorkerHistoryPage() {
                       </p>
                     </div>
 
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canContinue) continueAllocation(r);
+                      }}
+                      disabled={!canContinue}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition ${
+                        canContinue
+                          ? 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:border-teal-300'
+                          : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                      }`}
+                      title={
+                        allocationComplete
+                          ? 'Allocation completed for all stages'
+                          : 'Open this style in Worker Daily Output and continue allocation'
+                      }
+                    >
+                      {allocationComplete ? (
+                        <>
+                          Completed
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        </>
+                      ) : (
+                        <>
+                          Continue
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </>
+                      )}
+                    </button>
+
                     <div className="text-right space-y-0.5 shrink-0">
                       <div className="text-xs">
                         <Package className="inline h-3 w-3 mr-1 text-orange-500" />
@@ -382,14 +472,55 @@ export default function WorkerHistoryPage() {
                         exit={{ opacity: 0, height: 0 }}
                         className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden"
                       >
+                        <div className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+                          allocationComplete
+                            ? 'border-emerald-200 bg-emerald-50'
+                            : 'border-teal-200 bg-white'
+                        }`}>
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">
+                              {allocationComplete ? 'Production allocation completed' : 'Continue this production allocation'}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {allocationComplete
+                                ? 'All independent stages have reached the issue qty. No remaining qty is available to continue.'
+                                : 'Opens the main Worker Daily Output page with this style, cut, line, and table preselected.'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (canContinue) continueAllocation(r);
+                            }}
+                            disabled={!canContinue}
+                            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold transition ${
+                              canContinue
+                                ? 'bg-teal-600 text-white hover:bg-teal-700'
+                                : 'cursor-not-allowed bg-slate-200 text-slate-500'
+                            }`}
+                          >
+                            {allocationComplete ? (
+                              <>
+                                Completed
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              </>
+                            ) : (
+                              <>
+                                Continue Allocation
+                                <ArrowRight className="h-3.5 w-3.5" />
+                              </>
+                            )}
+                          </button>
+                        </div>
+
                         {/* Totals strip */}
                         <div className="grid grid-cols-3 gap-2 md:grid-cols-6 mb-4">
-                          <StageTotal label="Seating"  value={r.totalSeating} />
-                          <StageTotal label="Printing" value={r.totalPrinting} />
-                          <StageTotal label="Curing"   value={r.totalCuring} />
-                          <StageTotal label="Checking" value={r.totalChecking} />
-                          <StageTotal label="Packing"  value={r.totalPacking} />
-                          <StageTotal label="Dispatch" value={r.totalDispatch} />
+                          <StageTotal label="Seating"  value={aggregateTotals.seating} />
+                          <StageTotal label="Printing" value={aggregateTotals.printing} />
+                          <StageTotal label="Curing"   value={aggregateTotals.curing} />
+                          <StageTotal label="Checking" value={aggregateTotals.checking} />
+                          <StageTotal label="Packing"  value={aggregateTotals.packing} />
+                          <StageTotal label="Dispatch" value={aggregateTotals.dispatch} />
                         </div>
 
                         {/* Time slot breakdown */}

@@ -1,7 +1,6 @@
 // src/pages/worker/DailyOutputPage.tsx
 import { useState, useEffect, useMemo } from 'react';
-import { useAutoDraft } from '../../hooks/useAutoDraft';
-import DraftRestoredToast from '../../components/DraftRestoredToast';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
@@ -109,6 +108,21 @@ interface DailyOutputRecord {
 // ==========================================
 // HELPERS
 // ==========================================
+function getColomboDateString(): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Colombo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+
+  const year = parts.find((p) => p.type === 'year')?.value ?? '';
+  const month = parts.find((p) => p.type === 'month')?.value ?? '';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '';
+
+  return `${year}-${month}-${day}`;
+}
+
 function createEmptyTimeSlots(): TimeSlot[] {
   return DEFAULT_TIME_SLOTS.map((t) => ({
     ...t,
@@ -157,15 +171,19 @@ const minStageValue = (totals: StageTotals) =>
 // COMPONENT
 // ==========================================
 export default function DailyOutputPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [eligibleStyles, setEligibleStyles] = useState<EligibleStyle[]>([]);
   const [records, setRecords] = useState<DailyOutputRecord[]>([]);
+  const [hasFetchedWorkerData, setHasFetchedWorkerData] = useState(false);
+  const [resumeApplied, setResumeApplied] = useState(false);
+  const [resumeNotice, setResumeNotice] = useState('');
   
   const [pickedStyleKey, setPickedStyleKey] = useState('');   
   const [pickedCutNo, setPickedCutNo] = useState('');
   const [selectedStoreInId, setSelectedStoreInId] = useState(''); 
   const [selectedComponent, setSelectedComponent] = useState('');
   const [tableNo, setTableNo] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getColomboDateString);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>(createEmptyTimeSlots());
   const [workerName, setWorkerName] = useState(localStorage.getItem('operatorName') || '');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -174,27 +192,6 @@ export default function DailyOutputPage() {
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
 
   const [confirmModal, setConfirmModal] = useState<{ rowIndex: number; slot: TimeSlot } | null>(null);
-
-  const workerDraftState = useMemo(() => ({
-    pickedStyleKey, pickedCutNo, selectedStoreInId,
-    selectedComponent, tableNo, date, workerName, timeSlots,
-  }), [pickedStyleKey, pickedCutNo, selectedStoreInId,
-       selectedComponent, tableNo, date, workerName, timeSlots]);
-
-  const { draftRestored, clearDraft, dismissDraftNotice } = useAutoDraft(
-    'worker-daily-output',
-    workerDraftState,
-    (saved) => {
-      if (saved.pickedStyleKey) setPickedStyleKey(saved.pickedStyleKey);
-      if (saved.pickedCutNo) setPickedCutNo(saved.pickedCutNo);
-      if (saved.selectedStoreInId) setSelectedStoreInId(saved.selectedStoreInId);
-      if (saved.selectedComponent) setSelectedComponent(saved.selectedComponent);
-      if (saved.tableNo) setTableNo(saved.tableNo);
-      if (saved.date) setDate(saved.date);
-      if (saved.workerName) setWorkerName(saved.workerName);
-      if (saved.timeSlots) setTimeSlots(saved.timeSlots);
-    }
-  );
 
   const workerPagination = usePaginatedSearch({
     data: records,
@@ -212,10 +209,64 @@ export default function DailyOutputPage() {
       if (recRes.ok) setRecords(await recRes.json());
     } catch (e) {
       setPageError('Failed to load data.');
+    } finally {
+      setHasFetchedWorkerData(true);
     }
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // Disable old worker auto-draft behavior. Existing saved drafts are cleared once
+  // so stale date/style/slot data cannot overwrite the live worker page.
+  useEffect(() => {
+    [
+      'worker-daily-output',
+      'draft-worker-daily-output',
+      'autoDraft:worker-daily-output',
+      'autodraft-worker-daily-output',
+    ].forEach((key) => localStorage.removeItem(key));
+  }, []);
+
+  // Resume flow from Worker History.
+  // The history page passes the production record and table, then this page
+  // preselects the correct style/cut/line so the worker can continue without
+  // manually searching again. We intentionally keep today's Colombo date unless
+  // a date query parameter is explicitly provided.
+  useEffect(() => {
+    if (resumeApplied) return;
+
+    const resumeProductionRecordId = searchParams.get('productionRecordId') || '';
+    if (!resumeProductionRecordId) return;
+    if (!hasFetchedWorkerData) return;
+
+    const matchedItem = eligibleStyles.find((item) =>
+      item.productionRecordId === resumeProductionRecordId || item.id === resumeProductionRecordId
+    );
+
+    if (!matchedItem) {
+      setPageError('This production record is already fully completed or is no longer available for worker allocation.');
+      setResumeApplied(true);
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    const resumeTableNo = searchParams.get('tableNo') || '';
+    const resumeDate = searchParams.get('date') || '';
+    const sourceDate = searchParams.get('sourceDate') || '';
+
+    setPickedStyleKey(`${matchedItem.styleNo}|||${matchedItem.customerName}`);
+    setPickedCutNo(matchedItem.cutNo || '');
+    setSelectedStoreInId(matchedItem.id);
+    setSelectedComponent(matchedItem.component || '');
+    if (resumeTableNo) setTableNo(resumeTableNo);
+    if (resumeDate) setDate(resumeDate);
+
+    setResumeNotice(
+      `Loaded ${matchedItem.styleNo} (${matchedItem.component || 'component'}) from worker history${sourceDate ? `, previous entry ${sourceDate}` : ''}. Continue allocating the remaining stage quantities below.`
+    );
+    setResumeApplied(true);
+    setSearchParams({}, { replace: true });
+  }, [eligibleStyles, hasFetchedWorkerData, resumeApplied, searchParams, setSearchParams]);
 
   const selectedItem = useMemo(
     () => eligibleStyles.find((i) => i.id === selectedStoreInId) || null,
@@ -497,7 +548,7 @@ export default function DailyOutputPage() {
     setActiveRecordId(null);
     setErrors({});
     setPageError('');
-    clearDraft();
+    setResumeNotice('');
   };
 
   const handleDelete = async (id: string) => {
@@ -512,11 +563,6 @@ export default function DailyOutputPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-7xl space-y-6 pb-12">
-      <DraftRestoredToast
-        visible={draftRestored}
-        onDismiss={dismissDraftNotice}
-        onDiscard={() => { clearDraft(); handleReset(); }}
-      />
 
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="rounded-lg bg-teal-100 p-2">
@@ -533,6 +579,14 @@ export default function DailyOutputPage() {
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>{pageError}</span>
           <button onClick={() => setPageError('')} className="ml-auto text-red-400 hover:text-red-600"><X className="h-4 w-4" /></button>
+        </motion.div>
+      )}
+
+      {resumeNotice && (
+        <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{resumeNotice}</span>
+          <button onClick={() => setResumeNotice('')} className="ml-auto text-blue-400 hover:text-blue-600"><X className="h-4 w-4" /></button>
         </motion.div>
       )}
 
