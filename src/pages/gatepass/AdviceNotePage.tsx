@@ -84,7 +84,7 @@ export default function AdviceNotePage() {
 
   const notesPagination = usePaginatedSearch({
     data: adviceNotes,
-    searchFields: ['styleNo' as any, 'customerName' as any, 'scheduleNo' as any, 'adNo' as any],
+    searchFields: ['styleNo' as any, 'customerName' as any, 'scheduleNo' as any, 'jobNo' as any, 'adNo' as any],
     pageSize: 25,
   });
 
@@ -315,6 +315,7 @@ export default function AdviceNotePage() {
         attn,
         address,
         scheduleNo:         selectedItem?.scheduleNo || '',
+        jobNo:              selectedItem?.jobNo || '',
         dispatchQty:        totalPcs,
         rows:               rowsRecord,
         receivedByName,
@@ -384,6 +385,7 @@ export default function AdviceNotePage() {
       styleNo:            selectedItem?.styleNo || '',
       address,
       scheduleNo:         selectedItem?.scheduleNo || '',
+      jobNo:              selectedItem?.jobNo || '',
       cutNo:              addedCutNos.join(', '),
       component:          selectedItem?.components || '',
       dispatchQty:        totalPcs,
@@ -529,7 +531,7 @@ export default function AdviceNotePage() {
                   <option value="">Select schedule/batch…</option>
                   {storeInOptions.map(item => (
                     <option key={item.storeInRecordId} value={item.storeInRecordId}>
-                      {item.scheduleNo ? `Sch: ${item.scheduleNo}` : 'No Schedule'} | Rem: {item.remainingDispatchQty}
+                      {item.scheduleNo ? `Sch: ${item.scheduleNo}` : 'No Schedule'}{item.jobNo ? ` | Job: ${item.jobNo}` : ''} | Rem: {item.remainingDispatchQty}
                     </option>
                   ))}
                 </select>
@@ -555,6 +557,7 @@ export default function AdviceNotePage() {
                 <InfoLine label="Customer"      value={selectedItem.customerName} />
                 <InfoLine label="Style #"       value={selectedItem.styleNo} />
                 <InfoLine label="Schedule No"   value={selectedItem.scheduleNo || '—'} />
+                <InfoLine label="Job No"        value={selectedItem.jobNo || '—'} />
                 <InfoLine label="Body Colour"   value={selectedItem.bodyColour} />
                 <InfoLine label="Print Colour"  value={selectedItem.printColour} />
                 <InfoLine label="Components"    value={selectedItem.components} />
@@ -827,7 +830,7 @@ export default function AdviceNotePage() {
                         )}
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Date: {note.deliveryDate}{note.scheduleNo ? ' | Sch: ' + note.scheduleNo : ''} | Cuts: {note.cutNo} | Dispatch: {note.dispatchQty}
+                        Date: {note.deliveryDate}{note.scheduleNo ? ' | Sch: ' + note.scheduleNo : ''}{note.jobNo ? ' | Job: ' + note.jobNo : ''} | Cuts: {note.cutNo} | Dispatch: {note.dispatchQty}
                       </p>
                     </div>
                     <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
@@ -1022,7 +1025,8 @@ function printAdviceNote(note: AdviceNoteRecord) {
       <span class="lbl" style="margin-left:20px">Attn:</span><span class="val">${note.attn}</span></div>
       <div class="row"><span class="lbl">Style #:</span><span class="val">${note.styleNo}</span></div>
       <div class="row"><span class="lbl">Address:</span><span class="val">${note.address}</span></div>
-      <div class="row"><span class="lbl">Schedule No:</span><span class="val">${note.scheduleNo || ''}</span></div>
+      <div class="row"><span class="lbl">Schedule No:</span><span class="val">${note.scheduleNo || ''}</span>
+      <span class="lbl" style="margin-left:20px">Job No:</span><span class="val">${note.jobNo || ''}</span></div>
     </div>
     <table><thead><tr>
       <th style="width:24px"></th>

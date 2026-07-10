@@ -1,4 +1,3 @@
-// src/pages/inventory/StoreInPage.tsx
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -44,6 +43,7 @@ interface StagedEntry {
   components: string;
   inAdNo: string;
   scheduleNo: string;
+  jobNo: string;
   cutInDate: string;
   inQty: number;
   cuts: {
@@ -68,6 +68,7 @@ interface StoreInDraftSnapshot {
   selectedCustomer: string;
   inAdNo: string;
   scheduleNo: string;
+  jobNo: string;
   cutInDate: string;
   componentInQty: Record<string, string>;
   confirmedInQty: Record<string, boolean>;
@@ -99,6 +100,14 @@ const normalizeBundleNo = (value: string) => {
   const raw = value.trim();
   const match = raw.match(/^b\s*-?\s*(\d+)$/i);
   return match ? 'b-' + String(parseInt(match[1], 10)) : raw;
+};
+
+const normalizeJobNo = (value: string) => value.trim();
+
+const isValidJobNo = (value: string) => {
+  const raw = normalizeJobNo(value);
+  if (!raw) return true; // Optional field
+  return /^[0-9\s/.,-]+$/.test(raw);
 };
 
 type BundleWithOrder<T extends { bundleNo: string }> = T & { bundleOrder?: number };
@@ -147,6 +156,7 @@ export default function StoreInPage() {
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [inAdNo, setInAdNo] = useState('');
   const [scheduleNo, setScheduleNo] = useState('');
+  const [jobNo, setJobNo] = useState('');
   const [cutInDate, setCutInDate] = useState('');
 
   // Per-component IN Qty
@@ -252,6 +262,7 @@ export default function StoreInPage() {
       setSelectedCustomer(draft.selectedCustomer || '');
       setInAdNo(draft.inAdNo || '');
       setScheduleNo(draft.scheduleNo || '');
+      setJobNo((draft as any).jobNo || '');
       setCutInDate(draft.cutInDate || '');
       setComponentInQty(draft.componentInQty || {});
       setConfirmedInQty(draft.confirmedInQty || {});
@@ -285,7 +296,7 @@ export default function StoreInPage() {
     }
 
     const hasMeaningfulDraft = Boolean(
-      selectedStyleNo || selectedCustomer || inAdNo || scheduleNo || cutInDate ||
+      selectedStyleNo || selectedCustomer || inAdNo || scheduleNo || jobNo || cutInDate ||
       Object.values(componentInQty).some(Boolean) || Object.values(confirmedInQty).some(Boolean) ||
       activeSubmissionId || activeCutNo || activeCutQty || savedCuts.length || stagedEntries.length ||
       activeCutBundles.some(b => b.bundleNo !== 'b-1' || b.bundleQty || b.size || b.numberRange)
@@ -304,6 +315,7 @@ export default function StoreInPage() {
         selectedCustomer,
         inAdNo,
         scheduleNo,
+        jobNo,
         cutInDate,
         componentInQty,
         confirmedInQty,
@@ -323,7 +335,7 @@ export default function StoreInPage() {
       console.error('Failed to save Store-In draft:', error);
     }
   }, [
-    selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, cutInDate,
+    selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, jobNo, cutInDate,
     componentInQty, confirmedInQty, activeSubmissionId, activeCutNo,
     activeCutBundles, activeCutQty, cutQtyConfirmed, editingCutTempId,
     savedCuts, stagedEntries, expandedStagedId,
@@ -704,6 +716,7 @@ export default function StoreInPage() {
     if (!selectedStyleNo)   errs.styleNo    = 'Select a style number';
     if (!selectedCustomer)  errs.customer   = 'Select a customer';
     if (!inAdNo.trim())     errs.inAdNo     = 'IN-AD No is required';
+    if (!isValidJobNo(jobNo)) errs.jobNo     = 'Job No can contain numbers and symbols only. Letters are not allowed.';
     if (!cutInDate)         errs.cutInDate  = 'Cut In Date is required';
     if (inQtyNum <= 0)      errs.inQty      = 'Enter IN Qty for at least one component';
 
@@ -738,7 +751,7 @@ export default function StoreInPage() {
 
   const resetForm = () => {
     setSelectedStyleNo(''); setSelectedCustomer('');
-    setInAdNo(''); setScheduleNo(''); setCutInDate('');
+    setInAdNo(''); setScheduleNo(''); setJobNo(''); setCutInDate('');
     setComponentInQty({}); setConfirmedInQty({});
     setSavedCuts([]); setActiveCutBundles([makeBundleRow(1)]);
     setActiveCutQty(''); setActiveCutNo(''); setActiveSubmissionId('');
@@ -751,6 +764,7 @@ export default function StoreInPage() {
   // ── Stage a single component ─────────────────────────────────────────────
   const stageComponent = (comp: EligibleStoreInItem) => {
     if (!inAdNo.trim()) { setErrors(p => ({ ...p, inAdNo: 'IN-AD No is required' })); return; }
+    if (!isValidJobNo(jobNo)) { setErrors(p => ({ ...p, jobNo: 'Job No can contain numbers and symbols only. Letters are not allowed.' })); return; }
     if (!cutInDate)     { setErrors(p => ({ ...p, cutInDate: 'Cut In Date is required' })); return; }
 
     const compCuts  = savedCuts.filter(c => c.submissionId === comp.submissionId);
@@ -772,6 +786,7 @@ export default function StoreInPage() {
       components:   comp.components,
       inAdNo:       inAdNo.trim(),
       scheduleNo:   scheduleNo.trim(),
+      jobNo:        normalizeJobNo(jobNo),
       cutInDate,
       inQty:        compInQty,
       cuts: compCuts.map(c => ({
@@ -819,6 +834,7 @@ export default function StoreInPage() {
     setSelectedCustomer(entry.customerName);
     setInAdNo(entry.inAdNo);
     setScheduleNo(entry.scheduleNo);
+    setJobNo((entry as any).jobNo || '');
     setCutInDate(entry.cutInDate);
     setComponentInQty(prev => ({ ...prev, [primarySubId]: String(entry.inQty) }));
     setConfirmedInQty(prev => ({ ...prev, [primarySubId]: true }));
@@ -864,6 +880,7 @@ export default function StoreInPage() {
           submissionId: primarySubId,
           inAdNo:       entry.inAdNo,
           scheduleNo:   entry.scheduleNo,
+          jobNo:        (entry as any).jobNo || '',
           cutInDate:    entry.cutInDate,
           inQty:        entry.inQty,
           cuts:         entry.cuts,
@@ -894,6 +911,7 @@ export default function StoreInPage() {
         submissionId: primarySubId,
         inAdNo:       inAdNo.trim(),
         scheduleNo:   scheduleNo.trim(),
+        jobNo:        normalizeJobNo(jobNo),
         cutInDate,
         inQty:        inQtyNum,
         cuts: savedCuts.map(c => ({
@@ -917,6 +935,7 @@ export default function StoreInPage() {
     setSelectedCustomer(record.customerName);
     setInAdNo(record.inAdNo || '');
     setScheduleNo(record.scheduleNo);
+    setJobNo((record as any).jobNo || '');
     setCutInDate(record.cutInDate);
     const compQtyMap: Record<string, string> = {};
     record.cuts.forEach(c => {
@@ -963,6 +982,7 @@ export default function StoreInPage() {
         r.customerName.toLowerCase().includes(q) ||
         r.inAdNo?.toLowerCase().includes(q) ||
         r.scheduleNo.toLowerCase().includes(q) ||
+        (r as any).jobNo?.toLowerCase().includes(q) ||
         r.bodyColour?.toLowerCase().includes(q) ||
         r.season?.toLowerCase().includes(q)
       );
@@ -1090,7 +1110,7 @@ export default function StoreInPage() {
           {/* Style & Schedule */}
           <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-5 space-y-4">
             <h4 className="border-b border-blue-200 pb-2 text-sm font-bold uppercase tracking-wider text-blue-800">Style & Schedule</h4>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-6">
 
               <div className="space-y-1">
                 <label className="block text-xs font-medium text-slate-600">Style No <span className="text-red-500">*</span></label>
@@ -1137,6 +1157,17 @@ export default function StoreInPage() {
                   {existingScheduleOptions.map(s => <option key={s} value={s} />)}
                 </datalist>
                 {errors.scheduleNo && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.scheduleNo}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-600">Job No <span className="text-slate-400">(optional)</span></label>
+                <input type="text" value={jobNo}
+                  onChange={e => { setJobNo(e.target.value); if (errors.jobNo) setErrors(p => ({ ...p, jobNo: '' })); }}
+                  disabled={!selectedCustomer}
+                  placeholder={selectedCustomer ? 'e.g. 1, 1/2, 1-2' : 'Select customer first...'}
+                  autoComplete="off"
+                  className={'w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none ' + (errors.jobNo ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500') + (!selectedCustomer ? ' cursor-not-allowed bg-slate-100 text-slate-400' : '')} />
+                {errors.jobNo && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.jobNo}</p>}
               </div>
 
               <div className="space-y-1">
@@ -1567,7 +1598,7 @@ export default function StoreInPage() {
                         <span className="text-xs text-slate-500">{entry.customerName}</span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        IN-AD: <span className="font-semibold text-slate-700">{entry.inAdNo}</span> | Sch: {entry.scheduleNo} | {entry.cutInDate}
+                        IN-AD: <span className="font-semibold text-slate-700">{entry.inAdNo}</span> | Sch: {entry.scheduleNo || '—'} | Job: {(entry as any).jobNo || '—'} | {entry.cutInDate}
                         <span className="ml-2 inline-flex items-center rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-bold px-2 py-0.5">
                           {entry.components}
                         </span>
@@ -1698,7 +1729,7 @@ export default function StoreInPage() {
                         </span>
                         <span className="text-xs text-slate-500">{record.customerName}</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{record.components} · IN-AD: {record.inAdNo} · Sch: {record.scheduleNo} | {record.cutInDate}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{record.components} · IN-AD: {record.inAdNo} · Sch: {record.scheduleNo || '—'} · Job: {(record as any).jobNo || '—'} | {record.cutInDate}</p>
                     </div>
                     <div className="text-right space-y-0.5 shrink-0">
                       <div className="text-xs text-slate-500">IN: <span className="font-bold text-orange-600">{record.inQty}</span></div>

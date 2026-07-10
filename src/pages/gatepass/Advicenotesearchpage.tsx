@@ -1,4 +1,3 @@
-// src/pages/qc/AdviceNoteSearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Truck, ChevronDown, ChevronRight, Filter, CalendarDays, RotateCcw, Clock, Printer } from 'lucide-react'; // <-- Added Printer Icon
@@ -21,12 +20,17 @@ function getAdviceNoteRowsInSavedOrder(rows?: Record<string, AdviceNoteRow>): Ad
     .map(item => item.row);
 }
 
+function getJobNo(note: AdviceNoteRecord): string {
+  return String((note as any).jobNo || '').trim();
+}
+
 
 export default function AdviceNoteSearchPage() {
   const { adviceNotes, fetchAdviceNotes } = useAdviceNoteStore();
   const [filterStyle, setFilterStyle] = useState('');
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterSchedule, setFilterSchedule] = useState('');
+  const [filterJobNo, setFilterJobNo] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -55,17 +59,26 @@ export default function AdviceNoteSearchPage() {
     return Array.from(new Set(recs.map((n) => n.scheduleNo).filter(Boolean))).sort();
   }, [adviceNotes, filterStyle]);
 
-  const hasFilters = !!(filterStyle || filterCustomer || filterSchedule || filterDateFrom || filterDateTo);
+  const jobNos = useMemo(() => {
+    let recs = adviceNotes;
+    if (filterStyle) { const [sn, cn] = filterStyle.split('|||'); recs = recs.filter((n) => n.styleNo === sn && n.customerName === cn); }
+    if (filterCustomer) recs = recs.filter((n) => n.customerName === filterCustomer);
+    if (filterSchedule) recs = recs.filter((n) => n.scheduleNo === filterSchedule);
+    return Array.from(new Set(recs.map(getJobNo).filter(Boolean))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [adviceNotes, filterStyle, filterCustomer, filterSchedule]);
+
+  const hasFilters = !!(filterStyle || filterCustomer || filterSchedule || filterJobNo || filterDateFrom || filterDateTo);
 
   const filteredRecords = useMemo(() => {
     let recs = [...adviceNotes];
     if (filterStyle) { const [sn, cn] = filterStyle.split('|||'); recs = recs.filter((n) => n.styleNo === sn && n.customerName === cn); }
     if (filterCustomer) recs = recs.filter((n) => n.customerName === filterCustomer);
     if (filterSchedule) recs = recs.filter((n) => n.scheduleNo === filterSchedule);
+    if (filterJobNo) recs = recs.filter((n) => getJobNo(n) === filterJobNo);
     if (filterDateFrom) recs = recs.filter((n) => (n.deliveryDate || '') >= filterDateFrom);
     if (filterDateTo) recs = recs.filter((n) => (n.deliveryDate || '') <= filterDateTo);
     return recs;
-  }, [adviceNotes, filterStyle, filterCustomer, filterSchedule, filterDateFrom, filterDateTo]);
+  }, [adviceNotes, filterStyle, filterCustomer, filterSchedule, filterJobNo, filterDateFrom, filterDateTo]);
 
   const displayRecords = useMemo(() => {
     if (!hasFilters) return [...adviceNotes].sort((a, b) => (b.deliveryDate || '').localeCompare(a.deliveryDate || '')).slice(0, RECENT_LIMIT);
@@ -78,8 +91,8 @@ export default function AdviceNoteSearchPage() {
     totalBalance: displayRecords.reduce((s, n) => s + n.balanceQty, 0),
   }), [displayRecords]);
 
-  const clearFilters = () => { setFilterStyle(''); setFilterCustomer(''); setFilterSchedule(''); setFilterDateFrom(''); setFilterDateTo(''); setExpandedId(null); };
-  const activeCount = [filterStyle, filterCustomer, filterSchedule, filterDateFrom, filterDateTo].filter(Boolean).length;
+  const clearFilters = () => { setFilterStyle(''); setFilterCustomer(''); setFilterSchedule(''); setFilterJobNo(''); setFilterDateFrom(''); setFilterDateTo(''); setExpandedId(null); };
+  const activeCount = [filterStyle, filterCustomer, filterSchedule, filterJobNo, filterDateFrom, filterDateTo].filter(Boolean).length;
 
   const getRows = (note: AdviceNoteRecord): AdviceNoteRow[] => getAdviceNoteRowsInSavedOrder(note.rows);
 
@@ -87,7 +100,7 @@ export default function AdviceNoteSearchPage() {
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-6xl space-y-6 pb-12">
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
         <div className="rounded-lg bg-amber-100 p-2"><Search className="h-6 w-6 text-amber-700" /></div>
-        <div><h2 className="text-2xl font-bold text-slate-900">Advice Note Search</h2><p className="text-sm text-slate-500">Search gatepass advice notes by style, customer, schedule, and delivery date.</p></div>
+        <div><h2 className="text-2xl font-bold text-slate-900">Advice Note Search</h2><p className="text-sm text-slate-500">Search gatepass advice notes by style, customer, schedule, job no, and delivery date.</p></div>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
@@ -99,18 +112,23 @@ export default function AdviceNoteSearchPage() {
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-1 lg:col-span-2"><label className="block text-xs font-medium text-slate-600">Style</label>
-            <select value={filterStyle} onChange={(e) => { setFilterStyle(e.target.value); setFilterSchedule(''); }} className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${filterStyle ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'}`}>
+            <select value={filterStyle} onChange={(e) => { setFilterStyle(e.target.value); setFilterSchedule(''); setFilterJobNo(''); }} className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${filterStyle ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'}`}>
               <option value="">All Styles</option>{availableStyles.map((s) => <option key={s.key} value={s.key}>{s.styleNo} | {s.customerName} ({s.count})</option>)}
             </select>
           </div>
           <div className="space-y-1"><label className="block text-xs font-medium text-slate-600">Customer</label>
-            <select value={filterCustomer} onChange={(e) => setFilterCustomer(e.target.value)} className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${filterCustomer ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'}`}>
+            <select value={filterCustomer} onChange={(e) => { setFilterCustomer(e.target.value); setFilterJobNo(''); }} className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${filterCustomer ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'}`}>
               <option value="">All Customers</option>{customers.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
           <div className="space-y-1"><label className="block text-xs font-medium text-slate-600">Schedule No</label>
-            <select value={filterSchedule} onChange={(e) => setFilterSchedule(e.target.value)} className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${filterSchedule ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'}`}>
+            <select value={filterSchedule} onChange={(e) => { setFilterSchedule(e.target.value); setFilterJobNo(''); }} className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${filterSchedule ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'}`}>
               <option value="">All Schedules</option>{schedules.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1"><label className="block text-xs font-medium text-slate-600">Job No</label>
+            <select value={filterJobNo} onChange={(e) => setFilterJobNo(e.target.value)} className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${filterJobNo ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'}`}>
+              <option value="">All Job Nos</option>{jobNos.map((j) => <option key={j} value={j}>{j}</option>)}
             </select>
           </div>
           <div className="space-y-1"><label className="block text-xs font-medium text-slate-600"><CalendarDays className="mr-1 inline h-3 w-3" />Delivery Date From</label>
@@ -145,7 +163,7 @@ export default function AdviceNoteSearchPage() {
                       {isExp ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap"><p className="font-bold text-slate-900">{note.styleNo}</p><span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-800">AD: {note.adNo}</span><span className="text-xs text-slate-500">{note.customerName}</span></div>
-                        <p className="text-xs text-slate-500 mt-0.5">Sch: <span className="font-medium text-slate-700">{note.scheduleNo}</span> | Cut: <span className="font-medium text-slate-700">{note.cutNo}</span> | Delivery: <span className="font-medium text-slate-700">{note.deliveryDate}</span></p>
+                        <p className="text-xs text-slate-500 mt-0.5">Sch: <span className="font-medium text-slate-700">{note.scheduleNo}</span> | Job: <span className="font-medium text-slate-700">{getJobNo(note) || '-'}</span> | Cut: <span className="font-medium text-slate-700">{note.cutNo}</span> | Delivery: <span className="font-medium text-slate-700">{note.deliveryDate}</span></p>
                       </div>
                       <div className="text-right space-y-0.5 shrink-0">
                         <div className="text-xs">Dispatch: <span className="font-bold text-emerald-600">{note.dispatchQty}</span></div>
@@ -170,7 +188,7 @@ export default function AdviceNoteSearchPage() {
                           </div>
 
                           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4 p-3 rounded-lg bg-white border border-slate-200">
-                            <InfoField label="Attn" value={note.attn} /><InfoField label="Component" value={note.component} /><InfoField label="Prep By" value={note.prepByName} /><InfoField label="Remarks" value={note.remarks} />
+                            <InfoField label="Attn" value={note.attn} /><InfoField label="Job No" value={getJobNo(note)} /><InfoField label="Component" value={note.component} /><InfoField label="Prep By" value={note.prepByName} /><InfoField label="Remarks" value={note.remarks} />
                           </div>
                           <table className="w-full text-xs"><thead><tr className="bg-slate-100 text-slate-600"><th className="px-2 py-1.5 text-left">#</th><th className="px-2 py-1.5 text-left">Bundle</th><th className="px-2 py-1.5 text-left">Size</th><th className="px-2 py-1.5 text-left">Cut</th><th className="px-2 py-1.5 text-right">Pcs</th><th className="px-2 py-1.5 text-right">PD</th><th className="px-2 py-1.5 text-right">FD</th><th className="px-2 py-1.5 text-right">Good</th></tr></thead>
                             <tbody>{rows.map((r, i) => (<tr key={i} className="border-b border-slate-100"><td className="px-2 py-1">{i + 1}</td><td className="px-2 py-1 font-bold">{r.bundleNo}</td><td className="px-2 py-1">{r.size}</td><td className="px-2 py-1">{r.cutForm}</td><td className="px-2 py-1 text-right font-bold">{r.totalPcs}</td><td className="px-2 py-1 text-right text-red-600">{r.pd || '-'}</td><td className="px-2 py-1 text-right text-red-600">{r.fd || '-'}</td><td className="px-2 py-1 text-right font-bold text-emerald-700">{r.goodQty}</td></tr>))}</tbody>
@@ -318,6 +336,7 @@ function printAdviceNote(note: AdviceNoteRecord) {
       <div class="row"><span class="lbl">Style #:</span><span class="val">${note.styleNo}</span></div>
       <div class="row"><span class="lbl">Address:</span><span class="val">${note.address}</span></div>
       <div class="row"><span class="lbl">Schedule No:</span><span class="val">${note.scheduleNo || ''}</span></div>
+      <div class="row"><span class="lbl">Job No:</span><span class="val">${getJobNo(note)}</span></div>
     </div>
     <table><thead><tr>
       <th style="width:24px"></th>

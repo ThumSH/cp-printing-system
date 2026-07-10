@@ -1,4 +1,3 @@
-// src/pages/inventory/StoreInSearchPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -19,6 +18,7 @@ export default function StoreInSearchPage() {
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterComponent, setFilterComponent] = useState('');
   const [filterSchedule, setFilterSchedule] = useState('');
+  const [filterJobNo, setFilterJobNo] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -100,6 +100,26 @@ export default function StoreInSearchPage() {
     return Array.from(set).sort();
   }, [storeInRecords, filterStyle, filterCustomer]);
 
+  // Job numbers (scoped to selected style/customer/component/schedule)
+  const jobNos = useMemo(() => {
+    let records = storeInRecords;
+    if (filterStyle) {
+      const [sn, cn] = filterStyle.split('|||');
+      records = records.filter((r) => r.styleNo === sn && r.customerName === cn);
+    }
+    if (filterCustomer) {
+      records = records.filter((r) => r.customerName === filterCustomer);
+    }
+    if (filterComponent) {
+      records = records.filter((r) => r.components === filterComponent);
+    }
+    if (filterSchedule) {
+      records = records.filter((r) => r.scheduleNo === filterSchedule);
+    }
+    const set = new Set(records.map((r) => (r.jobNo || '').trim()).filter(Boolean));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [storeInRecords, filterStyle, filterCustomer, filterComponent, filterSchedule]);
+
   // Selected style info card
   const selectedStyleInfo = useMemo(() => {
     if (!filterStyle) return null;
@@ -116,7 +136,7 @@ export default function StoreInSearchPage() {
   }, [filterStyle, storeInRecords]);
 
   // Is any filter active?
-  const hasFilters = !!(filterStyle || filterCustomer || filterComponent || filterSchedule || filterDateFrom || filterDateTo);
+  const hasFilters = !!(filterStyle || filterCustomer || filterComponent || filterSchedule || filterJobNo || filterDateFrom || filterDateTo);
 
   // Filtered records
   const filteredRecords = useMemo(() => {
@@ -135,6 +155,9 @@ export default function StoreInSearchPage() {
     if (filterSchedule) {
       records = records.filter((r) => r.scheduleNo === filterSchedule);
     }
+    if (filterJobNo) {
+      records = records.filter((r) => (r.jobNo || '').trim() === filterJobNo);
+    }
     if (filterDateFrom) {
       records = records.filter((r) => r.cutInDate >= filterDateFrom);
     }
@@ -143,7 +166,7 @@ export default function StoreInSearchPage() {
     }
 
     return records;
-  }, [storeInRecords, filterStyle, filterCustomer, filterComponent, filterSchedule, filterDateFrom, filterDateTo]);
+  }, [storeInRecords, filterStyle, filterCustomer, filterComponent, filterSchedule, filterJobNo, filterDateFrom, filterDateTo]);
 
   // Display records only after the user applies at least one filter.
   const displayRecords = useMemo(() => {
@@ -165,13 +188,14 @@ export default function StoreInSearchPage() {
     setFilterCustomer('');
     setFilterComponent('');
     setFilterSchedule('');
+    setFilterJobNo('');
     setFilterDateFrom('');
     setFilterDateTo('');
     setExpandedId(null);
   };
 
   // Active filter count (for badge)
-  const activeFilterCount = [filterStyle, filterCustomer, filterComponent, filterSchedule, filterDateFrom, filterDateTo].filter(Boolean).length;
+  const activeFilterCount = [filterStyle, filterCustomer, filterComponent, filterSchedule, filterJobNo, filterDateFrom, filterDateTo].filter(Boolean).length;
 
   // ==========================================
   // RENDER
@@ -238,6 +262,7 @@ export default function StoreInSearchPage() {
                 setFilterStyle(e.target.value);
                 setFilterComponent('');
                 setFilterSchedule('');
+                setFilterJobNo('');
               }}
               className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
                 filterStyle
@@ -278,7 +303,10 @@ export default function StoreInSearchPage() {
             <label className="block text-xs font-medium text-slate-600">Component</label>
             <select
               value={filterComponent}
-              onChange={(e) => setFilterComponent(e.target.value)}
+              onChange={(e) => {
+                setFilterComponent(e.target.value);
+                setFilterJobNo('');
+              }}
               className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
                 filterComponent
                   ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200'
@@ -297,7 +325,10 @@ export default function StoreInSearchPage() {
             <label className="block text-xs font-medium text-slate-600">Schedule No</label>
             <select
               value={filterSchedule}
-              onChange={(e) => setFilterSchedule(e.target.value)}
+              onChange={(e) => {
+                setFilterSchedule(e.target.value);
+                setFilterJobNo('');
+              }}
               className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
                 filterSchedule
                   ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200'
@@ -307,6 +338,28 @@ export default function StoreInSearchPage() {
               <option value="">All Schedules</option>
               {scheduleNos.map((s) => (
                 <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Job No */}
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">Job No</label>
+            <select
+              value={filterJobNo}
+              onChange={(e) => setFilterJobNo(e.target.value)}
+              disabled={jobNos.length === 0}
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors ${
+                filterJobNo
+                  ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200'
+                  : jobNos.length === 0
+                    ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : 'border-slate-300 bg-white focus:ring-2 focus:ring-blue-500'
+              }`}
+            >
+              <option value="">{jobNos.length === 0 ? 'No Job Nos' : 'All Job Nos'}</option>
+              {jobNos.map((j) => (
+                <option key={j} value={j}>{j}</option>
               ))}
             </select>
           </div>
@@ -406,7 +459,7 @@ export default function StoreInSearchPage() {
         ) : displayRecords.length === 0 ? (
           <div className="py-16 text-center text-slate-400">
             <PackageOpen className="mx-auto mb-3 h-12 w-12 opacity-20" />
-            <p>{hasFilters ? 'No records match your filters.' : 'Select a style, customer, schedule, or date filter to view records.'}</p>
+            <p>{hasFilters ? 'No records match your filters.' : 'Select a style, customer, schedule, job no, or date filter to view records.'}</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
@@ -435,7 +488,8 @@ export default function StoreInSearchPage() {
                         <span className="text-xs text-slate-500">{record.customerName}</span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Sch: <span className="font-medium text-slate-700">{record.scheduleNo}</span>
+                        Sch: <span className="font-medium text-slate-700">{record.scheduleNo || '-'}</span>
+                        {' | '}Job: <span className="font-medium text-slate-700">{record.jobNo || '-'}</span>
                         {' | '}Date: <span className="font-medium text-slate-700">{record.cutInDate}</span>
                         {' | '}{record.bodyColour} / {record.printColour}
                         {' | '}{record.season}
@@ -473,7 +527,8 @@ export default function StoreInSearchPage() {
                           <MiniStat label="Available (Shelf)" value={record.availableQty} color="green" />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4 p-3 rounded-lg bg-white border border-slate-200">
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-5 mb-4 p-3 rounded-lg bg-white border border-slate-200">
+                          <InfoField label="Job No" value={record.jobNo || ''} />
                           <InfoField label="Components" value={record.components} />
                           <InfoField label="Body Colour" value={record.bodyColour} />
                           <InfoField label="Print Colour" value={record.printColour} />
