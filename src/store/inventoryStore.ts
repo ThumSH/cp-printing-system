@@ -1,4 +1,3 @@
-
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
 
@@ -53,6 +52,7 @@ export interface StoreInRecord {
   inAdNo: string;
 
   scheduleNo: string;
+  jobNo: string;
   cutInDate: string;
   bulkQty: number;
   inQty: number;
@@ -100,6 +100,7 @@ export interface CreateStoreInInput {
   inAdNo: string;
 
   scheduleNo: string;
+  jobNo: string;
   cutInDate: string;
   inQty: number;
   cuts: CreateCutInput[];

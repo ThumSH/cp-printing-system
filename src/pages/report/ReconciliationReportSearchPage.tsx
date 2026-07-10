@@ -1,4 +1,3 @@
-// src/pages/reports/ReconciliationReportSearchPage.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -54,6 +53,7 @@ interface ReconciliationSavedReport {
   styleNo: string;
   component: string;
   scheduleNo: string;
+  jobNos: string;
   colour: string;
   reportDate: string;
   createdAt: string;
@@ -64,6 +64,18 @@ interface ReconciliationSavedReport {
 
 function uniq(values: string[]) {
   return Array.from(new Set(values.map(v => (v || '').trim()).filter(Boolean))).sort();
+}
+
+function getJobNoValues(value?: string) {
+  return (value || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
+function hasJobNo(report: ReconciliationSavedReport, jobNo: string) {
+  if (!jobNo) return true;
+  return getJobNoValues(report.jobNos).some(value => value.toLowerCase() === jobNo.toLowerCase());
 }
 
 function formatQty(value?: number | null) {
@@ -139,7 +151,7 @@ function printSavedReport(report: ReconciliationSavedReport) {
     <div class="label">Component</div><div class="value">${escapeHtml(report.component)}</div>
     <div class="label">Style No</div><div class="value">${escapeHtml(report.styleNo)}</div>
     <div class="label">Schedule No</div><div class="value">${escapeHtml(report.scheduleNo || '(No Schedule)')}</div>
-    <div></div><div></div>
+    <div class="label">Job No(s)</div><div class="value">${escapeHtml(report.jobNos || '-')}</div>
   </div>
 
   <table>
@@ -192,6 +204,7 @@ export default function ReconciliationReportSearchPage() {
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterStyle, setFilterStyle] = useState('');
   const [filterComponent, setFilterComponent] = useState('');
+  const [filterJobNo, setFilterJobNo] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
 
@@ -233,7 +246,21 @@ export default function ReconciliationReportSearchPage() {
     return uniq(scoped.map(report => report.component));
   }, [reports, filterCustomer, filterStyle]);
 
-  const hasFilters = !!(filterCustomer || filterStyle || filterComponent || filterDateFrom || filterDateTo);
+  const jobNos = useMemo(() => {
+    let scoped = reports;
+    if (filterCustomer) scoped = scoped.filter(report => report.customerName === filterCustomer);
+    if (filterStyle) scoped = scoped.filter(report => report.styleNo === filterStyle);
+    if (filterComponent) scoped = scoped.filter(report => report.component === filterComponent);
+
+    const values: string[] = [];
+    scoped.forEach(report => {
+      values.push(...getJobNoValues(report.jobNos));
+    });
+
+    return uniq(values);
+  }, [reports, filterCustomer, filterStyle, filterComponent]);
+
+  const hasFilters = !!(filterCustomer || filterStyle || filterComponent || filterJobNo || filterDateFrom || filterDateTo);
 
   const filteredReports = useMemo(() => {
     let list = reports.slice();
@@ -241,22 +268,24 @@ export default function ReconciliationReportSearchPage() {
     if (filterCustomer) list = list.filter(report => report.customerName === filterCustomer);
     if (filterStyle) list = list.filter(report => report.styleNo === filterStyle);
     if (filterComponent) list = list.filter(report => report.component === filterComponent);
+    if (filterJobNo) list = list.filter(report => hasJobNo(report, filterJobNo));
     if (filterDateFrom) list = list.filter(report => report.reportDate >= filterDateFrom);
     if (filterDateTo) list = list.filter(report => report.reportDate <= filterDateTo);
 
     return list;
-  }, [reports, filterCustomer, filterStyle, filterComponent, filterDateFrom, filterDateTo]);
+  }, [reports, filterCustomer, filterStyle, filterComponent, filterJobNo, filterDateFrom, filterDateTo]);
 
   const clearFilters = () => {
     setFilterCustomer('');
     setFilterStyle('');
     setFilterComponent('');
+    setFilterJobNo('');
     setFilterDateFrom('');
     setFilterDateTo('');
     setExpandedId(null);
   };
 
-  const activeFilterCount = [filterCustomer, filterStyle, filterComponent, filterDateFrom, filterDateTo].filter(Boolean).length;
+  const activeFilterCount = [filterCustomer, filterStyle, filterComponent, filterJobNo, filterDateFrom, filterDateTo].filter(Boolean).length;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-7xl space-y-6 pb-12">
@@ -265,7 +294,7 @@ export default function ReconciliationReportSearchPage() {
           <div className="rounded-lg bg-cyan-100 p-2"><Search className="h-6 w-6 text-cyan-700" /></div>
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Reconciliation Report Search</h2>
-            <p className="text-sm text-slate-500">Search saved reconciliation reports by customer, style, component, and saved date.</p>
+            <p className="text-sm text-slate-500">Search saved reconciliation reports by customer, style, component, job no, and saved date.</p>
           </div>
         </div>
         <button type="button" onClick={loadReports} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
@@ -287,10 +316,10 @@ export default function ReconciliationReportSearchPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-600">Customer</label>
-            <select value={filterCustomer} onChange={e => { setFilterCustomer(e.target.value); setFilterStyle(''); setFilterComponent(''); }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-cyan-500">
+            <select value={filterCustomer} onChange={e => { setFilterCustomer(e.target.value); setFilterStyle(''); setFilterComponent(''); setFilterJobNo(''); }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-cyan-500">
               <option value="">All Customers</option>
               {customers.map(customer => <option key={customer} value={customer}>{customer}</option>)}
             </select>
@@ -298,7 +327,7 @@ export default function ReconciliationReportSearchPage() {
 
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-600">Style No</label>
-            <select value={filterStyle} onChange={e => { setFilterStyle(e.target.value); setFilterComponent(''); }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-cyan-500">
+            <select value={filterStyle} onChange={e => { setFilterStyle(e.target.value); setFilterComponent(''); setFilterJobNo(''); }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-cyan-500">
               <option value="">All Styles</option>
               {styles.map(style => <option key={style} value={style}>{style}</option>)}
             </select>
@@ -306,9 +335,17 @@ export default function ReconciliationReportSearchPage() {
 
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-600">Component</label>
-            <select value={filterComponent} onChange={e => setFilterComponent(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-cyan-500">
+            <select value={filterComponent} onChange={e => { setFilterComponent(e.target.value); setFilterJobNo(''); }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-cyan-500">
               <option value="">All Components</option>
               {components.map(component => <option key={component} value={component}>{component}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">Job No</label>
+            <select value={filterJobNo} onChange={e => setFilterJobNo(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-cyan-500">
+              <option value="">All Job Nos</option>
+              {jobNos.map(jobNo => <option key={jobNo} value={jobNo}>{jobNo}</option>)}
             </select>
           </div>
 
@@ -328,7 +365,7 @@ export default function ReconciliationReportSearchPage() {
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 py-14 text-center">
           <FileSpreadsheet className="mx-auto mb-3 h-12 w-12 text-slate-300" />
           <p className="text-sm font-medium text-slate-500">Use filters to search saved reconciliation reports.</p>
-          <p className="mt-1 text-xs text-slate-400">Customer, style, component, and date range can be used together.</p>
+          <p className="mt-1 text-xs text-slate-400">Customer, style, component, job no, and date range can be used together.</p>
         </div>
       )}
 
@@ -357,8 +394,11 @@ export default function ReconciliationReportSearchPage() {
                           <span className="text-xs text-slate-500">{report.customerName}</span>
                           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{report.component}</span>
                           <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">{report.scheduleNo || 'No Schedule'}</span>
+                          {report.jobNos && (
+                            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Job: {report.jobNos}</span>
+                          )}
                         </div>
-                        <p className="mt-0.5 text-xs text-slate-500">Saved Date: {report.reportDate} | Colour: {report.colour || '-'}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">Saved Date: {report.reportDate} | Colour: {report.colour || '-'}{report.jobNos ? ' | Job No(s): ' + report.jobNos : ''}</p>
                       </div>
                       <div className="shrink-0 text-right text-xs">
                         <div>Received: <span className="font-bold text-slate-800">{formatQty(report.totals.receivedQty)}</span></div>
@@ -372,7 +412,7 @@ export default function ReconciliationReportSearchPage() {
                           <div className="mb-3 flex items-center justify-between">
                             <div>
                               <h4 className="font-bold text-slate-700">Saved Report Details</h4>
-                              <p className="text-[11px] text-slate-400">Received AD No = Store-In IN-AD No · Sent AD No = Gatepass bill AD No</p>
+                              <p className="text-[11px] text-slate-400">Received AD No = Store-In IN-AD No · Sent AD No = Gatepass bill AD No{report.jobNos ? ' · Job No(s): ' + report.jobNos : ''}</p>
                             </div>
                             <button type="button" onClick={() => printSavedReport(report)} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700">
                               <Printer className="h-3.5 w-3.5" /> Print Report

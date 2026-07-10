@@ -1,11 +1,3 @@
-// src/store/adviceNoteStore.ts
-// FIXES:
-//   - addAdviceNote:    now re-fetches eligibleDispatchItems so remaining qty updates in UI
-//   - deleteAdviceNote: now re-fetches eligibleDispatchItems so item reappears as dispatchable
-//   - updateAdviceNote: now re-fetches the note from server after PUT (204 NoContent)
-//                       to ensure backend-computed balanceQty/scheduleNo are current
-//   - sortAdviceNotes:  uses safe string comparison instead of new Date() (timezone safe)
-
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
 
@@ -54,6 +46,7 @@ export interface EligibleGatepassItem {
   issueQty: number;
   remainingDispatchQty: number;
   scheduleNo: string;
+  jobNo: string;
   bodyColour: string;
   printColour: string;
   season: string;
@@ -73,6 +66,7 @@ export interface AdviceNoteRecord {
   styleNo: string;
   address: string;
   scheduleNo: string;
+  jobNo: string;
   cutNo: string;
   component: string;
   dispatchQty: number;

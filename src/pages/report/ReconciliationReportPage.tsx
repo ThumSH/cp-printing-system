@@ -1,4 +1,3 @@
-// src/pages/reports/ReconciliationReportPage.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -39,6 +38,7 @@ interface ReconciliationStoreInRecord {
   season: string;
   inAdNo: string;
   scheduleNo: string;
+  jobNo: string;
   cutInDate: string;
   inQty: number;
   totalCutQty: number;
@@ -67,6 +67,7 @@ interface ReconciliationAdviceNoteRecord {
   customerName: string;
   styleNo: string;
   scheduleNo: string;
+  jobNo: string;
   cutNo: string;
   component: string;
   dispatchQty: number;
@@ -321,6 +322,8 @@ export default function ReconciliationReportPage() {
       }, [])
     );
 
+    const jobNos = uniq(matchingStoreIns.map(record => record.jobNo || '')).join(', ');
+
     return {
       customer: selectedCustomer,
       styleNo: selectedStyle,
@@ -331,6 +334,7 @@ export default function ReconciliationReportPage() {
             ? ''
             : selectedSchedule
           : '',
+      jobNos,
       colour: colours.join(' / ') || first?.bodyColour || '',
     };
   }, [matchingStoreIns, selectedCustomer, selectedStyle, selectedComponent, selectedSchedule, hasRealSchedules]);
@@ -529,6 +533,7 @@ export default function ReconciliationReportPage() {
         styleNo: reportMeta.styleNo,
         component: reportMeta.component,
         scheduleNo: reportMeta.scheduleNo || '',
+        jobNos: reportMeta.jobNos || '',
         colour: reportMeta.colour || '',
         reportDate: today,
         totals: {
@@ -633,7 +638,7 @@ export default function ReconciliationReportPage() {
     <div class="label">Component</div><div class="value">${escapeHtml(reportMeta.component)}</div>
     <div class="label">Style No</div><div class="value">${escapeHtml(reportMeta.styleNo)}</div>
     <div class="label">Schedule No</div><div class="value">${escapeHtml(reportMeta.scheduleNo || '(No Schedule)')}</div>
-    <div></div><div></div>
+    <div class="label">Job No(s)</div><div class="value">${escapeHtml(reportMeta.jobNos || '—')}</div>
   </div>
 
   <table>
@@ -745,6 +750,23 @@ export default function ReconciliationReportPage() {
             </select>
           </div>
         </div>
+
+        {selectedComponent && (
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1 xl:col-span-2">
+              <label className="block text-xs font-medium text-slate-600">Job No(s)</label>
+              <input
+                type="text"
+                readOnly
+                value={hasRealSchedules && !selectedSchedule ? 'Select schedule first...' : reportMeta.jobNos || '—'}
+                className="w-full cursor-default rounded-lg border border-slate-300 bg-slate-100 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none"
+              />
+              <p className="text-[11px] text-slate-400">
+                One Schedule No can include multiple Job Nos. The report includes all Job Nos under the selected Schedule No.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {!reportReady && (
@@ -763,11 +785,12 @@ export default function ReconciliationReportPage() {
                 <p className="text-sm font-black uppercase tracking-wide text-slate-900">{COMPANY_NAME}</p>
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{REPORT_TITLE}</p>
               </div>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600 md:grid-cols-5">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600 md:grid-cols-6">
                 <span><b>Customer:</b> {reportMeta.customer}</span>
                 <span><b>Style:</b> {reportMeta.styleNo}</span>
                 <span><b>Component:</b> {reportMeta.component}</span>
                 <span><b>Schedule:</b> {reportMeta.scheduleNo || '(No Schedule)'}</span>
+                <span><b>Job No(s):</b> {reportMeta.jobNos || '-'}</span>
                 <span><b>Colour:</b> {reportMeta.colour || '-'}</span>
               </div>
             </div>
@@ -815,7 +838,7 @@ export default function ReconciliationReportPage() {
             </table>
           </div>
 
-          <div className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">Received Details AD No is taken from Store-In IN-AD No. Sent Details AD No is taken from the Gatepass / Advice Note bill AD No.</div>
+          <div className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">Received Details AD No is taken from Store-In IN-AD No. Sent Details AD No is taken from the Gatepass / Advice Note bill AD No. Job No(s) are grouped under the selected Schedule No.</div>
         </div>
       )}
 
