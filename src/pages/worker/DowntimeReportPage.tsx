@@ -1,348 +1,746 @@
-// src/pages/worker/DowntimePage.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, Save, Trash2, AlertCircle, Plus, ChevronDown, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
-import { useAuthStore } from '../../store/authStore';
-import { API } from '../../api/client';
+import { useNavigate } from 'react-router-dom';
+import {
+  History, Search, Filter, RotateCcw, ChevronDown, ChevronRight,
+  CalendarDays, ChevronLeft, ChevronsLeft, ChevronsRight, Clock,
+  User as UserIcon, Package, X, ArrowRight, CheckCircle2,
+} from 'lucide-react';
+import { API, getAuthHeaders } from '../../api/client';
 
-const API_BASE = API.WORKER;
-const getHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
+const API_BASE = `${API.WORKER}`;
+const PAGE_SIZE = 50;
 
-const DOWNTIME_TYPES = [
-  'Machine Breakdown',
-  'Power Cut',
-  'Material Shortage',
-  'Maintenance',
-  'Worker Absence',
-  'Quality Issue',
-  'Setup / Changeover',
-  'Other',
-];
+interface TimeSlotEntry {
+  timeFrom: string;
+  timeTo: string;
+  seating: number;
+  printing: number;
+  curing: number;
+  checking: number;
+  packing: number;
+  dispatch: number;
+}
 
-interface DowntimeEntry { type: string; hours: number; reason: string; timeFrom: string; timeTo: string; isAcknowledged: boolean; acknowledgedBy: string; }
-interface DowntimeRecord { id: string; storeInRecordId: string; date: string; styleNo: string; customerName: string; tableNo: string; workerName: string; entries: DowntimeEntry[]; totalHours: number; fullyAcknowledged: boolean; }
-interface EligibleStyle { id: string; styleNo: string; customerName: string; scheduleNo: string; components: string; bodyColour: string; orderQty: number; }
+interface DailyOutputRecord {
+  id: string;
+  storeInRecordId: string;
+  productionRecordId: string;
+  date: string;
+  styleNo: string;
+  customerName: string;
+  cutNo: string;
+  component: string;
+  orderQty: number;
+  tableNo: string;
+  workerName: string;
+  isJobCompleted?: boolean;
+  completedAt?: string;
+  completedBy?: string;
+  timeSlots: TimeSlotEntry[];
+  totalSeating: number;
+  totalPrinting: number;
+  totalCuring: number;
+  totalChecking: number;
+  totalPacking: number;
+  totalDispatch: number;
+}
 
-// Local staging entry
-interface StagingEntry { tempId: string; type: string; hours: string; reason: string; timeFrom: string; timeTo: string; }
+interface PaginatedResponse {
+  items: DailyOutputRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
 
-export default function DowntimePage() {
-  const { user } = useAuthStore();
-  const isAdmin = user?.role === 'Admin';
+interface WorkerEligibleStyle {
+  id?: string;
+  Id?: string;
+  productionRecordId?: string;
+  ProductionRecordId?: string;
+}
 
-  const [eligibleStyles, setEligibleStyles] = useState<EligibleStyle[]>([]);
-  const [records, setRecords] = useState<DowntimeRecord[]>([]);
-  const [selectedStoreInId, setSelectedStoreInId] = useState('');
-  const [tableNo, setTableNo] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [workerName, setWorkerName] = useState('');
+function getEligibleProductionId(item: WorkerEligibleStyle) {
+  return String(item.productionRecordId || item.ProductionRecordId || item.id || item.Id || '').trim();
+}
 
-  // Staging entries (accumulate before submit)
-  const [stagingEntries, setStagingEntries] = useState<StagingEntry[]>([]);
+export default function WorkerHistoryPage() {
+  const navigate = useNavigate();
 
-  // New entry form
-  const [entryType, setEntryType] = useState('');
-  const [entryHours, setEntryHours] = useState('');
-  const [entryReason, setEntryReason] = useState('');
-  const [entryTimeFrom, setEntryTimeFrom] = useState('');
-  const [entryTimeTo, setEntryTimeTo] = useState('');
+  // Filters
+  const [searchText, setSearchText] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [filterStyle, setFilterStyle] = useState('');
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterCut, setFilterCut] = useState('');
+  const [filterComponent, setFilterComponent] = useState('');
+  const [filterWorker, setFilterWorker] = useState('');
+  const [filterTable, setFilterTable] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Paginated data
+  const [records, setRecords] = useState<DailyOutputRecord[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+
+  // UI state
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const fetchData = async () => {
+  // Loaded once: all records (for populating the filter dropdowns)
+  const [allRecords, setAllRecords] = useState<DailyOutputRecord[]>([]);
+
+  // Loaded once: currently available worker production IDs.
+  // If a history row's production record is no longer returned here, it means
+  // the job is completed/closed and should not show Continue.
+  const [eligibleProductionIds, setEligibleProductionIds] = useState<Set<string>>(new Set());
+  const [eligibleStylesLoaded, setEligibleStylesLoaded] = useState(false);
+
+  // Debounce search input — 300ms
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchText), 300);
+    return () => clearTimeout(t);
+  }, [searchText]);
+
+  // Reset to page 1 when any filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterStyle, filterCustomer, filterCut, filterComponent,
+      filterWorker, filterTable, filterDateFrom, filterDateTo]);
+
+  // Server-paginated fetch
+  const fetchPage = useCallback(async () => {
+    setIsLoading(true);
+    setPageError('');
     try {
-      const [styRes, recRes] = await Promise.all([
-        fetch(`${API_BASE}/eligible-styles`, { headers: getHeaders() }),
-        fetch(`${API_BASE}/downtime`, { headers: getHeaders() }),
-      ]);
-      if (styRes.ok) setEligibleStyles(await styRes.json());
-      if (recRes.ok) setRecords(await recRes.json());
-    } catch (e) { setPageError('Failed to load data.'); }
+      const p = new URLSearchParams();
+      p.set('paginated', 'true');
+      p.set('page', String(page));
+      p.set('pageSize', String(PAGE_SIZE));
+      if (debouncedSearch.trim()) p.set('search', debouncedSearch.trim());
+      if (filterStyle)     p.set('styleNo', filterStyle);
+      if (filterCustomer)  p.set('customerName', filterCustomer);
+      if (filterCut)       p.set('cutNo', filterCut);
+      if (filterComponent) p.set('component', filterComponent);
+      if (filterWorker)    p.set('workerName', filterWorker);
+      if (filterTable)     p.set('tableNo', filterTable);
+      if (filterDateFrom)  p.set('dateFrom', filterDateFrom);
+      if (filterDateTo)    p.set('dateTo', filterDateTo);
+
+      const res = await fetch(`${API_BASE}/daily-output?${p.toString()}`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await res.text() || 'Failed to load');
+      const data: PaginatedResponse = await res.json();
+      setRecords(data.items || []);
+      setTotal(data.total || 0);
+      setTotalPages(data.totalPages || 0);
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Failed to load history.');
+      setRecords([]); setTotal(0); setTotalPages(0);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, debouncedSearch, filterStyle, filterCustomer, filterCut, filterComponent,
+      filterWorker, filterTable, filterDateFrom, filterDateTo]);
+
+  useEffect(() => { fetchPage(); }, [fetchPage]);
+
+  // Load ALL records ONCE (no filter) to populate dropdown facets,
+  // and load eligible worker production IDs so completed/closed jobs can be
+  // indicated as Completed instead of showing a Continue button.
+  useEffect(() => {
+    (async () => {
+      try {
+        const [historyRes, eligibleRes] = await Promise.all([
+          fetch(`${API_BASE}/daily-output`, { headers: getAuthHeaders() }),
+          fetch(`${API_BASE}/eligible-styles`, { headers: getAuthHeaders() }),
+        ]);
+
+        if (historyRes.ok) setAllRecords(await historyRes.json());
+
+        if (eligibleRes.ok) {
+          const eligibleData: WorkerEligibleStyle[] = await eligibleRes.json();
+          setEligibleProductionIds(new Set(
+            (eligibleData || [])
+              .map(getEligibleProductionId)
+              .filter(Boolean)
+          ));
+          setEligibleStylesLoaded(true);
+        }
+      } catch {
+        // Silent: history still works. If eligible-styles fails, Continue will
+        // not be disabled based on availability because the source is unknown.
+      }
+    })();
+  }, []);
+
+  // Dropdown options derived from allRecords (so every unique value shows, not just page's)
+  const styles = useMemo(() =>
+    [...new Set(allRecords.map(r => r.styleNo).filter(Boolean))].sort(),
+  [allRecords]);
+
+  const customers = useMemo(() =>
+    [...new Set(allRecords.map(r => r.customerName).filter(Boolean))].sort(),
+  [allRecords]);
+
+  const cuts = useMemo(() =>
+    [...new Set(allRecords.map(r => r.cutNo).filter(Boolean))].sort(),
+  [allRecords]);
+
+  const components = useMemo(() =>
+    [...new Set(allRecords.map(r => r.component).filter(Boolean))].sort(),
+  [allRecords]);
+
+  const workers = useMemo(() =>
+    [...new Set(allRecords.map(r => r.workerName).filter(Boolean))].sort(),
+  [allRecords]);
+
+  const tables = useMemo(() =>
+    [...new Set(allRecords.map(r => r.tableNo).filter(Boolean))].sort(),
+  [allRecords]);
+
+  const hasFilters = !!(debouncedSearch || filterStyle || filterCustomer || filterCut ||
+                        filterComponent || filterWorker || filterTable ||
+                        filterDateFrom || filterDateTo);
+  const activeFilterCount = [debouncedSearch, filterStyle, filterCustomer, filterCut,
+                              filterComponent, filterWorker, filterTable,
+                              filterDateFrom, filterDateTo].filter(Boolean).length;
+
+  const clearFilters = () => {
+    setSearchText(''); setFilterStyle(''); setFilterCustomer('');
+    setFilterCut(''); setFilterComponent(''); setFilterWorker('');
+    setFilterTable(''); setFilterDateFrom(''); setFilterDateTo('');
+    setExpandedId(null);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  const allKnownRecords = useMemo(() => {
+    const map = new Map<string, DailyOutputRecord>();
+    [...allRecords, ...records].forEach((record) => {
+      if (record.id) map.set(record.id, record);
+    });
+    return Array.from(map.values());
+  }, [allRecords, records]);
 
+  const getAggregateStageTotals = useCallback((record: DailyOutputRecord) => {
+    const relatedRecords = allKnownRecords.filter(
+      (r) => r.productionRecordId === record.productionRecordId
+    );
+    const source = relatedRecords.length > 0 ? relatedRecords : [record];
 
-  // Separate pending vs acknowledged records
-  const pendingRecords = records.filter((r) => !r.fullyAcknowledged);
+    return {
+      seating: source.reduce((sum, r) => sum + (r.totalSeating || 0), 0),
+      printing: source.reduce((sum, r) => sum + (r.totalPrinting || 0), 0),
+      curing: source.reduce((sum, r) => sum + (r.totalCuring || 0), 0),
+      checking: source.reduce((sum, r) => sum + (r.totalChecking || 0), 0),
+      packing: source.reduce((sum, r) => sum + (r.totalPacking || 0), 0),
+      dispatch: source.reduce((sum, r) => sum + (r.totalDispatch || 0), 0),
+    };
+  }, [allKnownRecords]);
 
-  const handleAddEntry = () => {
-    const newErrors: Record<string, string> = {};
-    if (!entryType) newErrors.entryType = 'Select a type';
-    if (!(parseFloat(entryHours) > 0)) newErrors.entryHours = 'Hours must be > 0';
-    if (!entryReason.trim()) newErrors.entryReason = 'Reason is required';
-    setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) return;
+  const stageValues = (totals: ReturnType<typeof getAggregateStageTotals>) => [
+    totals.seating,
+    totals.printing,
+    totals.curing,
+    totals.checking,
+    totals.packing,
+    totals.dispatch,
+  ];
 
-    setStagingEntries((prev) => [...prev, {
-      tempId: crypto.randomUUID(),
-      type: entryType,
-      hours: entryHours,
-      reason: entryReason.trim(),
-      timeFrom: entryTimeFrom,
-      timeTo: entryTimeTo,
-    }]);
+  const maxStageAllocated = (totals: ReturnType<typeof getAggregateStageTotals>) =>
+    Math.max(...stageValues(totals));
 
-    setEntryType(''); setEntryHours(''); setEntryReason(''); setEntryTimeFrom(''); setEntryTimeTo('');
-    setErrors({});
+  const lowestStageRemaining = (
+    record: DailyOutputRecord,
+    totals: ReturnType<typeof getAggregateStageTotals>
+  ) => Math.min(...stageValues(totals).map((value) => Math.max(0, record.orderQty - value)));
+
+  const isAllocationComplete = (
+    record: DailyOutputRecord,
+    totals = getAggregateStageTotals(record)
+  ) => record.orderQty > 0 && stageValues(totals).every((value) => value >= record.orderQty);
+
+  const getManualCompletionMeta = useCallback((record: DailyOutputRecord) => {
+    const relatedRecords = allKnownRecords.filter(
+      (r) => r.productionRecordId === record.productionRecordId
+    );
+    const source = relatedRecords.length > 0 ? relatedRecords : [record];
+
+    const completedRecord = source.find((r) =>
+      Boolean(r.isJobCompleted) ||
+      Boolean((r.completedAt || '').trim()) ||
+      Boolean((r.completedBy || '').trim())
+    );
+
+    return {
+      isCompleted: Boolean(completedRecord),
+      completedAt: completedRecord?.completedAt || '',
+      completedBy: completedRecord?.completedBy || '',
+    };
+  }, [allKnownRecords]);
+
+  const isProductionStillEligible = useCallback((record: DailyOutputRecord) => {
+    if (!record.productionRecordId || !eligibleStylesLoaded) return true;
+    return eligibleProductionIds.has(record.productionRecordId);
+  }, [eligibleProductionIds, eligibleStylesLoaded]);
+
+  const continueAllocation = (record: DailyOutputRecord) => {
+    if (!record.productionRecordId) {
+      setPageError('This history record is missing its production record link and cannot be resumed.');
+      return;
+    }
+
+    if (isAllocationComplete(record)) {
+      setPageError('This production allocation is already completed. No remaining qty is available to continue.');
+      return;
+    }
+
+    if (getManualCompletionMeta(record).isCompleted) {
+      setPageError('This job was manually completed. It can no longer be continued even if some stage qty remains.');
+      return;
+    }
+
+    if (!isProductionStillEligible(record)) {
+      setPageError('This job is completed or no longer available for worker allocation. It cannot be continued.');
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('productionRecordId', record.productionRecordId);
+    if (record.tableNo) params.set('tableNo', record.tableNo);
+    if (record.date) {
+      params.set('date', record.date);
+      params.set('sourceDate', record.date);
+    }
+    if (record.id) params.set('sourceRecordId', record.id);
+
+    navigate(`/worker?${params.toString()}`);
   };
 
-  const handleSubmit = async () => {
-    const newErrors: Record<string, string> = {};
-    if (!date) newErrors.date = 'Date is required';
-    if (!workerName.trim()) newErrors.workerName = 'Worker name is required';
-    if (stagingEntries.length === 0) newErrors.entries = 'Add at least one downtime entry';
-    setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) return;
-
-    setIsSaving(true); setPageError('');
-    try {
-      const payload = {
-        storeInRecordId: selectedStoreInId || '',
-        date,
-        tableNo,
-        workerName,
-        entries: stagingEntries.map((e) => ({
-          type: e.type,
-          hours: parseFloat(e.hours) || 0,
-          reason: e.reason,
-          timeFrom: e.timeFrom,
-          timeTo: e.timeTo,
-        })),
-      };
-
-      const res = await fetch(`${API_BASE}/downtime`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error(await res.text());
-
-      setStagingEntries([]); setWorkerName(''); setTableNo(''); setSelectedStoreInId('');
-      await fetchData();
-    } catch (e) { setPageError(e instanceof Error ? e.message : 'Failed to save.'); }
-    finally { setIsSaving(false); }
-  };
-
-  const handleAcknowledge = async (id: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/downtime/${id}/acknowledge`, {
-        method: 'PUT', headers: getHeaders(),
-        body: JSON.stringify({ acknowledgedBy: user?.name || 'Admin' }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      await fetchData();
-    } catch (e) { setPageError(e instanceof Error ? e.message : 'Failed to acknowledge.'); }
-  };
-
-  const handleReject = async (id: string) => {
-    if (!window.confirm('Reject and delete this downtime report?')) return;
-    try {
-      const res = await fetch(`${API_BASE}/downtime/${id}/reject`, { method: 'PUT', headers: getHeaders() });
-      if (!res.ok) throw new Error(await res.text());
-      await fetchData();
-    } catch (e) { setPageError(e instanceof Error ? e.message : 'Failed to reject.'); }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this record?')) return;
-    try { await fetch(`${API_BASE}/downtime/${id}`, { method: 'DELETE', headers: getHeaders() }); await fetchData(); }
-    catch (e) { setPageError('Failed to delete.'); }
-  };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-5xl space-y-6 pb-12">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mx-auto max-w-7xl space-y-6 pb-12"
+    >
+      {/* Header */}
       <div className="flex items-center space-x-3 border-b border-slate-200 pb-4">
-        <div className="rounded-lg bg-amber-100 p-2"><Clock className="h-6 w-6 text-amber-700" /></div>
-        <div><h2 className="text-2xl font-bold text-slate-900">Downtime Reports</h2>
-          <p className="text-sm text-slate-500">{isAdmin ? 'Review and approve/reject worker downtime requests.' : 'Submit downtime reasons for approval.'}</p>
+        <div className="rounded-lg bg-teal-100 p-2">
+          <History className="h-6 w-6 text-teal-700" />
+        </div>
+        <div className="flex-1">
+          <h2 className="text-2xl font-bold text-slate-900">Worker History</h2>
+          <p className="text-sm text-slate-500">
+            Search old allocations and continue unfinished styles directly from here. Showing top {PAGE_SIZE} most recent.
+          </p>
         </div>
       </div>
 
-      {pageError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{pageError}</div>}
-
-      {/* ==========================================
-          WORKER: Submit downtime form
-          ========================================== */}
-      {!isAdmin && (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
-          <h3 className="text-lg font-semibold text-slate-800">Submit Downtime</h3>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">Date *</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="w-full rounded border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">Style (optional)</label>
-              <select value={selectedStoreInId} onChange={(e) => setSelectedStoreInId(e.target.value)}
-                className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500">
-                <option value="">No style</option>
-                {eligibleStyles.map((s) => (<option key={s.id} value={s.id}>{s.styleNo} | {s.customerName}</option>))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">Table No</label>
-              <input type="text" value={tableNo} onChange={(e) => setTableNo(e.target.value)} placeholder="T01"
-                className="w-full rounded border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">Worker Name *</label>
-              <input type="text" value={workerName} onChange={(e) => setWorkerName(e.target.value)} placeholder="Your name"
-                className={`w-full rounded border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500 ${errors.workerName ? 'border-red-400 bg-red-50' : 'border-slate-300'}`} />
-            </div>
-          </div>
-
-          {/* Add entry form */}
-          <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-3">
-            <h4 className="text-sm font-bold text-amber-800">Add Downtime Entry</h4>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-              <div className="space-y-1 md:col-span-2">
-                <label className="block text-[10px] font-medium text-slate-600">Type *</label>
-                <select value={entryType} onChange={(e) => setEntryType(e.target.value)}
-                  className={`w-full rounded border bg-white px-3 py-2 text-sm outline-none ${errors.entryType ? 'border-red-400' : 'border-slate-300 focus:ring-2 focus:ring-amber-500'}`}>
-                  <option value="">Select type...</option>
-                  {DOWNTIME_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-medium text-slate-600">Hours *</label>
-                <input type="number" step="0.5" value={entryHours} onChange={(e) => setEntryHours(e.target.value)} placeholder="1.5"
-                  className={`w-full rounded border px-3 py-2 text-sm font-bold outline-none ${errors.entryHours ? 'border-red-400' : 'border-slate-300 focus:ring-2 focus:ring-amber-500'}`} />
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-medium text-slate-600">From</label>
-                <input type="time" value={entryTimeFrom} onChange={(e) => setEntryTimeFrom(e.target.value)}
-                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" />
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-medium text-slate-600">To</label>
-                <input type="time" value={entryTimeTo} onChange={(e) => setEntryTimeTo(e.target.value)}
-                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" />
-              </div>
-              <div className="flex items-end">
-                <button type="button" onClick={handleAddEntry}
-                  className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700 transition-colors w-full justify-center">
-                  <Plus className="h-4 w-4" /> Add
-                </button>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-medium text-slate-600">Reason / Description *</label>
-              <input type="text" value={entryReason} onChange={(e) => setEntryReason(e.target.value)} placeholder="Describe the downtime reason..."
-                className={`w-full rounded border px-3 py-2 text-sm outline-none ${errors.entryReason ? 'border-red-400' : 'border-slate-300 focus:ring-2 focus:ring-amber-500'}`} />
-            </div>
-          </div>
-
-          {/* Staging entries */}
-          {stagingEntries.length > 0 && (
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="bg-slate-800 px-4 py-2 text-sm font-bold text-white">Entries — {stagingEntries.length} | Total: {stagingEntries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0).toFixed(1)} hrs</div>
-              <table className="w-full text-sm">
-                <thead><tr className="bg-slate-50 text-xs font-semibold text-slate-600 border-b border-slate-200">
-                  <th className="px-3 py-2 text-left">Type</th><th className="px-3 py-2 text-right">Hours</th>
-                  <th className="px-3 py-2 text-left">Time</th><th className="px-3 py-2 text-left">Reason</th><th className="px-3 py-2"></th>
-                </tr></thead>
-                <tbody className="divide-y divide-slate-100">
-                  {stagingEntries.map((e) => (
-                    <tr key={e.tempId}>
-                      <td className="px-3 py-2 font-medium">{e.type}</td>
-                      <td className="px-3 py-2 text-right font-bold text-amber-700">{e.hours}</td>
-                      <td className="px-3 py-2 text-xs text-slate-500">{e.timeFrom && e.timeTo ? `${e.timeFrom} - ${e.timeTo}` : '-'}</td>
-                      <td className="px-3 py-2 text-xs">{e.reason}</td>
-                      <td className="px-3 py-2 text-right"><button onClick={() => setStagingEntries((p) => p.filter((x) => x.tempId !== e.tempId))} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
-                <button onClick={handleSubmit} disabled={isSaving}
-                  className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors disabled:opacity-50">
-                  <Save className="h-4 w-4" />{isSaving ? 'Submitting...' : 'Submit for Approval'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {errors.entries && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />{errors.entries}</p>}
+      {pageError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 flex items-center gap-2">
+          <X className="h-4 w-4" />
+          <span>{pageError}</span>
         </div>
       )}
 
-      {/* ==========================================
-          DOWNTIME RECORDS — Admin sees Approve/Reject on pending, everyone sees the list
-          ========================================== */}
-      {records.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
-            <h3 className="text-lg font-semibold text-slate-800">Downtime Records</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{records.length} record(s){pendingRecords.length > 0 ? ` — ${pendingRecords.length} pending` : ''}</p>
+      {/* Filters */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-slate-500" />
+            <h3 className="text-sm font-bold text-slate-700">Filters</h3>
+            {activeFilterCount > 0 && (
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                {activeFilterCount} active
+              </span>
+            )}
           </div>
+          <button
+            onClick={clearFilters}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              hasFilters
+                ? 'bg-red-50 border border-red-200 text-red-700 hover:bg-red-100'
+                : 'bg-slate-50 border border-slate-200 text-slate-400 cursor-default'
+            }`}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Clear All
+          </button>
+        </div>
+
+        {/* Search bar */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Search by style, customer, cut, worker, table, component..."
+            className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-10 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+          />
+          {searchText && (
+            <button
+              onClick={() => setSearchText('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Filter grid */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <FilterSelect label="Style" value={filterStyle} options={styles} onChange={setFilterStyle} />
+          <FilterSelect label="Customer" value={filterCustomer} options={customers} onChange={setFilterCustomer} />
+          <FilterSelect label="Cut No" value={filterCut} options={cuts} onChange={setFilterCut} />
+          <FilterSelect label="Component" value={filterComponent} options={components} onChange={setFilterComponent} />
+          <FilterSelect label="Worker" value={filterWorker} options={workers} onChange={setFilterWorker} />
+          <FilterSelect label="Table" value={filterTable} options={tables} onChange={setFilterTable} />
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">
+              <CalendarDays className="mr-1 inline h-3 w-3" /> Date From
+            </label>
+            <input
+              type="date"
+              value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">
+              <CalendarDays className="mr-1 inline h-3 w-3" /> Date To
+            </label>
+            <input
+              type="date"
+              value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Results */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-slate-400" />
+            <p className="text-sm font-medium text-slate-700">
+              {hasFilters
+                ? <>Found <span className="font-bold">{total}</span> matching record{total !== 1 ? 's' : ''}</>
+                : <>Showing recent <span className="font-bold">{records.length}</span> of <span className="font-bold">{total}</span></>
+              }
+            </p>
+            {!hasFilters && total > PAGE_SIZE && (
+              <span className="text-xs text-slate-400">(use filters to narrow)</span>
+            )}
+          </div>
+          {totalPages > 1 && (
+            <span className="text-xs text-slate-600">Page {page} of {totalPages}</span>
+          )}
+        </div>
+
+        {isLoading ? (
+          <div className="py-16 text-center text-slate-400">Loading history...</div>
+        ) : records.length === 0 ? (
+          <div className="py-16 text-center text-slate-400">
+            <History className="mx-auto mb-3 h-12 w-12 opacity-20" />
+            <p>{hasFilters ? 'No records match your filters.' : 'No daily output history yet.'}</p>
+          </div>
+        ) : (
           <div className="divide-y divide-slate-100">
-            {records.map((rec) => {
-              const isExp = expandedId === rec.id;
-              const isPending = !rec.fullyAcknowledged;
+            {records.map((r) => {
+              const isExpanded = expandedId === r.id;
+              const aggregateTotals = getAggregateStageTotals(r);
+              const maxAllocated = maxStageAllocated(aggregateTotals);
+              const lowestRemaining = lowestStageRemaining(r, aggregateTotals);
+              const allocationComplete = isAllocationComplete(r, aggregateTotals);
+              const manualCompletion = getManualCompletionMeta(r);
+              const unavailableCompleted =
+                eligibleStylesLoaded &&
+                Boolean(r.productionRecordId) &&
+                !eligibleProductionIds.has(r.productionRecordId);
+              const jobCompleted = allocationComplete || manualCompletion.isCompleted || unavailableCompleted;
+              const canContinue = !!r.productionRecordId && !jobCompleted;
               return (
-                <div key={rec.id}>
-                  <div className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50/50 cursor-pointer transition-colors" onClick={() => setExpandedId(isExp ? null : rec.id)}>
-                    {isExp ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isPending ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'}`}>
-                          {isPending ? 'PENDING' : 'APPROVED'}
-                        </span>
-                        <span className="font-bold text-slate-900">{rec.workerName}</span>
-                        {rec.styleNo && <span className="text-xs text-slate-500">{rec.styleNo}</span>}
+                <div key={r.id}>
+                  {/* Summary row */}
+                  <div
+                    className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50/50 cursor-pointer transition-colors"
+                    onClick={() => setExpandedId(isExpanded ? null : r.id)}
+                  >
+                    {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-bold text-slate-900">{r.styleNo}</p>
+                        <span className="text-xs text-slate-500">{r.customerName}</span>
+                        {r.component && (
+                          <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">
+                            {r.component}
+                          </span>
+                        )}
+                        {jobCompleted && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" /> Completed
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">Date: {rec.date} | Table: {rec.tableNo || '-'} | Total: {rec.totalHours} hrs | {rec.entries.length} entry(s)</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        <CalendarDays className="inline h-3 w-3 mr-1" />
+                        {r.date}
+                        {' | '}Cut: <span className="font-medium text-slate-700">{r.cutNo}</span>
+                        {' | '}Table: <span className="font-medium text-slate-700">{r.tableNo}</span>
+                        {' | '}<UserIcon className="inline h-3 w-3" /> <span className="font-medium text-slate-700">{r.workerName || '—'}</span>
+                      </p>
                     </div>
-                    <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                      {isAdmin && isPending && (
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canContinue) continueAllocation(r);
+                      }}
+                      disabled={!canContinue}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition ${
+                        canContinue
+                          ? 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:border-teal-300'
+                          : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                      }`}
+                      title={
+                        manualCompletion.isCompleted
+                          ? 'This job was manually completed and cannot be continued'
+                          : allocationComplete
+                            ? 'Allocation completed for all stages'
+                            : unavailableCompleted
+                              ? 'This job is completed or no longer available for worker allocation'
+                              : 'Open this style in Worker Daily Output and continue allocation'
+                      }
+                    >
+                      {jobCompleted ? (
                         <>
-                          <button onClick={() => handleAcknowledge(rec.id)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors">
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Approve
-                          </button>
-                          <button onClick={() => handleReject(rec.id)} className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition-colors">
-                            <XCircle className="h-3.5 w-3.5" /> Reject
-                          </button>
+                          Completed
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        </>
+                      ) : (
+                        <>
+                          Continue
+                          <ArrowRight className="h-3.5 w-3.5" />
                         </>
                       )}
-                      {isAdmin && (
-                        <button onClick={() => handleDelete(rec.id)} className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"><Trash2 className="h-4 w-4" /></button>
-                      )}
+                    </button>
+
+                    <div className="text-right space-y-0.5 shrink-0">
+                      <div className="text-xs">
+                        <Package className="inline h-3 w-3 mr-1 text-orange-500" />
+                        Issue: <span className="font-bold text-orange-600">{r.orderQty}</span>
+                      </div>
+                      <div className="text-xs">
+                        Max stage: <span className="font-bold text-emerald-700">{maxAllocated}</span>
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Lowest rem: <span className="font-bold text-blue-700">{lowestRemaining}</span> · {r.timeSlots?.length || 0} slot{(r.timeSlots?.length || 0) !== 1 ? 's' : ''}
+                      </div>
                     </div>
                   </div>
-                  <AnimatePresence>{isExp && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden">
-                      <table className="w-full text-xs border-collapse">
-                        <thead><tr className="text-slate-500 border-b border-slate-200">
-                          <th className="py-2 text-left font-semibold">Down Time</th>
-                          <th className="py-2 text-right font-semibold">Hours</th>
-                          <th className="py-2 text-left font-semibold pl-4">Time</th>
-                          <th className="py-2 text-left font-semibold pl-4">Reason</th>
-                          <th className="py-2 text-center font-semibold">Status</th>
-                        </tr></thead>
-                        <tbody>{rec.entries.map((e, i) => (
-                          <tr key={i} className="border-b border-slate-100">
-                            <td className="py-2 font-medium">{e.type}</td>
-                            <td className="py-2 text-right font-bold text-amber-700">{e.hours}</td>
-                            <td className="py-2 pl-4 text-slate-500">{e.timeFrom && e.timeTo ? `${e.timeFrom} - ${e.timeTo}` : '-'}</td>
-                            <td className="py-2 pl-4">{e.reason}</td>
-                            <td className="py-2 text-center">
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${e.isAcknowledged ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {e.isAcknowledged ? 'Approved' : 'Pending'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}</tbody>
-                      </table>
-                    </motion.div>
-                  )}</AnimatePresence>
+
+                  {/* Expanded detail */}
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden"
+                      >
+                        <div className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+                          jobCompleted
+                            ? 'border-emerald-200 bg-emerald-50'
+                            : 'border-teal-200 bg-white'
+                        }`}>
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">
+                              {manualCompletion.isCompleted
+                                ? 'Job manually completed'
+                                : allocationComplete
+                                  ? 'Production allocation completed'
+                                  : unavailableCompleted
+                                    ? 'Job completed'
+                                    : 'Continue this production allocation'}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {manualCompletion.isCompleted
+                                ? `This job was marked as complete${manualCompletion.completedBy ? ` by ${manualCompletion.completedBy}` : ''}${manualCompletion.completedAt ? ` on ${manualCompletion.completedAt.slice(0, 10)}` : ''}. It cannot be continued even if some stage qty remains.`
+                                : allocationComplete
+                                  ? 'All independent stages have reached the issue qty. No remaining qty is available to continue.'
+                                  : unavailableCompleted
+                                    ? 'This job is completed or no longer available for worker allocation. It cannot be continued even if some stage qty remains.'
+                                    : 'Opens the main Worker Daily Output page with this style, cut, line, and table preselected.'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (canContinue) continueAllocation(r);
+                            }}
+                            disabled={!canContinue}
+                            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold transition ${
+                              canContinue
+                                ? 'bg-teal-600 text-white hover:bg-teal-700'
+                                : 'cursor-not-allowed bg-slate-200 text-slate-500'
+                            }`}
+                          >
+                            {jobCompleted ? (
+                              <>
+                                Completed
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              </>
+                            ) : (
+                              <>
+                                Continue Allocation
+                                <ArrowRight className="h-3.5 w-3.5" />
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Totals strip */}
+                        <div className="grid grid-cols-3 gap-2 md:grid-cols-6 mb-4">
+                          <StageTotal label="Seating"  value={aggregateTotals.seating} />
+                          <StageTotal label="Printing" value={aggregateTotals.printing} />
+                          <StageTotal label="Curing"   value={aggregateTotals.curing} />
+                          <StageTotal label="Checking" value={aggregateTotals.checking} />
+                          <StageTotal label="Packing"  value={aggregateTotals.packing} />
+                          <StageTotal label="Dispatch" value={aggregateTotals.dispatch} />
+                        </div>
+
+                        {/* Time slot breakdown */}
+                        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-slate-100 text-slate-600">
+                                <th className="px-3 py-2 text-left font-bold">Time Slot</th>
+                                <th className="px-3 py-2 text-center font-bold">Seating</th>
+                                <th className="px-3 py-2 text-center font-bold">Printing</th>
+                                <th className="px-3 py-2 text-center font-bold">Curing</th>
+                                <th className="px-3 py-2 text-center font-bold">Checking</th>
+                                <th className="px-3 py-2 text-center font-bold">Packing</th>
+                                <th className="px-3 py-2 text-center font-bold">Dispatch</th>
+                                <th className="px-3 py-2 text-center font-bold bg-slate-200">Row Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {(r.timeSlots || []).map((t, i) => {
+                                const rowTotal = (t.seating || 0) + (t.printing || 0) + (t.curing || 0) +
+                                                 (t.checking || 0) + (t.packing || 0) + (t.dispatch || 0);
+                                if (rowTotal === 0) return null;
+                                return (
+                                  <tr key={i} className="hover:bg-slate-50">
+                                    <td className="px-3 py-1.5 font-medium text-slate-700">
+                                      {t.timeFrom} – {t.timeTo}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-center">{t.seating || '—'}</td>
+                                    <td className="px-3 py-1.5 text-center">{t.printing || '—'}</td>
+                                    <td className="px-3 py-1.5 text-center">{t.curing || '—'}</td>
+                                    <td className="px-3 py-1.5 text-center">{t.checking || '—'}</td>
+                                    <td className="px-3 py-1.5 text-center">{t.packing || '—'}</td>
+                                    <td className="px-3 py-1.5 text-center">{t.dispatch || '—'}</td>
+                                    <td className="px-3 py-1.5 text-center font-bold text-teal-700 bg-slate-50">{rowTotal}</td>
+                                  </tr>
+                                );
+                              })}
+                              {(r.timeSlots || []).every(t => ((t.seating||0)+(t.printing||0)+(t.curing||0)+(t.checking||0)+(t.packing||0)+(t.dispatch||0)) === 0) && (
+                                <tr>
+                                  <td colSpan={8} className="px-3 py-3 text-center text-slate-400">No time-slot entries recorded.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Pagination footer */}
+        {totalPages > 1 && (
+          <div className="border-t border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between">
+            <div className="text-xs text-slate-500">
+              Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+            </div>
+            <div className="flex items-center gap-1">
+              <PagerBtn disabled={page === 1 || isLoading} onClick={() => setPage(1)} title="First"><ChevronsLeft className="h-4 w-4" /></PagerBtn>
+              <PagerBtn disabled={page === 1 || isLoading} onClick={() => setPage(p => Math.max(1, p - 1))} title="Previous"><ChevronLeft className="h-4 w-4" /></PagerBtn>
+              <span className="px-3 text-xs font-medium text-slate-700">Page {page} of {totalPages}</span>
+              <PagerBtn disabled={page === totalPages || isLoading} onClick={() => setPage(p => Math.min(totalPages, p + 1))} title="Next"><ChevronRight className="h-4 w-4" /></PagerBtn>
+              <PagerBtn disabled={page === totalPages || isLoading} onClick={() => setPage(totalPages)} title="Last"><ChevronsRight className="h-4 w-4" /></PagerBtn>
+            </div>
+          </div>
+        )}
+      </div>
     </motion.div>
+  );
+}
+
+// ==========================================
+// HELPERS
+// ==========================================
+function FilterSelect({
+  label, value, options, onChange,
+}: {
+  label: string; value: string; options: string[]; onChange: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="block text-xs font-medium text-slate-600">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors ${
+          value
+            ? 'border-blue-400 bg-blue-50/50 ring-1 ring-blue-200'
+            : 'border-slate-300 bg-white focus:ring-2 focus:ring-teal-500'
+        }`}
+      >
+        <option value="">All</option>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function StageTotal({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded bg-white border border-slate-200 px-2 py-1.5 text-center">
+      <p className="text-[9px] uppercase tracking-wide text-slate-400 font-bold">{label}</p>
+      <p className="text-sm font-black text-slate-700">{value || 0}</p>
+    </div>
+  );
+}
+
+function PagerBtn({
+  children, disabled, onClick, title,
+}: {
+  children: React.ReactNode; disabled: boolean; onClick: () => void; title: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="rounded p-1.5 text-slate-500 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+    >
+      {children}
+    </button>
   );
 }

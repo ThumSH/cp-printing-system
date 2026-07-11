@@ -251,8 +251,8 @@ export default function DailyOutputPage() {
     }
 
     const resumeTableNo = searchParams.get('tableNo') || '';
-    const resumeDate = searchParams.get('date') || '';
     const sourceDate = searchParams.get('sourceDate') || '';
+    const resumeDate = searchParams.get('date') || sourceDate || '';
 
     setPickedStyleKey(`${matchedItem.styleNo}|||${matchedItem.customerName}`);
     setPickedCutNo(matchedItem.cutNo || '');
