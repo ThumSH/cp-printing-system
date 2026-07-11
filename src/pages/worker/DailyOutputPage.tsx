@@ -1,4 +1,3 @@
-// src/pages/worker/DailyOutputPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -189,6 +188,7 @@ export default function DailyOutputPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pageError, setPageError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isCompletingJob, setIsCompletingJob] = useState(false);
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
 
   const [confirmModal, setConfirmModal] = useState<{ rowIndex: number; slot: TimeSlot } | null>(null);
@@ -538,6 +538,49 @@ export default function DailyOutputPage() {
     }
   };
 
+  const handleCompleteJob = async () => {
+    if (!selectedItem) return;
+
+    const confirmMessage =
+      `Complete this job?\n\n${selectedItem.styleNo} — ${selectedItem.customerName}\nCut: ${selectedItem.cutNo || '-'}\nLine: ${selectedItem.lineNo || '-'}\n\nThis will remove it from the Worker dropdown even if some stage quantities are still remaining.`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setIsCompletingJob(true);
+    setPageError('');
+
+    try {
+      const res = await fetch(`${API_BASE}/complete-job/${selectedItem.productionRecordId}`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text() || 'Failed to complete job.');
+      }
+
+      const completedProductionRecordId = selectedItem.productionRecordId;
+
+      setEligibleStyles(prev => prev.filter(item => item.productionRecordId !== completedProductionRecordId));
+      setPickedStyleKey('');
+      setPickedCutNo('');
+      setSelectedStoreInId('');
+      setSelectedComponent('');
+      setTableNo('');
+      setTimeSlots(createEmptyTimeSlots());
+      setActiveRecordId(null);
+      setErrors({});
+      setResumeNotice('Job completed successfully. It has been removed from the Worker dropdown.');
+
+      await fetchData();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : 'Failed to complete job.');
+    } finally {
+      setIsCompletingJob(false);
+    }
+  };
+
   const handleReset = () => {
     setPickedStyleKey('');
     setPickedCutNo('');
@@ -780,6 +823,26 @@ export default function DailyOutputPage() {
                 Highest stage allocation: <span className="font-bold text-emerald-700">{maxAllocated}</span>.
                 Lowest remaining stage balance: <span className="font-bold text-blue-700">{lowestRemaining}</span>.
               </p>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Finish this job manually</p>
+                  <p className="text-xs text-slate-500">
+                    Use this when the remaining stages will not be allocated. The job will be removed from the Worker dropdown.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCompleteJob}
+                  disabled={isCompletingJob || isSaving}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {isCompletingJob ? 'Completing...' : 'Complete Job'}
+                </button>
+              </div>
             </div>
           </div>
         )}

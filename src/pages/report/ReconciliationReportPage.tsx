@@ -82,6 +82,7 @@ interface ReconciliationSourceResponse {
 interface ReceivedRow {
   date: string;
   adNo: string;
+  jobNo: string;
   cutNo: string;
   qty: number;
   runningTotal: number;
@@ -91,6 +92,7 @@ interface SentRow {
   key: string;
   date: string;
   adNo: string;
+  jobNo: string;
   cutNo: string;
   total: number;
   pd: number;
@@ -193,6 +195,8 @@ export default function ReconciliationReportPage() {
   const [selectedStyle, setSelectedStyle] = useState('');
   const [selectedComponent, setSelectedComponent] = useState('');
   const [selectedSchedule, setSelectedSchedule] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [poNo, setPoNo] = useState('');
 
   const [manualEntries, setManualEntries] = useState<Record<string, ManualEntry>>({});
   const [loading, setLoading] = useState(true);
@@ -335,9 +339,11 @@ export default function ReconciliationReportPage() {
             : selectedSchedule
           : '',
       jobNos,
+      invoiceNo: invoiceNo.trim(),
+      poNo: poNo.trim(),
       colour: colours.join(' / ') || first?.bodyColour || '',
     };
-  }, [matchingStoreIns, selectedCustomer, selectedStyle, selectedComponent, selectedSchedule, hasRealSchedules]);
+  }, [matchingStoreIns, selectedCustomer, selectedStyle, selectedComponent, selectedSchedule, hasRealSchedules, invoiceNo, poNo]);
 
   const receivedRows = useMemo<ReceivedRow[]>(() => {
     let runningTotal = 0;
@@ -356,6 +362,7 @@ export default function ReconciliationReportPage() {
         rows.push({
           date: record.cutInDate || '',
           adNo: record.inAdNo || '',
+          jobNo: record.jobNo || '',
           cutNo: cut.cutNo || '',
           qty: num(cut.cutQty),
           runningTotal,
@@ -404,6 +411,7 @@ export default function ReconciliationReportPage() {
           key: `${note.id}|||${cutNo}`,
           date: note.deliveryDate || '',
           adNo: adviceNoteAdNo, // Gatepass / Advice Note AD No printed on the bill.
+          jobNo: note.jobNo || '',
           cutNo,
           total: value.total,
           pd: value.pd,
@@ -432,6 +440,11 @@ export default function ReconciliationReportPage() {
   }, [adviceNotes, matchingStoreIns, storeInById, manualEntries]);
 
   const maxRows = Math.max(receivedRows.length, sentRows.length);
+
+  const showJobNoColumns = useMemo(
+    () => [...receivedRows, ...sentRows].some(row => (row.jobNo || '').trim()),
+    [receivedRows, sentRows]
+  );
 
   const totals = useMemo(() => ({
     receivedQty: receivedRows.reduce((sum, row) => sum + row.qty, 0),
@@ -466,6 +479,8 @@ export default function ReconciliationReportPage() {
     setSelectedStyle('');
     setSelectedComponent('');
     setSelectedSchedule('');
+    setInvoiceNo('');
+    setPoNo('');
   };
 
   const clearCurrentReportAfterSave = () => {
@@ -486,6 +501,8 @@ export default function ReconciliationReportPage() {
     setSelectedStyle('');
     setSelectedComponent('');
     setSelectedSchedule('');
+    setInvoiceNo('');
+    setPoNo('');
   };
 
 
@@ -499,12 +516,14 @@ export default function ReconciliationReportPage() {
       rows.push({
         receivedDate: received?.date || '',
         receivedAdNo: received?.adNo || '',
+        receivedJobNo: received?.jobNo || '',
         receivedCutNo: received?.cutNo || '',
         receivedQty: received ? received.qty : null,
         receivedRunningTotal: received ? received.runningTotal : null,
 
         sentDate: sent?.date || '',
         sentAdNo: sent?.adNo || '',
+        sentJobNo: sent?.jobNo || '',
         sentCutNo: sent?.cutNo || '',
         sentTotal: sent ? sent.total : null,
         pd: sent ? sent.pd : null,
@@ -534,6 +553,8 @@ export default function ReconciliationReportPage() {
         component: reportMeta.component,
         scheduleNo: reportMeta.scheduleNo || '',
         jobNos: reportMeta.jobNos || '',
+        invoiceNo: reportMeta.invoiceNo || '',
+        poNo: reportMeta.poNo || '',
         colour: reportMeta.colour || '',
         reportDate: today,
         totals: {
@@ -572,6 +593,24 @@ export default function ReconciliationReportPage() {
   const printReport = () => {
     if (!reportReady) return;
 
+    const printTotalColumns = showJobNoColumns ? 17 : 15;
+    const printReceivedColSpan = showJobNoColumns ? 6 : 5;
+    const printSentColSpan = showJobNoColumns ? 11 : 10;
+    const printReceivedTotalColSpan = showJobNoColumns ? 4 : 3;
+    const printSentTotalColSpan = showJobNoColumns ? 4 : 3;
+
+    const printColGroup = showJobNoColumns
+      ? `<colgroup>
+      <col style="width: 5.8%" /><col style="width: 5.8%" /><col style="width: 5.8%" /><col style="width: 5.8%" /><col style="width: 4.8%" /><col style="width: 5.2%" />
+      <col style="width: 5.8%" /><col style="width: 5.8%" /><col style="width: 5.8%" /><col style="width: 5.8%" /><col style="width: 4.8%" />
+      <col style="width: 4.2%" /><col style="width: 4.2%" /><col style="width: 8%" /><col style="width: 4.2%" /><col style="width: 6.2%" /><col style="width: 6.2%" />
+    </colgroup>`
+      : `<colgroup>
+      <col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 5.5%" /><col style="width: 6%" />
+      <col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 5.5%" /><col style="width: 4.5%" />
+      <col style="width: 4.5%" /><col style="width: 9%" /><col style="width: 4.5%" /><col style="width: 7%" /><col style="width: 7%" />
+    </colgroup>`;
+
     const rows: string[] = [];
     for (let index = 0; index < maxRows; index += 1) {
       const received = receivedRows[index];
@@ -580,12 +619,14 @@ export default function ReconciliationReportPage() {
       rows.push(`<tr>
         <td>${escapeHtml(received?.date || '')}</td>
         <td>${escapeHtml(received?.adNo || '')}</td>
+        ${showJobNoColumns ? `<td>${escapeHtml(received?.jobNo || '')}</td>` : ''}
         <td>${escapeHtml(received?.cutNo || '')}</td>
         <td class="num">${received ? formatQty(received.qty) : ''}</td>
         <td class="num bold">${received ? formatQty(received.runningTotal) : ''}</td>
 
         <td>${escapeHtml(sent?.date || '')}</td>
         <td>${escapeHtml(sent?.adNo || '')}</td>
+        ${showJobNoColumns ? `<td>${escapeHtml(sent?.jobNo || '')}</td>` : ''}
         <td>${escapeHtml(sent?.cutNo || '')}</td>
         <td class="num">${sent ? formatQty(sent.total) : ''}</td>
         <td class="num">${sent ? formatQty(sent.pd) : ''}</td>
@@ -597,7 +638,7 @@ export default function ReconciliationReportPage() {
       </tr>`);
     }
 
-    const rowHtml = rows.join('') || `<tr><td colspan="15" class="center">No rows found for selected scope.</td></tr>`;
+    const rowHtml = rows.join('') || `<tr><td colspan="${printTotalColumns}" class="center">No rows found for selected scope.</td></tr>`;
 
     const html = `<!DOCTYPE html>
 <html>
@@ -639,26 +680,24 @@ export default function ReconciliationReportPage() {
     <div class="label">Style No</div><div class="value">${escapeHtml(reportMeta.styleNo)}</div>
     <div class="label">Schedule No</div><div class="value">${escapeHtml(reportMeta.scheduleNo || '(No Schedule)')}</div>
     <div class="label">Job No(s)</div><div class="value">${escapeHtml(reportMeta.jobNos || '—')}</div>
+    <div class="label">Invoice No</div><div class="value">${escapeHtml(reportMeta.invoiceNo || '—')}</div>
+    <div class="label">PO No</div><div class="value">${escapeHtml(reportMeta.poNo || '—')}</div>
   </div>
 
   <table>
-    <colgroup>
-      <col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 5.5%" /><col style="width: 6%" />
-      <col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 6.5%" /><col style="width: 5.5%" /><col style="width: 4.5%" />
-      <col style="width: 4.5%" /><col style="width: 9%" /><col style="width: 4.5%" /><col style="width: 7%" /><col style="width: 7%" />
-    </colgroup>
+    ${printColGroup}
     <thead>
-      <tr><th class="section" colspan="5">Received Details</th><th class="section" colspan="10">Sent Details</th></tr>
+      <tr><th class="section" colspan="${printReceivedColSpan}">Received Details</th><th class="section" colspan="${printSentColSpan}">Sent Details</th></tr>
       <tr>
-        <th>Date</th><th>AD No</th><th>Cut No</th><th>Qty</th><th>Total</th>
-        <th>Date</th><th>AD No</th><th>Cut No</th><th>Total</th><th>PD</th><th>FD</th><th>Sample / Testing</th><th>RTN</th><th>Good Qty</th><th>Good Total</th>
+        <th>Date</th><th>AD No</th>${showJobNoColumns ? '<th>Job No</th>' : ''}<th>Cut No</th><th>Qty</th><th>Total</th>
+        <th>Date</th><th>AD No</th>${showJobNoColumns ? '<th>Job No</th>' : ''}<th>Cut No</th><th>Total</th><th>PD</th><th>FD</th><th>Sample / Testing</th><th>RTN</th><th>Good Qty</th><th>Good Total</th>
       </tr>
     </thead>
     <tbody>${rowHtml}</tbody>
     <tfoot>
       <tr>
-        <td colspan="3" class="num">TOTAL</td><td class="num">${formatQty(totals.receivedQty)}</td><td class="num">${formatQty(lastReceivedRunningTotal)}</td>
-        <td colspan="3" class="num">TOTAL</td><td class="num">${formatQty(totals.sentTotal)}</td><td class="num">${formatQty(totals.pd)}</td><td class="num">${formatQty(totals.fd)}</td><td class="num">${formatQty(totals.sampleTesting)}</td><td class="num">${formatQty(totals.rtn)}</td><td class="num">${formatQty(totals.goodQty)}</td><td class="num">${formatQty(lastSentGoodTotal)}</td>
+        <td colspan="${printReceivedTotalColSpan}" class="num">TOTAL</td><td class="num">${formatQty(totals.receivedQty)}</td><td class="num">${formatQty(lastReceivedRunningTotal)}</td>
+        <td colspan="${printSentTotalColSpan}" class="num">TOTAL</td><td class="num">${formatQty(totals.sentTotal)}</td><td class="num">${formatQty(totals.pd)}</td><td class="num">${formatQty(totals.fd)}</td><td class="num">${formatQty(totals.sampleTesting)}</td><td class="num">${formatQty(totals.rtn)}</td><td class="num">${formatQty(totals.goodQty)}</td><td class="num">${formatQty(lastSentGoodTotal)}</td>
       </tr>
     </tfoot>
   </table>
@@ -765,6 +804,28 @@ export default function ReconciliationReportPage() {
                 One Schedule No can include multiple Job Nos. The report includes all Job Nos under the selected Schedule No.
               </p>
             </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-600">Invoice No</label>
+              <input
+                type="text"
+                value={invoiceNo}
+                onChange={(event) => setInvoiceNo(event.target.value)}
+                placeholder="Enter invoice no..."
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-600">PO No</label>
+              <input
+                type="text"
+                value={poNo}
+                onChange={(event) => setPoNo(event.target.value)}
+                placeholder="Enter PO no..."
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
           </div>
         )}
       </div>
@@ -785,12 +846,14 @@ export default function ReconciliationReportPage() {
                 <p className="text-sm font-black uppercase tracking-wide text-slate-900">{COMPANY_NAME}</p>
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{REPORT_TITLE}</p>
               </div>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600 md:grid-cols-6">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600 md:grid-cols-4 xl:grid-cols-8">
                 <span><b>Customer:</b> {reportMeta.customer}</span>
                 <span><b>Style:</b> {reportMeta.styleNo}</span>
                 <span><b>Component:</b> {reportMeta.component}</span>
                 <span><b>Schedule:</b> {reportMeta.scheduleNo || '(No Schedule)'}</span>
                 <span><b>Job No(s):</b> {reportMeta.jobNos || '-'}</span>
+                <span><b>Invoice No:</b> {reportMeta.invoiceNo || '-'}</span>
+                <span><b>PO No:</b> {reportMeta.poNo || '-'}</span>
                 <span><b>Colour:</b> {reportMeta.colour || '-'}</span>
               </div>
             </div>
@@ -800,26 +863,26 @@ export default function ReconciliationReportPage() {
             <table className="w-max min-w-full border-collapse text-xs">
               <thead>
                 <tr>
-                  <th colSpan={5} className="border border-slate-300 bg-slate-100 px-2 py-2 text-center text-[11px] font-black uppercase text-slate-700">Received Details</th>
-                  <th colSpan={10} className="border border-slate-300 bg-slate-100 px-2 py-2 text-center text-[11px] font-black uppercase text-slate-700">Sent Details</th>
+                  <th colSpan={showJobNoColumns ? 6 : 5} className="border border-slate-300 bg-slate-100 px-2 py-2 text-center text-[11px] font-black uppercase text-slate-700">Received Details</th>
+                  <th colSpan={showJobNoColumns ? 11 : 10} className="border border-slate-300 bg-slate-100 px-2 py-2 text-center text-[11px] font-black uppercase text-slate-700">Sent Details</th>
                 </tr>
                 <tr className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
-                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">AD No</th><th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th>
-                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">AD No</th><th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th><th className="border border-slate-300 px-2 py-2 text-right">PD</th><th className="border border-slate-300 px-2 py-2 text-right">FD</th><th className="border border-slate-300 px-2 py-2 text-right">Sample/Testing</th><th className="border border-slate-300 px-2 py-2 text-right">RTN</th><th className="border border-slate-300 px-2 py-2 text-right">Good Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Good Total</th>
+                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">AD No</th>{showJobNoColumns && <th className="border border-slate-300 px-2 py-2">Job No</th>}<th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th>
+                  <th className="border border-slate-300 px-2 py-2">Date</th><th className="border border-slate-300 px-2 py-2">AD No</th>{showJobNoColumns && <th className="border border-slate-300 px-2 py-2">Job No</th>}<th className="border border-slate-300 px-2 py-2">Cut No</th><th className="border border-slate-300 px-2 py-2 text-right">Total</th><th className="border border-slate-300 px-2 py-2 text-right">PD</th><th className="border border-slate-300 px-2 py-2 text-right">FD</th><th className="border border-slate-300 px-2 py-2 text-right">Sample/Testing</th><th className="border border-slate-300 px-2 py-2 text-right">RTN</th><th className="border border-slate-300 px-2 py-2 text-right">Good Qty</th><th className="border border-slate-300 px-2 py-2 text-right">Good Total</th>
                 </tr>
               </thead>
 
               <tbody>
                 {maxRows === 0 ? (
-                  <tr><td colSpan={15} className="border border-slate-200 px-4 py-12 text-center text-slate-400">No received or sent rows found for this selected scope.</td></tr>
+                  <tr><td colSpan={showJobNoColumns ? 17 : 15} className="border border-slate-200 px-4 py-12 text-center text-slate-400">No received or sent rows found for this selected scope.</td></tr>
                 ) : (
                   Array.from({ length: maxRows }).map((_, index) => {
                     const received = receivedRows[index];
                     const sent = sentRows[index];
                     return (
                       <tr key={index} className="hover:bg-slate-50">
-                        <td className="border border-slate-200 px-2 py-1.5">{received?.date || ''}</td><td className="border border-slate-200 px-2 py-1.5 font-medium">{received?.adNo || ''}</td><td className="border border-slate-200 px-2 py-1.5">{received?.cutNo || ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right font-medium">{received ? formatQty(received.qty) : ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right font-black">{received ? formatQty(received.runningTotal) : ''}</td>
-                        <td className="border border-slate-200 px-2 py-1.5">{sent?.date || ''}</td><td className="border border-slate-200 px-2 py-1.5 font-medium">{sent?.adNo || ''}</td><td className="border border-slate-200 px-2 py-1.5">{sent?.cutNo || ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right font-medium">{sent ? formatQty(sent.total) : ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right text-red-700">{sent ? formatQty(sent.pd) : ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right text-amber-700">{sent ? formatQty(sent.fd) : ''}</td>
+                        <td className="border border-slate-200 px-2 py-1.5">{received?.date || ''}</td><td className="border border-slate-200 px-2 py-1.5 font-medium">{received?.adNo || ''}</td>{showJobNoColumns && <td className="border border-slate-200 px-2 py-1.5 font-medium text-slate-700">{received?.jobNo || ''}</td>}<td className="border border-slate-200 px-2 py-1.5">{received?.cutNo || ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right font-medium">{received ? formatQty(received.qty) : ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right font-black">{received ? formatQty(received.runningTotal) : ''}</td>
+                        <td className="border border-slate-200 px-2 py-1.5">{sent?.date || ''}</td><td className="border border-slate-200 px-2 py-1.5 font-medium">{sent?.adNo || ''}</td>{showJobNoColumns && <td className="border border-slate-200 px-2 py-1.5 font-medium text-slate-700">{sent?.jobNo || ''}</td>}<td className="border border-slate-200 px-2 py-1.5">{sent?.cutNo || ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right font-medium">{sent ? formatQty(sent.total) : ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right text-red-700">{sent ? formatQty(sent.pd) : ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right text-amber-700">{sent ? formatQty(sent.fd) : ''}</td>
                         <td className="border border-slate-200 px-1 py-1 text-right">{sent ? <input type="number" min={0} value={sent.sampleTesting === 0 ? '' : sent.sampleTesting} onChange={(event) => updateManualEntry(sent.key, 'sampleTesting', event.target.value)} className="w-20 rounded border border-slate-200 bg-white px-2 py-1 text-right text-xs font-bold text-slate-700 outline-none focus:ring-1 focus:ring-slate-500" /> : ''}</td>
                         <td className="border border-slate-200 px-1 py-1 text-right">{sent ? <input type="number" min={0} value={sent.rtn === 0 ? '' : sent.rtn} onChange={(event) => updateManualEntry(sent.key, 'rtn', event.target.value)} className="w-16 rounded border border-slate-200 bg-white px-2 py-1 text-right text-xs font-bold text-slate-700 outline-none focus:ring-1 focus:ring-slate-500" /> : ''}</td>
                         <td className="border border-slate-200 px-2 py-1.5 text-right font-black">{sent ? formatQty(sent.goodQty) : ''}</td><td className="border border-slate-200 px-2 py-1.5 text-right font-black">{sent ? formatQty(sent.goodTotal) : ''}</td>
@@ -831,8 +894,8 @@ export default function ReconciliationReportPage() {
 
               <tfoot>
                 <tr className="bg-slate-100 font-black text-slate-800">
-                  <td colSpan={3} className="border border-slate-300 px-2 py-2 text-right uppercase">Total</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.receivedQty)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(lastReceivedRunningTotal)}</td>
-                  <td colSpan={3} className="border border-slate-300 px-2 py-2 text-right uppercase">Total</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.sentTotal)}</td><td className="border border-slate-300 px-2 py-2 text-right text-red-700">{formatQty(totals.pd)}</td><td className="border border-slate-300 px-2 py-2 text-right text-amber-700">{formatQty(totals.fd)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.sampleTesting)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.rtn)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.goodQty)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(lastSentGoodTotal)}</td>
+                  <td colSpan={showJobNoColumns ? 4 : 3} className="border border-slate-300 px-2 py-2 text-right uppercase">Total</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.receivedQty)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(lastReceivedRunningTotal)}</td>
+                  <td colSpan={showJobNoColumns ? 4 : 3} className="border border-slate-300 px-2 py-2 text-right uppercase">Total</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.sentTotal)}</td><td className="border border-slate-300 px-2 py-2 text-right text-red-700">{formatQty(totals.pd)}</td><td className="border border-slate-300 px-2 py-2 text-right text-amber-700">{formatQty(totals.fd)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.sampleTesting)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.rtn)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(totals.goodQty)}</td><td className="border border-slate-300 px-2 py-2 text-right">{formatQty(lastSentGoodTotal)}</td>
                 </tr>
               </tfoot>
             </table>

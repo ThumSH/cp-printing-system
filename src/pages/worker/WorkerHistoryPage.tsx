@@ -1,7 +1,3 @@
-// src/pages/worker/WorkerHistoryPage.tsx
-// Read-only search history of Worker Daily Output submissions.
-// All data is already captured on save — this page just surfaces it with filters.
-
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -38,6 +34,9 @@ interface DailyOutputRecord {
   orderQty: number;
   tableNo: string;
   workerName: string;
+  isJobCompleted?: boolean;
+  completedAt?: string;
+  completedBy?: string;
   timeSlots: TimeSlotEntry[];
   totalSeating: number;
   totalPrinting: number;
@@ -53,6 +52,17 @@ interface PaginatedResponse {
   page: number;
   pageSize: number;
   totalPages: number;
+}
+
+interface WorkerEligibleStyle {
+  id?: string;
+  Id?: string;
+  productionRecordId?: string;
+  ProductionRecordId?: string;
+}
+
+function getEligibleProductionId(item: WorkerEligibleStyle) {
+  return String(item.productionRecordId || item.ProductionRecordId || item.id || item.Id || '').trim();
 }
 
 export default function WorkerHistoryPage() {
@@ -83,6 +93,12 @@ export default function WorkerHistoryPage() {
 
   // Loaded once: all records (for populating the filter dropdowns)
   const [allRecords, setAllRecords] = useState<DailyOutputRecord[]>([]);
+
+  // Loaded once: currently available worker production IDs.
+  // If a history row's production record is no longer returned here, it means
+  // the job is completed/closed and should not show Continue.
+  const [eligibleProductionIds, setEligibleProductionIds] = useState<Set<string>>(new Set());
+  const [eligibleStylesLoaded, setEligibleStylesLoaded] = useState(false);
 
   // Debounce search input — 300ms
   useEffect(() => {
@@ -132,13 +148,32 @@ export default function WorkerHistoryPage() {
 
   useEffect(() => { fetchPage(); }, [fetchPage]);
 
-  // Load ALL records ONCE (no filter) to populate dropdown facets
+  // Load ALL records ONCE (no filter) to populate dropdown facets,
+  // and load eligible worker production IDs so completed/closed jobs can be
+  // indicated as Completed instead of showing a Continue button.
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/daily-output`, { headers: getAuthHeaders() });
-        if (res.ok) setAllRecords(await res.json());
-      } catch { /* silent */ }
+        const [historyRes, eligibleRes] = await Promise.all([
+          fetch(`${API_BASE}/daily-output`, { headers: getAuthHeaders() }),
+          fetch(`${API_BASE}/eligible-styles`, { headers: getAuthHeaders() }),
+        ]);
+
+        if (historyRes.ok) setAllRecords(await historyRes.json());
+
+        if (eligibleRes.ok) {
+          const eligibleData: WorkerEligibleStyle[] = await eligibleRes.json();
+          setEligibleProductionIds(new Set(
+            (eligibleData || [])
+              .map(getEligibleProductionId)
+              .filter(Boolean)
+          ));
+          setEligibleStylesLoaded(true);
+        }
+      } catch {
+        // Silent: history still works. If eligible-styles fails, Continue will
+        // not be disabled based on availability because the source is unknown.
+      }
     })();
   }, []);
 
@@ -227,6 +262,30 @@ export default function WorkerHistoryPage() {
     totals = getAggregateStageTotals(record)
   ) => record.orderQty > 0 && stageValues(totals).every((value) => value >= record.orderQty);
 
+  const getManualCompletionMeta = useCallback((record: DailyOutputRecord) => {
+    const relatedRecords = allKnownRecords.filter(
+      (r) => r.productionRecordId === record.productionRecordId
+    );
+    const source = relatedRecords.length > 0 ? relatedRecords : [record];
+
+    const completedRecord = source.find((r) =>
+      Boolean(r.isJobCompleted) ||
+      Boolean((r.completedAt || '').trim()) ||
+      Boolean((r.completedBy || '').trim())
+    );
+
+    return {
+      isCompleted: Boolean(completedRecord),
+      completedAt: completedRecord?.completedAt || '',
+      completedBy: completedRecord?.completedBy || '',
+    };
+  }, [allKnownRecords]);
+
+  const isProductionStillEligible = useCallback((record: DailyOutputRecord) => {
+    if (!record.productionRecordId || !eligibleStylesLoaded) return true;
+    return eligibleProductionIds.has(record.productionRecordId);
+  }, [eligibleProductionIds, eligibleStylesLoaded]);
+
   const continueAllocation = (record: DailyOutputRecord) => {
     if (!record.productionRecordId) {
       setPageError('This history record is missing its production record link and cannot be resumed.');
@@ -235,6 +294,16 @@ export default function WorkerHistoryPage() {
 
     if (isAllocationComplete(record)) {
       setPageError('This production allocation is already completed. No remaining qty is available to continue.');
+      return;
+    }
+
+    if (getManualCompletionMeta(record).isCompleted) {
+      setPageError('This job was manually completed. It can no longer be continued even if some stage qty remains.');
+      return;
+    }
+
+    if (!isProductionStillEligible(record)) {
+      setPageError('This job is completed or no longer available for worker allocation. It cannot be continued.');
       return;
     }
 
@@ -389,7 +458,13 @@ export default function WorkerHistoryPage() {
               const maxAllocated = maxStageAllocated(aggregateTotals);
               const lowestRemaining = lowestStageRemaining(r, aggregateTotals);
               const allocationComplete = isAllocationComplete(r, aggregateTotals);
-              const canContinue = !!r.productionRecordId && !allocationComplete;
+              const manualCompletion = getManualCompletionMeta(r);
+              const unavailableCompleted =
+                eligibleStylesLoaded &&
+                Boolean(r.productionRecordId) &&
+                !eligibleProductionIds.has(r.productionRecordId);
+              const jobCompleted = allocationComplete || manualCompletion.isCompleted || unavailableCompleted;
+              const canContinue = !!r.productionRecordId && !jobCompleted;
               return (
                 <div key={r.id}>
                   {/* Summary row */}
@@ -406,6 +481,11 @@ export default function WorkerHistoryPage() {
                         {r.component && (
                           <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">
                             {r.component}
+                          </span>
+                        )}
+                        {jobCompleted && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" /> Completed
                           </span>
                         )}
                       </div>
@@ -431,12 +511,16 @@ export default function WorkerHistoryPage() {
                           : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
                       }`}
                       title={
-                        allocationComplete
-                          ? 'Allocation completed for all stages'
-                          : 'Open this style in Worker Daily Output and continue allocation'
+                        manualCompletion.isCompleted
+                          ? 'This job was manually completed and cannot be continued'
+                          : allocationComplete
+                            ? 'Allocation completed for all stages'
+                            : unavailableCompleted
+                              ? 'This job is completed or no longer available for worker allocation'
+                              : 'Open this style in Worker Daily Output and continue allocation'
                       }
                     >
-                      {allocationComplete ? (
+                      {jobCompleted ? (
                         <>
                           Completed
                           <CheckCircle2 className="h-3.5 w-3.5" />
@@ -473,18 +557,28 @@ export default function WorkerHistoryPage() {
                         className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden"
                       >
                         <div className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
-                          allocationComplete
+                          jobCompleted
                             ? 'border-emerald-200 bg-emerald-50'
                             : 'border-teal-200 bg-white'
                         }`}>
                           <div>
                             <p className="text-sm font-bold text-slate-800">
-                              {allocationComplete ? 'Production allocation completed' : 'Continue this production allocation'}
+                              {manualCompletion.isCompleted
+                                ? 'Job manually completed'
+                                : allocationComplete
+                                  ? 'Production allocation completed'
+                                  : unavailableCompleted
+                                    ? 'Job completed'
+                                    : 'Continue this production allocation'}
                             </p>
                             <p className="text-xs text-slate-500">
-                              {allocationComplete
-                                ? 'All independent stages have reached the issue qty. No remaining qty is available to continue.'
-                                : 'Opens the main Worker Daily Output page with this style, cut, line, and table preselected.'}
+                              {manualCompletion.isCompleted
+                                ? `This job was marked as complete${manualCompletion.completedBy ? ` by ${manualCompletion.completedBy}` : ''}${manualCompletion.completedAt ? ` on ${manualCompletion.completedAt.slice(0, 10)}` : ''}. It cannot be continued even if some stage qty remains.`
+                                : allocationComplete
+                                  ? 'All independent stages have reached the issue qty. No remaining qty is available to continue.'
+                                  : unavailableCompleted
+                                    ? 'This job is completed or no longer available for worker allocation. It cannot be continued even if some stage qty remains.'
+                                    : 'Opens the main Worker Daily Output page with this style, cut, line, and table preselected.'}
                             </p>
                           </div>
                           <button
@@ -499,7 +593,7 @@ export default function WorkerHistoryPage() {
                                 : 'cursor-not-allowed bg-slate-200 text-slate-500'
                             }`}
                           >
-                            {allocationComplete ? (
+                            {jobCompleted ? (
                               <>
                                 Completed
                                 <CheckCircle2 className="h-3.5 w-3.5" />
