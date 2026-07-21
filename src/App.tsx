@@ -34,6 +34,10 @@ import ColourMasterPage from './pages/admin/ColourMasterPage';
 import AboutUsPage from './pages/AboutUsPage';
 import ReconciliationReportPage from './pages/report/ReconciliationReportPage';
 import ReconciliationReportSearchPage from './pages/report/ReconciliationReportSearchPage';
+import InvoicePage from './pages/invoice/InvoicePage';
+import InvoiceSearchPage from './pages/invoice/InvoiceSearchPage';
+import InvoiceDetailPage from './pages/invoice/InvoiceDetailPage';
+import InvoiceSecurityPage from './pages/superadmin/InvoiceSecurityPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -78,6 +82,31 @@ function App() {
           <Route path="about" element={<AboutUsPage />} />
           <Route path="report" element={<ReconciliationReportPage />} />
           <Route path="report-search" element={<ReconciliationReportSearchPage />} />
+
+           {/* ── Tax Invoice: Admin and SuperAdmin only ── */}
+          <Route path="invoice">
+            <Route index element={
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
+                <InvoicePage />
+              </RoleRoute>
+            } />
+            <Route path="search" element={
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
+                <InvoiceSearchPage />
+              </RoleRoute>
+            } />
+            <Route path=":id" element={
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
+                <InvoiceDetailPage />
+              </RoleRoute>
+            } />
+          </Route>
+
+           <Route path="superadmin/invoice-security" element={
+            <RoleRoute allowedRoles={['SuperAdmin']}>
+              <InvoiceSecurityPage />
+            </RoleRoute>
+          } />
 
           {/* ── Development ── */}
           <Route path="development">

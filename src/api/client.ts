@@ -12,6 +12,8 @@ export const API = {
   DELIVERY_TRACKER: `${API_URL}/api/deliverytracker`,
   WORKER: `${API_URL}/api/worker`,
   ADMIN: `${API_URL}/api/admin`,
+  TAX_INVOICES: `${API_URL}/api/tax-invoices`,
+  INVOICE_SECURITY: `${API_URL}/api/invoice-security`,
 } as const;
 
 export const getAuthHeaders = () => ({

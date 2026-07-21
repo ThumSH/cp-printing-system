@@ -6,6 +6,7 @@ import {
   LayoutDashboard, Users, LogOut, Activity, Truck, FileText,
   Code, Send, Search, ClipboardCheck, PackageOpen, ClipboardList,
   Factory, Clock, Menu, X, History, Palette, FlaskConical,Info,Receipt,
+  LockKeyhole,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
@@ -29,6 +30,19 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Overview',
     items: [
       { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores', 'Worker'], exact: true },
+    ],
+  },
+  {
+    label: 'Tax Invoice',
+    items: [
+      { name: 'Invoice', href: '/invoice', icon: Receipt, roles: ['Admin', 'SuperAdmin'], exact: true },
+      { name: 'Invoice Search', href: '/invoice/search', icon: Search, roles: ['Admin', 'SuperAdmin'] },
+    ],
+  },
+  {
+    label: 'Super Admin',
+    items: [
+      { name: 'Invoice Password', href: '/superadmin/invoice-security', icon: LockKeyhole, roles: ['SuperAdmin'] },
     ],
   },
   {
