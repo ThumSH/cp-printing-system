@@ -11,7 +11,9 @@ import {
   Printer,
   Trash2,
 } from 'lucide-react';
-import InvoiceDocument from '../../components/invoice/InvoiceDocument';
+import InvoiceDocument, {
+  printInvoiceDocument,
+} from '../../components/invoice/InvoiceDocument';
 import InvoiceForm from '../../components/invoice/InvoiceForm';
 import PasswordModal from '../../components/invoice/PasswordModal';
 import {
@@ -96,6 +98,21 @@ export default function InvoiceDetailPage() {
   const saveUpdate = async () => {
     if (!draft || !invoice) return;
 
+    if (!draft.invoiceNumber.trim()) {
+      setError('Tax Invoice No. is required.');
+      return;
+    }
+
+    if (!draft.invoiceDate.trim()) {
+      setError('Date of Invoice is required.');
+      return;
+    }
+
+    if (!draft.deliveryDate.trim()) {
+      setError('Date of Delivery is required.');
+      return;
+    }
+
     setSaving(true);
     setError('');
     setSuccess('');
@@ -132,6 +149,21 @@ export default function InvoiceDetailPage() {
 
     setEditing(false);
     setEditPassword('');
+    setError('');
+  };
+
+  const handlePrint = () => {
+    setError('');
+
+    try {
+      printInvoiceDocument();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to open the print view.'
+      );
+    }
   };
 
   if (loading) {
@@ -149,9 +181,11 @@ export default function InvoiceDetailPage() {
         <p className="font-bold text-red-800">
           The Tax Invoice could not be opened.
         </p>
+
         <p className="text-sm text-red-600">
           {error || 'Report not found.'}
         </p>
+
         <Link
           to="/invoice/search"
           className="inline-flex items-center gap-2 text-sm font-bold text-red-700 underline"
@@ -165,7 +199,7 @@ export default function InvoiceDetailPage() {
 
   return (
     <div className="space-y-5">
-      <div className="print:hidden flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <Link
             to="/invoice/search"
@@ -188,7 +222,7 @@ export default function InvoiceDetailPage() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={handlePrint}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
             >
               <Printer className="h-4 w-4" />
@@ -221,13 +255,13 @@ export default function InvoiceDetailPage() {
       </div>
 
       {error && (
-        <div className="print:hidden rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           {error}
         </div>
       )}
 
       {success && (
-        <div className="print:hidden rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
           {success}
         </div>
       )}

@@ -67,10 +67,14 @@ export interface TaxInvoiceSearchFilters {
   invoiceNumber: string;
   supplierName: string;
   purchaserName: string;
-  supplierTin: string;
-  purchaserTin: string;
   dateFrom: string;
   dateTo: string;
+}
+
+export interface TaxInvoiceFilterOptions {
+  invoiceNumbers: string[];
+  supplierNames: string[];
+  purchaserNames: string[];
 }
 
 export interface InvoiceSecurityStatus {

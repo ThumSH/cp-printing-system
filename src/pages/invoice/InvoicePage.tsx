@@ -68,6 +68,11 @@ export default function InvoicePage() {
       return;
     }
 
+    if (!form.deliveryDate.trim()) {
+      setError('Date of Delivery is required.');
+      return;
+    }
+
     setSaving(true);
 
     try {

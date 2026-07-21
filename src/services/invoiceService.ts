@@ -1,6 +1,7 @@
 import { API, getAuthHeaders } from '../api/client';
 import {
   InvoiceSecurityStatus,
+  TaxInvoiceFilterOptions,
   TaxInvoice,
   TaxInvoicePayload,
   TaxInvoiceSearchFilters,
@@ -56,6 +57,21 @@ export async function getRecentInvoices():
   await ensureOk(
     response,
     'Failed to load recent Tax Invoices.'
+  );
+
+  return response.json();
+}
+
+export async function getInvoiceFilterOptions():
+  Promise<TaxInvoiceFilterOptions> {
+  const response = await fetch(
+    `${API.TAX_INVOICES}/filter-options`,
+    { headers: getAuthHeaders() }
+  );
+
+  await ensureOk(
+    response,
+    'Failed to load Invoice Search dropdown options.'
   );
 
   return response.json();

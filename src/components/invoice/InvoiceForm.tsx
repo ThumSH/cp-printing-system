@@ -306,7 +306,7 @@ export default function InvoiceForm({
                   Unit Price
                 </th>
                 <th className="w-48 border-r border-slate-600 px-2 py-3 text-left text-[10px] uppercase">
-                  Amount Excluding VAT (Rs.)
+                  Amount Excluding VAT (USD)
                 </th>
                 <th className="w-12 px-2 py-3" />
               </tr>
@@ -457,7 +457,7 @@ export default function InvoiceForm({
                 field: 'totalValueOfSupply' as const,
               },
               {
-                label: 'VAT Amount',
+                label: 'VAT Amount (Total Value of Supply 18%)',
                 field: 'vatAmount' as const,
               },
               {

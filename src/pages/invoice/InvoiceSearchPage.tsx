@@ -1,4 +1,3 @@
-
 import {
   FormEvent,
   useEffect,
@@ -15,8 +14,12 @@ import {
   RotateCcw,
   Search,
 } from 'lucide-react';
-import { searchInvoices } from '../../services/invoiceService';
 import {
+  getInvoiceFilterOptions,
+  searchInvoices,
+} from '../../services/invoiceService';
+import {
+  TaxInvoiceFilterOptions,
   TaxInvoiceSearchFilters,
   TaxInvoiceSearchResponse,
 } from '../../types/invoice';
@@ -25,23 +28,23 @@ const emptyFilters: TaxInvoiceSearchFilters = {
   invoiceNumber: '',
   supplierName: '',
   purchaserName: '',
-  supplierTin: '',
-  purchaserTin: '',
   dateFrom: '',
   dateTo: '',
 };
 
+const emptyOptions: TaxInvoiceFilterOptions = {
+  invoiceNumbers: [],
+  supplierNames: [],
+  purchaserNames: [],
+};
+
 export default function InvoiceSearchPage() {
   const [filters, setFilters] =
-    useState<TaxInvoiceSearchFilters>({
-      ...emptyFilters,
-    });
-
+    useState<TaxInvoiceSearchFilters>({ ...emptyFilters });
   const [appliedFilters, setAppliedFilters] =
-    useState<TaxInvoiceSearchFilters>({
-      ...emptyFilters,
-    });
-
+    useState<TaxInvoiceSearchFilters>({ ...emptyFilters });
+  const [filterOptions, setFilterOptions] =
+    useState<TaxInvoiceFilterOptions>({ ...emptyOptions });
   const [result, setResult] =
     useState<TaxInvoiceSearchResponse>({
       items: [],
@@ -52,8 +55,28 @@ export default function InvoiceSearchPage() {
     });
 
   const [page, setPage] = useState(1);
+  const [loadingOptions, setLoadingOptions] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      setLoadingOptions(true);
+      try {
+        setFilterOptions(await getInvoiceFilterOptions());
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : 'Failed to load search dropdowns.'
+        );
+      } finally {
+        setLoadingOptions(false);
+      }
+    };
+
+    void loadOptions();
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -62,11 +85,7 @@ export default function InvoiceSearchPage() {
 
       try {
         setResult(
-          await searchInvoices(
-            appliedFilters,
-            page,
-            25
-          )
+          await searchInvoices(appliedFilters, page, 25)
         );
       } catch (caught) {
         setError(
@@ -82,10 +101,19 @@ export default function InvoiceSearchPage() {
     void load();
   }, [appliedFilters, page]);
 
-  const submit = (
-    event: FormEvent<HTMLFormElement>
-  ) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (
+      filters.dateFrom &&
+      filters.dateTo &&
+      filters.dateFrom > filters.dateTo
+    ) {
+      setError('Date From cannot be later than Date To.');
+      return;
+    }
+
+    setError('');
     setPage(1);
     setAppliedFilters({ ...filters });
   };
@@ -95,6 +123,7 @@ export default function InvoiceSearchPage() {
     setFilters(cleared);
     setPage(1);
     setAppliedFilters(cleared);
+    setError('');
   };
 
   const updateFilter = (
@@ -117,9 +146,8 @@ export default function InvoiceSearchPage() {
               Invoice Search
             </h1>
           </div>
-
           <p className="mt-1 text-sm text-slate-500">
-            Find saved Tax Invoices using a date range or report details.
+            Select saved invoice details and an optional date range.
           </p>
         </div>
 
@@ -136,63 +164,44 @@ export default function InvoiceSearchPage() {
         onSubmit={submit}
         className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
       >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <FilterInput
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <FilterSelect
             label="Invoice No."
             value={filters.invoiceNumber}
-            onChange={(value) =>
-              updateFilter('invoiceNumber', value)
-            }
+            options={filterOptions.invoiceNumbers}
+            placeholder="All invoice numbers"
+            disabled={loadingOptions}
+            onChange={(value) => updateFilter('invoiceNumber', value)}
           />
 
-          <FilterInput
-            label="Supplier Name"
+          <FilterSelect
+            label="Supplier"
             value={filters.supplierName}
-            onChange={(value) =>
-              updateFilter('supplierName', value)
-            }
+            options={filterOptions.supplierNames}
+            placeholder="All suppliers"
+            disabled={loadingOptions}
+            onChange={(value) => updateFilter('supplierName', value)}
           />
 
-          <FilterInput
-            label="Purchaser Name"
+          <FilterSelect
+            label="Purchaser"
             value={filters.purchaserName}
-            onChange={(value) =>
-              updateFilter('purchaserName', value)
-            }
+            options={filterOptions.purchaserNames}
+            placeholder="All purchasers"
+            disabled={loadingOptions}
+            onChange={(value) => updateFilter('purchaserName', value)}
           />
 
-          <FilterInput
-            label="Supplier TIN"
-            value={filters.supplierTin}
-            onChange={(value) =>
-              updateFilter('supplierTin', value)
-            }
-          />
-
-          <FilterInput
-            label="Purchaser TIN"
-            value={filters.purchaserTin}
-            onChange={(value) =>
-              updateFilter('purchaserTin', value)
-            }
-          />
-
-          <FilterInput
+          <FilterDate
             label="Date From"
-            type="date"
             value={filters.dateFrom}
-            onChange={(value) =>
-              updateFilter('dateFrom', value)
-            }
+            onChange={(value) => updateFilter('dateFrom', value)}
           />
 
-          <FilterInput
+          <FilterDate
             label="Date To"
-            type="date"
             value={filters.dateTo}
-            onChange={(value) =>
-              updateFilter('dateTo', value)
-            }
+            onChange={(value) => updateFilter('dateTo', value)}
           />
         </div>
 
@@ -208,9 +217,14 @@ export default function InvoiceSearchPage() {
 
           <button
             type="submit"
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-700"
+            disabled={loading || loadingOptions}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Search className="h-4 w-4" />
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Search className="h-4 w-4" />
+            )}
             Search
           </button>
         </div>
@@ -229,8 +243,7 @@ export default function InvoiceSearchPage() {
               Search Results
             </h2>
             <p className="mt-0.5 text-xs text-slate-400">
-              {result.total} report
-              {result.total === 1 ? '' : 's'} found
+              {result.total} report{result.total === 1 ? '' : 's'} found
             </p>
           </div>
 
@@ -240,7 +253,7 @@ export default function InvoiceSearchPage() {
         </header>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-225 text-sm">
+          <table className="w-full min-w-200 text-sm">
             <thead>
               <tr className="bg-slate-50 text-left">
                 {[
@@ -265,10 +278,7 @@ export default function InvoiceSearchPage() {
             <tbody className="divide-y divide-slate-100">
               {!loading &&
                 result.items.map((invoice) => (
-                  <tr
-                    key={invoice.id}
-                    className="hover:bg-slate-50"
-                  >
+                  <tr key={invoice.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-bold text-slate-900">
                       {invoice.invoiceNumber}
                     </td>
@@ -282,8 +292,7 @@ export default function InvoiceSearchPage() {
                       {invoice.purchaserName || '—'}
                     </td>
                     <td className="px-4 py-3 font-bold text-slate-700">
-                      {invoice.totalAmountIncludingVat ||
-                        '—'}
+                      {invoice.totalAmountIncludingVat || '—'}
                     </td>
                     <td className="px-4 py-3 text-slate-500">
                       {invoice.createdBy || '—'}
@@ -327,17 +336,14 @@ export default function InvoiceSearchPage() {
 
         <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
           <p className="text-xs text-slate-500">
-            Page {result.page || page} of{' '}
-            {Math.max(1, result.totalPages)}
+            Page {result.page || page} of {Math.max(1, result.totalPages)}
           </p>
 
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() =>
-                setPage((current) =>
-                  Math.max(1, current - 1)
-                )
+                setPage((current) => Math.max(1, current - 1))
               }
               disabled={page <= 1 || loading}
               className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
@@ -348,9 +354,7 @@ export default function InvoiceSearchPage() {
 
             <button
               type="button"
-              onClick={() =>
-                setPage((current) => current + 1)
-              }
+              onClick={() => setPage((current) => current + 1)}
               disabled={
                 loading ||
                 result.totalPages === 0 ||
@@ -368,16 +372,55 @@ export default function InvoiceSearchPage() {
   );
 }
 
-function FilterInput({
+function FilterSelect({
+  label,
+  value,
+  options,
+  placeholder,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  placeholder: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+        {label}
+      </span>
+
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-wait disabled:bg-slate-50"
+      >
+        <option value="">
+          {disabled ? 'Loading...' : placeholder}
+        </option>
+
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function FilterDate({
   label,
   value,
   onChange,
-  type = 'text',
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  type?: string;
 }) {
   return (
     <label className="block">
@@ -386,11 +429,9 @@ function FilterInput({
       </span>
 
       <input
-        type={type}
+        type="date"
         value={value}
-        onChange={(event) =>
-          onChange(event.target.value)
-        }
+        onChange={(event) => onChange(event.target.value)}
         className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
       />
     </label>
