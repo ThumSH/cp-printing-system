@@ -1,5 +1,4 @@
-// src/pages/Dashboard.tsx
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
@@ -26,6 +25,20 @@ interface StoreInStyleSummary {
 // HELPERS
 // ==========================================
 const normalizeDay = (v?: string) => (v || '').slice(0, 10);
+
+const getColomboDateString = (): string => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Colombo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+
+  const year = parts.find(part => part.type === 'year')?.value ?? '';
+  const month = parts.find(part => part.type === 'month')?.value ?? '';
+  const day = parts.find(part => part.type === 'day')?.value ?? '';
+  return `${year}-${month}-${day}`;
+};
 
 const buildStoreInStyleSummaries = (records: StoreInRecord[]): StoreInStyleSummary[] => {
   const map = new Map<string, Omit<StoreInStyleSummary, 'scheduleCount'> & { scheduleSet: Set<string> }>();
@@ -226,7 +239,7 @@ function WorkerStageBarChart({
       </div>
       {total === 0 && (
         <p className="text-center text-xs text-slate-400">
-          No worker output recorded for today yet.
+          No worker output recorded for the selected date.
         </p>
       )}
     </div>
@@ -589,10 +602,23 @@ function AuditDashboard({ data, styles }: { data: DashboardData; styles: StyleOv
   );
 }
 
-function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleOverview[] }) {
+function WorkerDashboard({
+  data,
+  styles,
+  selectedDate,
+  onDateChange,
+  loading,
+}: {
+  data: DashboardData;
+  styles: StyleOverview[];
+  selectedDate: string;
+  onDateChange: (date: string) => void;
+  loading: boolean;
+}) {
   const worker = data.worker ?? {} as DashboardData['worker'];
+  const displayedDate = worker.selectedDate || selectedDate;
 
-  const todayBreakdown = [
+  const selectedDateBreakdown = [
     { label: 'Seating',  value: Number(worker.todaySeating)  || 0, color: '#3b82f6' },
     { label: 'Printing', value: Number(worker.todayPrinting) || 0, color: '#8b5cf6' },
     { label: 'Curing',   value: Number(worker.todayCuring)   || 0, color: '#f59e0b' },
@@ -601,27 +627,71 @@ function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleO
     { label: 'Dispatch', value: Number(worker.todayDispatch) || 0, color: '#10b981' },
   ];
 
-  const totalToday = todayBreakdown.reduce((sum, item) => sum + item.value, 0);
+  const selectedDateTotal = selectedDateBreakdown.reduce((sum, item) => sum + item.value, 0);
   const totalDailyOutput = Number(worker.totalDailyOutput) || 0;
-  const todayOutput = Number(worker.todayOutput) || 0;
+  const selectedDateEntries = Number(worker.todayOutput) || 0;
   const pendingDowntime = Number(worker.pendingDowntime) || 0;
-  const workerStyles = styles.filter(s => (Number(s.workerEntries) || 0) > 0 || (Number(s.totalWorkerOutput) || 0) > 0);
+
+  // Keep the full worked-style list for the KPI count.
+  const allWorkerStyles = useMemo(
+    () =>
+      styles.filter(
+        style =>
+          (Number(style.workerEntries) || 0) > 0 ||
+          (Number(style.totalWorkerOutput) || 0) > 0
+      ),
+    [styles]
+  );
+
+  // Show only the 10 styles with the latest Worker Daily Output dates.
+  const recentWorkerStyles = useMemo(
+    () =>
+      [...allWorkerStyles]
+        .sort((a, b) => {
+          const dateComparison = (b.latestWorkerDate || '').localeCompare(
+            a.latestWorkerDate || ''
+          );
+
+          if (dateComparison !== 0) return dateComparison;
+
+          // Stable fallback when multiple styles were worked on the same date.
+          return a.styleNo.localeCompare(b.styleNo);
+        })
+        .slice(0, 10),
+    [allWorkerStyles]
+  );
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Worker output date</p>
+          <p className="mt-1 text-sm text-slate-600">Choose today or any previous Daily Output date.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(event) => onDateChange(event.target.value || getColomboDateString())}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {loading && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+        </div>
+      </div>
+
       <div className="rounded-xl bg-linear-to-r from-slate-800 to-slate-700 p-5 text-white">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <p className="text-xs font-medium text-slate-300 uppercase tracking-widest">Today's Output</p>
-            <p className="text-4xl font-black mt-1">{totalToday.toLocaleString()} <span className="text-lg font-normal text-slate-300">pcs</span></p>
+            <p className="text-xs font-medium text-slate-300 uppercase tracking-widest">Output for {displayedDate}</p>
+            <p className="text-4xl font-black mt-1">{selectedDateTotal.toLocaleString()} <span className="text-lg font-normal text-slate-300">stage pcs</span></p>
           </div>
           <div className="text-right">
             <p className="text-xs text-slate-400">Entries logged</p>
-            <p className="text-2xl font-black">{todayOutput.toLocaleString()}</p>
+            <p className="text-2xl font-black">{selectedDateEntries.toLocaleString()}</p>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-          {todayBreakdown.map(item => (
+          {selectedDateBreakdown.map(item => (
             <div key={item.label} className="rounded-lg bg-white/10 p-2.5 text-center">
               <div className="w-2 h-2 rounded-full mx-auto mb-1.5" style={{ backgroundColor: item.color }} />
               <p className="text-sm font-black">{item.value.toLocaleString()}</p>
@@ -633,38 +703,69 @@ function WorkerDashboard({ data, styles }: { data: DashboardData; styles: StyleO
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <KpiCard icon={Factory} label="Total Entries (All Time)" value={totalDailyOutput.toLocaleString()} color="blue" href="/worker" delay={0.05} />
-        <KpiCard icon={Layers}  label="Styles Worked On" value={workerStyles.length} color="purple" delay={0.1} />
+        <KpiCard icon={Layers}  label="Styles Worked On" value={allWorkerStyles.length} color="purple" delay={0.1} />
         <KpiCard icon={Clock}   label="Pending Downtime Reports" value={pendingDowntime} color={pendingDowntime > 0 ? 'amber' : 'slate'} href="/worker/downtime" delay={0.15} />
       </div>
 
-      <Card title="Today's Output — By Section" icon={BarChart2}
-        action={<span className="text-xs font-bold text-slate-700">{totalToday.toLocaleString()} total pcs</span>}>
-        <WorkerStageBarChart data={todayBreakdown} height={170} />
+      <Card title={`Output by Section — ${displayedDate}`} icon={BarChart2}
+        action={<span className="text-xs font-bold text-slate-700">{selectedDateTotal.toLocaleString()} total stage pcs</span>}>
+        <WorkerStageBarChart data={selectedDateBreakdown} height={170} />
       </Card>
 
-      {workerStyles.length > 0 && (
-        <Card title="Work Per Style — Qty & Remaining" icon={Layers}>
+      {recentWorkerStyles.length > 0 && (
+        <Card
+          title="Recent 10 Styles — Qty & Remaining"
+          icon={Layers}
+          action={
+            <Link
+              to="/worker/history"
+              className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 hover:underline"
+            >
+              View History
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          }
+        >
           <div className="space-y-3">
-            {workerStyles.map(s => {
+            {recentWorkerStyles.map((s, index) => {
               const totalWorkerOutput = Number(s.totalWorkerOutput) || 0;
-              const bulkQty = Number(s.bulkQty) || 0;
-              const remaining = Math.max(0, bulkQty - totalWorkerOutput);
-              const pct = bulkQty > 0 ? Math.min(100, Math.round(totalWorkerOutput / bulkQty * 100)) : 0;
+              // Worker quantity originates from Production IssueQty. At style level,
+              // totalIssued is the sum of StoreProductionRecord.IssueQty values.
+              const productionIssuedQty = Number(s.totalIssued) || 0;
+              const remaining = Math.max(0, productionIssuedQty - totalWorkerOutput);
+              const pct = productionIssuedQty > 0
+                ? Math.min(100, Math.round(totalWorkerOutput / productionIssuedQty * 100))
+                : 0;
+              const workerStyleKey = [
+                s.styleNo,
+                s.customerName,
+                s.scheduleNo || 'no-schedule',
+                s.latestWorkerDate || 'no-worker-date',
+                index,
+              ].join('|||');
+
               return (
-                <div key={`${s.styleNo}-${s.customerName}`} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                <div key={workerStyleKey} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <span className="font-bold text-sm text-slate-800">{s.styleNo}</span>
-                      <span className="text-xs text-slate-500 ml-2">{s.customerName}</span>
+                      <div>
+                        <span className="font-bold text-sm text-slate-800">{s.styleNo}</span>
+                        <span className="text-xs text-slate-500 ml-2">{s.customerName}</span>
+                      </div>
+                      {s.latestWorkerDate && (
+                        <p className="mt-0.5 text-[10px] text-slate-400">
+                          Last worked: {s.latestWorkerDate}
+                        </p>
+                      )}
                     </div>
                     <StageBadge stage={s.stage} />
                   </div>
                   <div className="grid grid-cols-3 gap-3 mb-2.5 text-center">
                     <div><p className="text-xs text-slate-400">Total Output</p><p className="text-lg font-black text-blue-700">{totalWorkerOutput.toLocaleString()}</p></div>
-                    <div><p className="text-xs text-slate-400">Bulk Qty</p><p className="text-lg font-black text-slate-700">{bulkQty.toLocaleString()}</p></div>
+                    <div><p className="text-xs text-slate-400">Production Issued</p><p className="text-lg font-black text-slate-700">{productionIssuedQty.toLocaleString()}</p></div>
                     <div><p className="text-xs text-slate-400">Remaining</p><p className={`text-lg font-black ${remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{remaining.toLocaleString()}</p></div>
                   </div>
-                  <MiniProgress value={totalWorkerOutput} max={bulkQty} color={pct >= 100 ? '#10b981' : pct >= 50 ? '#3b82f6' : '#f59e0b'} />
+                  <MiniProgress value={totalWorkerOutput} max={productionIssuedQty} color={pct >= 100 ? '#10b981' : pct >= 50 ? '#3b82f6' : '#f59e0b'} />
                 </div>
               );
             })}
@@ -818,13 +919,14 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
             </tr>
           </thead>
           <tbody>
-            {slice.map((s) => {
+            {slice.map((s, rowIndex) => {
+              const rowKey = `${s.styleNo}|||${s.customerName}|||${s.scheduleNo || 'no-schedule'}|||${page * PAGE + rowIndex}`;
               const pct = s.bulkQty > 0 ? Math.round(s.totalDispatched / s.bulkQty * 100) : 0;
-              const isExp = expanded === s.styleNo;
+              const isExp = expanded === rowKey;
               const extra = styleExtraData.get(s.styleNo) || { totalCutQty: 0, totalBundles: 0, totalInQty: 0 };
               return (
-                <>
-                  <tr key={s.styleNo} className="border-b border-slate-50 hover:bg-blue-50/30 cursor-pointer transition-colors" onClick={() => setExpanded(isExp ? null : s.styleNo)}>
+                <Fragment key={rowKey}>
+                  <tr className="border-b border-slate-50 hover:bg-blue-50/30 cursor-pointer transition-colors" onClick={() => setExpanded(isExp ? null : rowKey)}>
                     <td className="px-3 py-3">
                       {isExp ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
                     </td>
@@ -847,7 +949,7 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
                     </td>
                   </tr>
                   {isExp && (
-                    <tr key={`${s.styleNo}-exp`} className="border-b border-slate-100 bg-slate-100 inset-shadow-sm">
+                    <tr className="border-b border-slate-100 bg-slate-100 inset-shadow-sm">
                       <td colSpan={11} className="px-6 py-4">
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 text-xs">
                           {[
@@ -867,7 +969,7 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               );
             })}
             {slice.length === 0 && (
@@ -944,15 +1046,29 @@ export default function Dashboard() {
   const { user } = useAuthStore();
   const { data, styles, storeInRecords, loading, error, fetch: fetchDashboard, lastFetched } = useDashboardStore();
   const [adminTab, setAdminTab] = useState<RoleTab>('overview');
+  const [workerDate, setWorkerDate] = useState(getColomboDateString);
+
+  const rawRole = String(user?.role || '').trim().toLowerCase();
+  const role =
+    rawRole === 'admin' ? 'Admin' :
+    rawRole === 'developer' ? 'Developer' :
+    rawRole === 'stores' ? 'Stores' :
+    rawRole === 'qc' ? 'QC' :
+    rawRole === 'gatepass' ? 'Gatepass' :
+    rawRole === 'audit' ? 'Audit' :
+    rawRole === 'worker' ? 'Worker' :
+    '';
+
+  const isAdmin = role === 'Admin';
+  const includeStoreIn = isAdmin || role === 'Stores';
 
   useEffect(() => {
-    fetchDashboard();
-  }, []);
+    // Force a fresh dashboard read whenever the dashboard/role is entered.
+    // This avoids showing the two-minute cached worker totals after saving output.
+    void fetchDashboard(true, includeStoreIn, workerDate);
+  }, [fetchDashboard, includeStoreIn, workerDate]);
 
-  const load = (force = false) => fetchDashboard(force);
-
-  const role = user?.role || '';
-  const isAdmin = role === 'Admin';
+  const load = (force = false) => fetchDashboard(force, includeStoreIn, workerDate);
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -1017,7 +1133,15 @@ export default function Dashboard() {
         {role === 'QC'        && <QCDashboard data={data} styles={styles} />}
         {role === 'Gatepass'  && <GatepassDashboard data={data} styles={styles} />}
         {role === 'Audit'     && <AuditDashboard data={data} styles={styles} />}
-        {role === 'Worker'    && <WorkerDashboard data={data} styles={styles} />}
+        {role === 'Worker'    && (
+          <WorkerDashboard
+            data={data}
+            styles={styles}
+            selectedDate={workerDate}
+            onDateChange={setWorkerDate}
+            loading={loading}
+          />
+        )}
       </motion.div>
     );
   }
@@ -1044,7 +1168,7 @@ export default function Dashboard() {
               <p className="text-2xl font-black">{styles.length}</p>
             </div>
             <div className="rounded-lg bg-white/10 backdrop-blur px-4 py-2.5 border border-white/10">
-              <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Today's Output</p>
+              <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Worker Output · {data.worker?.selectedDate || workerDate}</p>
               <p className="text-2xl font-black">{totalWorkerToday.toLocaleString()}</p>
             </div>
             <div className={`rounded-lg backdrop-blur px-4 py-2.5 border ${activeAlerts > 0 ? 'bg-amber-500/20 border-amber-400/30' : 'bg-emerald-500/20 border-emerald-400/30'}`}>
@@ -1224,7 +1348,13 @@ export default function Dashboard() {
               <Eye className="h-4 w-4 text-orange-600" />
               <p className="text-xs font-bold text-orange-800">Viewing as Worker</p>
             </div>
-            <WorkerDashboard data={data} styles={styles} />
+            <WorkerDashboard
+              data={data}
+              styles={styles}
+              selectedDate={workerDate}
+              onDateChange={setWorkerDate}
+              loading={loading}
+            />
           </motion.div>
         )}
       </AnimatePresence>

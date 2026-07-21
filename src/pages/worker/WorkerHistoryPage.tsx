@@ -90,6 +90,7 @@ export default function WorkerHistoryPage() {
 
   // UI state
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [continuingRecordId, setContinuingRecordId] = useState<string | null>(null);
 
   // Loaded once: all records (for populating the filter dropdowns)
   const [allRecords, setAllRecords] = useState<DailyOutputRecord[]>([]);
@@ -152,29 +153,62 @@ export default function WorkerHistoryPage() {
   // and load eligible worker production IDs so completed/closed jobs can be
   // indicated as Completed instead of showing a Continue button.
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    const loadHistorySupportData = async () => {
+      setEligibleStylesLoaded(false);
+
       try {
         const [historyRes, eligibleRes] = await Promise.all([
           fetch(`${API_BASE}/daily-output`, { headers: getAuthHeaders() }),
           fetch(`${API_BASE}/eligible-styles`, { headers: getAuthHeaders() }),
         ]);
 
-        if (historyRes.ok) setAllRecords(await historyRes.json());
-
-        if (eligibleRes.ok) {
-          const eligibleData: WorkerEligibleStyle[] = await eligibleRes.json();
-          setEligibleProductionIds(new Set(
-            (eligibleData || [])
-              .map(getEligibleProductionId)
-              .filter(Boolean)
-          ));
-          setEligibleStylesLoaded(true);
+        if (!historyRes.ok) {
+          const message = await historyRes.text();
+          throw new Error(
+            `Worker history request failed (${historyRes.status}): ${message || historyRes.statusText}`
+          );
         }
-      } catch {
-        // Silent: history still works. If eligible-styles fails, Continue will
-        // not be disabled based on availability because the source is unknown.
+
+        if (!eligibleRes.ok) {
+          const message = await eligibleRes.text();
+          throw new Error(
+            `Eligible styles request failed (${eligibleRes.status}): ${message || eligibleRes.statusText}`
+          );
+        }
+
+        const historyData = await historyRes.json();
+        const eligibleData: WorkerEligibleStyle[] = await eligibleRes.json();
+
+        if (cancelled) return;
+
+        setAllRecords(Array.isArray(historyData) ? historyData : []);
+        setEligibleProductionIds(new Set(
+          (Array.isArray(eligibleData) ? eligibleData : [])
+            .map(getEligibleProductionId)
+            .filter(Boolean)
+        ));
+        setEligibleStylesLoaded(true);
+      } catch (error) {
+        if (cancelled) return;
+
+        console.error('Failed to load worker history support data:', error);
+        setEligibleProductionIds(new Set());
+        setEligibleStylesLoaded(false);
+        setPageError(
+          error instanceof Error
+            ? error.message
+            : 'Failed to verify which production records can be continued.'
+        );
       }
-    })();
+    };
+
+    void loadHistorySupportData();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Dropdown options derived from allRecords (so every unique value shows, not just page's)
@@ -281,39 +315,96 @@ export default function WorkerHistoryPage() {
     };
   }, [allKnownRecords]);
 
-  const isProductionStillEligible = useCallback((record: DailyOutputRecord) => {
-    if (!record.productionRecordId || !eligibleStylesLoaded) return true;
-    return eligibleProductionIds.has(record.productionRecordId);
-  }, [eligibleProductionIds, eligibleStylesLoaded]);
-
-  const continueAllocation = (record: DailyOutputRecord) => {
-    if (!record.productionRecordId) {
-      setPageError('This history record is missing its production record link and cannot be resumed.');
+  const continueAllocation = async (record: DailyOutputRecord) => {
+    if (!record.productionRecordId || !record.id) {
+      setPageError(
+        'This history record is missing its indexed record links and cannot be resumed.'
+      );
       return;
     }
 
     if (isAllocationComplete(record)) {
-      setPageError('This production allocation is already completed. No remaining qty is available to continue.');
+      setPageError(
+        'This production allocation is already completed. No remaining qty is available to continue.'
+      );
       return;
     }
 
     if (getManualCompletionMeta(record).isCompleted) {
-      setPageError('This job was manually completed. It can no longer be continued even if some stage qty remains.');
+      setPageError(
+        'This job was manually completed. It can no longer be continued even if some stage qty remains.'
+      );
       return;
     }
 
-    if (!isProductionStillEligible(record)) {
-      setPageError('This job is completed or no longer available for worker allocation. It cannot be continued.');
-      return;
+    setContinuingRecordId(record.id);
+    setPageError('');
+
+    try {
+      // Fetch one exact resume payload. It contains both the clicked
+      // DailyOutputRecord and the linked StoreProductionRecord summary.
+      const response = await fetch(
+        `${API_BASE}/daily-output/${encodeURIComponent(record.id)}/resume`,
+        { headers: getAuthHeaders() }
+      );
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(
+          `Resume request failed (${response.status}): ` +
+          `${message || response.statusText}`
+        );
+      }
+
+      const workerResume = await response.json();
+
+      if (workerResume?.canContinue === false) {
+        throw new Error(
+          workerResume?.message ||
+          'This job is completed, fully allocated, or no longer available for worker allocation.'
+        );
+      }
+
+      const params = new URLSearchParams();
+      params.set(
+        'productionRecordId',
+        record.productionRecordId.trim()
+      );
+      params.set('sourceRecordId', record.id.trim());
+
+      if (record.tableNo) {
+        params.set('tableNo', record.tableNo);
+      }
+
+      if (record.date) {
+        params.set('date', record.date);
+        params.set('sourceDate', record.date);
+      }
+
+      // Pass the already-loaded payload through router state. DailyOutputPage
+      // uses it immediately, while the query parameters remain for refresh.
+      navigate(
+        `/worker?${params.toString()}`,
+        {
+          state: {
+            workerResume,
+          },
+        }
+      );
+    } catch (error) {
+      console.error(
+        'Failed to continue Worker allocation:',
+        error
+      );
+
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to open the selected Worker Daily Output record.'
+      );
+    } finally {
+      setContinuingRecordId(null);
     }
-
-    const params = new URLSearchParams();
-    params.set('productionRecordId', record.productionRecordId);
-    if (record.tableNo) params.set('tableNo', record.tableNo);
-    if (record.date) params.set('sourceDate', record.date);
-    if (record.id) params.set('sourceRecordId', record.id);
-
-    navigate(`/worker?${params.toString()}`);
   };
 
 
@@ -502,11 +593,11 @@ export default function WorkerHistoryPage() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (canContinue) continueAllocation(r);
+                        if (canContinue) void continueAllocation(r);
                       }}
-                      disabled={!canContinue}
+                      disabled={!canContinue || continuingRecordId === r.id}
                       className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition ${
-                        canContinue
+                        canContinue && continuingRecordId !== r.id
                           ? 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:border-teal-300'
                           : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
                       }`}
@@ -527,7 +618,7 @@ export default function WorkerHistoryPage() {
                         </>
                       ) : (
                         <>
-                          Continue
+                          {continuingRecordId === r.id ? 'Loading...' : 'Continue'}
                           <ArrowRight className="h-3.5 w-3.5" />
                         </>
                       )}
@@ -584,11 +675,11 @@ export default function WorkerHistoryPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              if (canContinue) continueAllocation(r);
+                              if (canContinue) void continueAllocation(r);
                             }}
-                            disabled={!canContinue}
+                            disabled={!canContinue || continuingRecordId === r.id}
                             className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold transition ${
-                              canContinue
+                              canContinue && continuingRecordId !== r.id
                                 ? 'bg-teal-600 text-white hover:bg-teal-700'
                                 : 'cursor-not-allowed bg-slate-200 text-slate-500'
                             }`}
@@ -600,7 +691,7 @@ export default function WorkerHistoryPage() {
                               </>
                             ) : (
                               <>
-                                Continue Allocation
+                                {continuingRecordId === r.id ? 'Loading...' : 'Continue Allocation'}
                                 <ArrowRight className="h-3.5 w-3.5" />
                               </>
                             )}

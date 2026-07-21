@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
@@ -8,6 +8,7 @@ import {
   TrendingDown, Package,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
+import { useDashboardStore } from '../../store/dashboardStore';
 
 const API_BASE = API.WORKER;
 const getHeaders = getAuthHeaders;
@@ -104,6 +105,13 @@ interface DailyOutputRecord {
   workerName: string;
 }
 
+interface WorkerResumePayload {
+  record: DailyOutputRecord;
+  eligibleStyle: EligibleStyle;
+  canContinue: boolean;
+  message?: string;
+}
+
 // ==========================================
 // HELPERS
 // ==========================================
@@ -170,11 +178,13 @@ const minStageValue = (totals: StageTotals) =>
 // COMPONENT
 // ==========================================
 export default function DailyOutputPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const invalidateDashboard = useDashboardStore((state) => state.invalidate);
   const [eligibleStyles, setEligibleStyles] = useState<EligibleStyle[]>([]);
   const [records, setRecords] = useState<DailyOutputRecord[]>([]);
-  const [hasFetchedWorkerData, setHasFetchedWorkerData] = useState(false);
-  const [resumeApplied, setResumeApplied] = useState(false);
+  const [isResumeLoading, setIsResumeLoading] = useState(false);
+  const [resumeSourceRecordId, setResumeSourceRecordId] = useState('');
   const [resumeNotice, setResumeNotice] = useState('');
   
   const [pickedStyleKey, setPickedStyleKey] = useState('');   
@@ -200,21 +210,240 @@ export default function DailyOutputPage() {
   });
 
   const fetchData = async () => {
+    setPageError('');
+
     try {
       const [styRes, recRes] = await Promise.all([
         fetch(`${API_BASE}/eligible-styles`, { headers: getHeaders() }),
         fetch(`${API_BASE}/daily-output`, { headers: getHeaders() }),
       ]);
-      if (styRes.ok) setEligibleStyles(await styRes.json());
-      if (recRes.ok) setRecords(await recRes.json());
-    } catch (e) {
-      setPageError('Failed to load data.');
-    } finally {
-      setHasFetchedWorkerData(true);
+
+      if (!styRes.ok) {
+        const message = await styRes.text();
+        throw new Error(
+          `Eligible styles request failed (${styRes.status}): ${message || styRes.statusText}`
+        );
+      }
+
+      if (!recRes.ok) {
+        const message = await recRes.text();
+        throw new Error(
+          `Daily output request failed (${recRes.status}): ${message || recRes.statusText}`
+        );
+      }
+
+      const stylesData = await styRes.json();
+      const recordsData = await recRes.json();
+
+      setEligibleStyles(Array.isArray(stylesData) ? stylesData : []);
+      setRecords(Array.isArray(recordsData) ? recordsData : []);
+    } catch (error) {
+      console.error('Failed to load worker data:', error);
+      setEligibleStyles([]);
+      setRecords([]);
+      setPageError(error instanceof Error ? error.message : 'Failed to load worker data.');
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // History Continue uses one exact resume endpoint. WorkerHistoryPage also
+  // passes the fetched payload through router state, so the Worker page can
+  // render immediately without waiting for a second network request.
+  const applyResumePayload = (
+    payload: WorkerResumePayload,
+    requestedTableNo: string,
+    requestedDate: string,
+  ) => {
+    if (!payload?.record || !payload?.eligibleStyle) {
+      throw new Error('The resume response is missing the Daily Output or Production record.');
+    }
+
+    if (payload.canContinue === false) {
+      throw new Error(payload.message || 'This production allocation can no longer be continued.');
+    }
+
+    const sourceRecord: DailyOutputRecord = {
+      ...payload.record,
+      timeSlots: Array.isArray(payload.record.timeSlots)
+        ? payload.record.timeSlots
+        : [],
+    };
+
+    const productionRecordId = String(
+      payload.eligibleStyle.productionRecordId ||
+      payload.eligibleStyle.id ||
+      sourceRecord.productionRecordId ||
+      ''
+    ).trim();
+
+    const normalizedItem: EligibleStyle = {
+      ...payload.eligibleStyle,
+      id: String(payload.eligibleStyle.id || productionRecordId).trim(),
+      productionRecordId,
+      storeInRecordId: String(
+        payload.eligibleStyle.storeInRecordId ||
+        sourceRecord.storeInRecordId ||
+        ''
+      ).trim(),
+      component: String(
+        payload.eligibleStyle.component ||
+        sourceRecord.component ||
+        ''
+      ).trim(),
+      originalQty: Number(
+        payload.eligibleStyle.originalQty ||
+        sourceRecord.orderQty ||
+        0
+      ),
+      orderQty: Number(payload.eligibleStyle.orderQty || 0),
+    };
+
+    if (!normalizedItem.id || !normalizedItem.productionRecordId) {
+      throw new Error('The resume response is missing the Production record ID.');
+    }
+
+    const resolvedDate =
+      sourceRecord.date ||
+      requestedDate ||
+      getColomboDateString();
+
+    const resolvedTableNo =
+      sourceRecord.tableNo ||
+      requestedTableNo ||
+      '';
+
+    setEligibleStyles([normalizedItem]);
+    setRecords([sourceRecord]);
+    setResumeSourceRecordId(sourceRecord.id);
+
+    setPickedStyleKey(
+      `${normalizedItem.styleNo}|||${normalizedItem.customerName}`
+    );
+    setPickedCutNo(normalizedItem.cutNo || sourceRecord.cutNo || '');
+    setSelectedStoreInId(normalizedItem.id);
+    setSelectedComponent(
+      normalizedItem.component ||
+      sourceRecord.component ||
+      ''
+    );
+    setTableNo(resolvedTableNo);
+    setDate(resolvedDate);
+
+    if (sourceRecord.workerName) {
+      setWorkerName(sourceRecord.workerName);
+    }
+
+    setResumeNotice(
+      `Loaded ${normalizedItem.styleNo} ` +
+      `(${normalizedItem.component || 'component'}) ` +
+      `for ${resolvedDate}` +
+      `${resolvedTableNo ? `, table ${resolvedTableNo}` : ''}.`
+    );
+  };
+
+  const loadResumeData = async () => {
+    const productionRecordId =
+      (searchParams.get('productionRecordId') || '').trim();
+
+    const sourceRecordId =
+      (searchParams.get('sourceRecordId') || '').trim();
+
+    const requestedTableNo =
+      (searchParams.get('tableNo') || '').trim();
+
+    const requestedDate =
+      (
+        searchParams.get('date') ||
+        searchParams.get('sourceDate') ||
+        ''
+      ).trim();
+
+    // Normal Daily Output page load.
+    if (!productionRecordId && !sourceRecordId) {
+      await fetchData();
+      return;
+    }
+
+    if (!sourceRecordId) {
+      setPageError(
+        'The Continue link is missing the exact Daily Output record ID. Return to Worker History and click Continue again.'
+      );
+      return;
+    }
+
+    setIsResumeLoading(true);
+    setPageError('');
+
+    try {
+      const navigationPayload = (
+        location.state as
+          | { workerResume?: WorkerResumePayload }
+          | null
+      )?.workerResume;
+
+      // WorkerHistoryPage has already fetched and validated this exact row.
+      // Use it directly when it matches the URL record ID.
+      if (
+        navigationPayload?.record?.id &&
+        navigationPayload.record.id === sourceRecordId
+      ) {
+        applyResumePayload(
+          navigationPayload,
+          requestedTableNo,
+          requestedDate
+        );
+        return;
+      }
+
+      // Direct reload/bookmark fallback: retrieve the Daily Output row and its
+      // Production summary together in one backend request.
+      const response = await fetch(
+        `${API_BASE}/daily-output/${encodeURIComponent(sourceRecordId)}/resume`,
+        { headers: getHeaders() }
+      );
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(
+          `Resume request failed (${response.status}): ` +
+          `${message || response.statusText}`
+        );
+      }
+
+      const payload: WorkerResumePayload =
+        await response.json();
+
+      applyResumePayload(
+        payload,
+        requestedTableNo,
+        requestedDate
+      );
+    } catch (error) {
+      console.error(
+        'Failed to resume Worker Daily Output:',
+        error
+      );
+
+      setEligibleStyles([]);
+      setRecords([]);
+      setResumeSourceRecordId('');
+      setActiveRecordId(null);
+      setTimeSlots(createEmptyTimeSlots());
+
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to load the selected Worker Daily Output record.'
+      );
+    } finally {
+      setIsResumeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadResumeData();
+    // Intentionally run once for the initial route/query values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Disable old worker auto-draft behavior. Existing saved drafts are cleared once
   // so stale date/style/slot data cannot overwrite the live worker page.
@@ -227,46 +456,6 @@ export default function DailyOutputPage() {
     ].forEach((key) => localStorage.removeItem(key));
   }, []);
 
-  // Resume flow from Worker History.
-  // The history page passes the production record and table, then this page
-  // preselects the correct style/cut/line so the worker can continue without
-  // manually searching again. We intentionally keep today's Colombo date unless
-  // a date query parameter is explicitly provided.
-  useEffect(() => {
-    if (resumeApplied) return;
-
-    const resumeProductionRecordId = searchParams.get('productionRecordId') || '';
-    if (!resumeProductionRecordId) return;
-    if (!hasFetchedWorkerData) return;
-
-    const matchedItem = eligibleStyles.find((item) =>
-      item.productionRecordId === resumeProductionRecordId || item.id === resumeProductionRecordId
-    );
-
-    if (!matchedItem) {
-      setPageError('This production record is already fully completed or is no longer available for worker allocation.');
-      setResumeApplied(true);
-      setSearchParams({}, { replace: true });
-      return;
-    }
-
-    const resumeTableNo = searchParams.get('tableNo') || '';
-    const sourceDate = searchParams.get('sourceDate') || '';
-    const resumeDate = searchParams.get('date') || sourceDate || '';
-
-    setPickedStyleKey(`${matchedItem.styleNo}|||${matchedItem.customerName}`);
-    setPickedCutNo(matchedItem.cutNo || '');
-    setSelectedStoreInId(matchedItem.id);
-    setSelectedComponent(matchedItem.component || '');
-    if (resumeTableNo) setTableNo(resumeTableNo);
-    if (resumeDate) setDate(resumeDate);
-
-    setResumeNotice(
-      `Loaded ${matchedItem.styleNo} (${matchedItem.component || 'component'}) from worker history${sourceDate ? `, previous entry ${sourceDate}` : ''}. Continue allocating the remaining stage quantities below.`
-    );
-    setResumeApplied(true);
-    setSearchParams({}, { replace: true });
-  }, [eligibleStyles, hasFetchedWorkerData, resumeApplied, searchParams, setSearchParams]);
 
   const selectedItem = useMemo(
     () => eligibleStyles.find((i) => i.id === selectedStoreInId) || null,
@@ -327,18 +516,32 @@ export default function DailyOutputPage() {
   }, [eligibleStyles, pickedStyleKey, pickedCutNo]);
 
   const activeRecord = useMemo(() => {
+    // Continue must edit the exact History row that was clicked. The Daily
+    // Output primary key is the strongest identity and avoids collisions when
+    // the same production/table/date combination exists more than once.
+    if (resumeSourceRecordId) {
+      return records.find((record) => record.id === resumeSourceRecordId) || null;
+    }
+
     if (!selectedItem || !tableNo) return null;
-    return records.find(r =>
-      r.productionRecordId === selectedItem.productionRecordId &&
-      r.tableNo === tableNo &&
-      r.date === date
+
+    return records.find((record) =>
+      record.productionRecordId === selectedItem.productionRecordId &&
+      record.tableNo.trim() === tableNo.trim() &&
+      record.date === date
     ) || null;
-  }, [records, selectedItem, tableNo, date]);
+  }, [records, resumeSourceRecordId, selectedItem, tableNo, date]);
 
   useEffect(() => {
     if (activeRecord) {
+      const recordTimeSlots = Array.isArray(activeRecord.timeSlots)
+        ? activeRecord.timeSlots
+        : [];
+
       const loadedSlots = DEFAULT_TIME_SLOTS.map((t) => {
-        const existing = activeRecord.timeSlots.find((s) => s.timeFrom === t.timeFrom && s.timeTo === t.timeTo);
+        const existing = recordTimeSlots.find(
+          (s) => s.timeFrom === t.timeFrom && s.timeTo === t.timeTo
+        );
         if (existing) {
           return {
             ...existing,
@@ -376,17 +579,20 @@ export default function DailyOutputPage() {
 
   const persistedElsewhere = useMemo(() => {
     if (!selectedItem) return emptyStageTotals();
-    // Only tally sums from records that aren't currently being edited
-    const other = records.filter(r => r.productionRecordId === selectedItem.productionRecordId && r.id !== activeRecordId);
+
+    // eligible-styles already returns database-aggregated totals for the exact
+    // ProductionRecordId. Subtract the record currently being edited so the UI
+    // keeps the same independent-stage validation without downloading all
+    // historical DailyOutput rows.
     return {
-      seating: other.reduce((sum, r) => sum + (r.totalSeating || 0), 0),
-      printing: other.reduce((sum, r) => sum + (r.totalPrinting || 0), 0),
-      curing: other.reduce((sum, r) => sum + (r.totalCuring || 0), 0),
-      checking: other.reduce((sum, r) => sum + (r.totalChecking || 0), 0),
-      packing: other.reduce((sum, r) => sum + (r.totalPacking || 0), 0),
-      dispatch: other.reduce((sum, r) => sum + (r.totalDispatch || 0), 0),
+      seating: Math.max(0, (selectedItem.seatingAllocated || 0) - (activeRecord?.totalSeating || 0)),
+      printing: Math.max(0, (selectedItem.printingAllocated || 0) - (activeRecord?.totalPrinting || 0)),
+      curing: Math.max(0, (selectedItem.curingAllocated || 0) - (activeRecord?.totalCuring || 0)),
+      checking: Math.max(0, (selectedItem.checkingAllocated || 0) - (activeRecord?.totalChecking || 0)),
+      packing: Math.max(0, (selectedItem.packingAllocated || 0) - (activeRecord?.totalPacking || 0)),
+      dispatch: Math.max(0, (selectedItem.dispatchAllocated || 0) - (activeRecord?.totalDispatch || 0)),
     };
-  }, [records, selectedItem, activeRecordId]);
+  }, [selectedItem, activeRecord]);
 
   const allocated = useMemo(() => ({
     seating: persistedElsewhere.seating + totals.seating,
@@ -530,6 +736,7 @@ export default function DailyOutputPage() {
 
       setTimeSlots(updatedSlots);
       setConfirmModal(null);
+      invalidateDashboard();
       await fetchData();
     } catch (e) {
       setPageError(e instanceof Error ? e.message : 'Failed to save.');
@@ -569,9 +776,11 @@ export default function DailyOutputPage() {
       setTableNo('');
       setTimeSlots(createEmptyTimeSlots());
       setActiveRecordId(null);
+      setResumeSourceRecordId('');
       setErrors({});
       setResumeNotice('Job completed successfully. It has been removed from the Worker dropdown.');
 
+      invalidateDashboard();
       await fetchData();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
@@ -589,6 +798,7 @@ export default function DailyOutputPage() {
     setTableNo('');
     setTimeSlots(createEmptyTimeSlots());
     setActiveRecordId(null);
+    setResumeSourceRecordId('');
     setErrors({});
     setPageError('');
     setResumeNotice('');
@@ -597,7 +807,9 @@ export default function DailyOutputPage() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this record? This cannot be undone.')) return;
     try {
-      await fetch(`${API_BASE}/daily-output/${id}`, { method: 'DELETE', headers: getHeaders() });
+      const response = await fetch(`${API_BASE}/daily-output/${id}`, { method: 'DELETE', headers: getHeaders() });
+      if (!response.ok) throw new Error(await response.text() || 'Failed to delete.');
+      invalidateDashboard();
       await fetchData();
     } catch (e) {
       setPageError('Failed to delete.');
@@ -616,6 +828,17 @@ export default function DailyOutputPage() {
           <p className="text-sm text-slate-500">Distribute your issued pieces across the stages they are currently located in.</p>
         </div>
       </div>
+
+      {isResumeLoading && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700"
+        >
+          <Clock className="h-4 w-4 animate-pulse" />
+          <span>Loading the exact Production and Daily Output records...</span>
+        </motion.div>
+      )}
 
       {pageError && (
         <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">

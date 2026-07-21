@@ -1,9 +1,3 @@
-// src/store/dashboardStore.ts
-// FIXES:
-//   - Optional fetches (styles, storeInRecords) now log errors instead of silently swallowing them
-//   - Added partialError field so UI can show a warning when secondary data fails to load
-//   - fetch() now correctly handles the abort signal in all branches
-
 import { create } from 'zustand';
 import { API, getAuthHeaders } from '../api/client';
 import { StoreInRecord } from './inventoryStore';
@@ -23,6 +17,7 @@ export interface DashboardData {
   gatepass: { totalAdviceNotes: number; totalDispatchedQty: number; todayDispatched: number };
   audit:   { total: number; passed: number; failed: number; pending: number };
   worker: {
+    selectedDate: string;
     totalDailyOutput: number; todayOutput: number; todaySeating: number;
     todayPrinting: number; todayCuring: number; todayChecking: number;
     todayPacking: number; todayDispatch: number; totalDowntime: number; pendingDowntime: number;
@@ -38,6 +33,10 @@ export interface StyleOverview {
   dispatchCount: number; totalDispatched: number; dispatchedPct: number;
   auditTotal: number; auditPassed: number; auditFailed: number;
   workerEntries: number; totalWorkerOutput: number;
+
+  // Latest Daily Output date for this style, returned by DashboardController.
+  // Used only to order the Worker dashboard's recent-style list.
+  latestWorkerDate?: string;
 }
 
 interface DashboardState {
@@ -49,8 +48,9 @@ interface DashboardState {
   /** Non-null when optional secondary data (styles / storeIn) failed but main KPIs loaded */
   partialError:    string;
   lastFetched:     number | null;
+  lastWorkerDate:  string;
 
-  fetch:      (force?: boolean) => Promise<void>;
+  fetch:      (force?: boolean, includeStoreIn?: boolean, workerDate?: string) => Promise<void>;
   invalidate: () => void;
 }
 
@@ -64,13 +64,16 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   error:          '',
   partialError:   '',
   lastFetched:    null,
+  lastWorkerDate: '',
 
-  invalidate: () => set({ lastFetched: null }),
+  invalidate: () => set({ lastFetched: null, lastWorkerDate: '' }),
 
-  fetch: async (force = false) => {
+  fetch: async (force = false, includeStoreIn = true, workerDate = '') => {
     const state = get();
+    const normalizedWorkerDate = workerDate.trim();
     const isFresh = state.lastFetched && (Date.now() - state.lastFetched < CACHE_TTL_MS);
-    if (!force && isFresh && state.data) return;
+    const isSameWorkerDate = state.lastWorkerDate === normalizedWorkerDate;
+    if (!force && isFresh && isSameWorkerDate && state.data) return;
     if (state.loading) return;
 
     set({ loading: true, error: '', partialError: '' });
@@ -81,7 +84,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
     try {
       // ── Main KPIs — required ──────────────────────────────────────────────
-      const dRes = await fetch(`${API.BASE}/api/dashboard`, {
+      const workerDateQuery = normalizedWorkerDate
+        ? `?workerDate=${encodeURIComponent(normalizedWorkerDate)}`
+        : '';
+
+      const dRes = await fetch(`${API.BASE}/api/dashboard${workerDateQuery}`, {
         headers,
         signal: controller.signal,
       });
@@ -97,8 +104,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           signal: controller.signal,
         });
         if (sRes.ok) {
-          set({ styles: await sRes.json() });
+          const styleData: StyleOverview[] = await sRes.json();
+          set({ styles: Array.isArray(styleData) ? styleData : [] });
         } else {
+          const message = await sRes.text();
+          console.warn(`dashboardStore: styles failed (${sRes.status}):`, message);
+          set({ styles: [] });
           partialErrors.push('style overview');
         }
       } catch (e) {
@@ -109,27 +120,40 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         }
       }
 
-      // ── Store-in records — optional ───────────────────────────────────────
-      try {
-        const siRes = await fetch(`${API.INVENTORY}/store-in`, {
-          headers,
-          signal: controller.signal,
-        });
-        if (siRes.ok) {
-          set({ storeInRecords: await siRes.json() });
-        } else {
-          partialErrors.push('store-in records');
+      // ── Store-in records — only Admin and Stores need this endpoint ───────
+      if (includeStoreIn) {
+        try {
+          const siRes = await fetch(`${API.INVENTORY}/store-in`, {
+            headers,
+            signal: controller.signal,
+          });
+
+          if (siRes.ok) {
+            const storeInData: StoreInRecord[] = await siRes.json();
+            set({ storeInRecords: Array.isArray(storeInData) ? storeInData : [] });
+          } else {
+            const message = await siRes.text();
+            console.warn(`dashboardStore: store-in failed (${siRes.status}):`, message);
+            set({ storeInRecords: [] });
+            partialErrors.push('store-in records');
+          }
+        } catch (e) {
+          if ((e as Error).name !== 'AbortError') {
+            console.warn('dashboardStore: failed to fetch store-in records:', e);
+            set({ storeInRecords: [] });
+            partialErrors.push('store-in records');
+          }
         }
-      } catch (e) {
-        if ((e as Error).name !== 'AbortError') {
-          console.warn('dashboardStore: failed to fetch store-in records:', e);
-          partialErrors.push('store-in records');
-        }
+      } else {
+        // Worker, QC, Gatepass, Audit and Developer dashboards do not need the
+        // protected Inventory/store-in endpoint.
+        set({ storeInRecords: [] });
       }
 
       clearTimeout(timeout);
       set({
         lastFetched:  Date.now(),
+        lastWorkerDate: normalizedWorkerDate,
         error:        '',
         partialError: partialErrors.length > 0
           ? `Could not load: ${partialErrors.join(', ')}. Core metrics are still accurate.`
