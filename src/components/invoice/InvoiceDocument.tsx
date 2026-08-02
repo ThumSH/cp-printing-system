@@ -8,8 +8,39 @@ interface InvoiceDocumentProps {
   invoice: TaxInvoice | TaxInvoicePayload;
 }
 
-const displayValue = (value?: string | null): string =>
-  value?.trim() || '\u00A0';
+const displayValue = (
+  value?: string | null
+): string => value?.trim() || '\u00A0';
+
+/**
+ * Dates are stored internally as yyyy-MM-dd so the
+ * browser calendar, backend, searching and sorting
+ * continue to work correctly.
+ *
+ * The printed Tax Invoice displays dates as MM/DD/YY.
+ */
+const formatInvoiceDate = (
+  value?: string | null
+): string => {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return '\u00A0';
+  }
+
+  const isoDateMatch =
+    /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+
+  if (!isoDateMatch) {
+    // Preserve older invoice values that may already
+    // use another date format.
+    return trimmed;
+  }
+
+  const [, year, month, day] = isoDateMatch;
+
+  return `${month}/${day}/${year.slice(-2)}`;
+};
 
 const INVOICE_STYLES = `
   .invoice-sheet {
@@ -271,18 +302,20 @@ export function printInvoiceDocument(): void {
   }
 
   const invoiceNumber =
-    invoiceElement.getAttribute('data-invoice-number') ||
-    'Tax-Invoice';
+    invoiceElement.getAttribute(
+      'data-invoice-number'
+    ) || 'Tax-Invoice';
 
-  // Remove an older print frame if one is still present.
   document
     .getElementById('tax-invoice-print-frame')
     ?.remove();
 
-  const printFrame = document.createElement('iframe');
+  const printFrame =
+    document.createElement('iframe');
 
   printFrame.id = 'tax-invoice-print-frame';
-  printFrame.title = `Tax Invoice ${invoiceNumber}`;
+  printFrame.title =
+    `Tax Invoice ${invoiceNumber}`;
 
   printFrame.style.position = 'fixed';
   printFrame.style.right = '0';
@@ -296,7 +329,8 @@ export function printInvoiceDocument(): void {
   document.body.appendChild(printFrame);
 
   const frameWindow = printFrame.contentWindow;
-  const frameDocument = printFrame.contentDocument;
+  const frameDocument =
+    printFrame.contentDocument;
 
   if (!frameWindow || !frameDocument) {
     printFrame.remove();
@@ -307,16 +341,22 @@ export function printInvoiceDocument(): void {
   }
 
   frameDocument.open();
+
   frameDocument.write(`
     <!doctype html>
     <html lang="en">
       <head>
         <meta charset="utf-8" />
+
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1"
         />
-        <title>Tax Invoice - ${invoiceNumber}</title>
+
+        <title>
+          Tax Invoice - ${invoiceNumber}
+        </title>
+
         <style>${PRINT_STYLES}</style>
       </head>
 
@@ -325,6 +365,7 @@ export function printInvoiceDocument(): void {
       </body>
     </html>
   `);
+
   frameDocument.close();
 
   const removeFrame = () => {
@@ -342,9 +383,9 @@ export function printInvoiceDocument(): void {
     }
   };
 
-  // The invoice has no remote images, but waiting for the iframe
-  // document ensures its styles and layout are ready before printing.
-  if (frameDocument.readyState === 'complete') {
+  if (
+    frameDocument.readyState === 'complete'
+  ) {
     window.setTimeout(startPrint, 100);
   } else {
     printFrame.onload = () => {
@@ -369,7 +410,9 @@ export default function InvoiceDocument({
 
       <article
         id="tax-invoice-print"
-        data-invoice-number={invoice.invoiceNumber}
+        data-invoice-number={
+          invoice.invoiceNumber
+        }
         className="invoice-sheet"
       >
         <div className="invoice-frame">
@@ -381,13 +424,21 @@ export default function InvoiceDocument({
 
           <div className="invoice-two-column invoice-border-bottom">
             <div className="invoice-cell invoice-border-right">
-              <strong>Date of Invoice:</strong>{' '}
-              {displayValue(invoice.invoiceDate)}
+              <strong>
+                Date of Invoice:
+              </strong>{' '}
+              {formatInvoiceDate(
+                invoice.invoiceDate
+              )}
             </div>
 
             <div className="invoice-cell">
-              <strong>Tax Invoice No.:</strong>{' '}
-              {displayValue(invoice.invoiceNumber)}
+              <strong>
+                Tax Invoice No.:
+              </strong>{' '}
+              {displayValue(
+                invoice.invoiceNumber
+              )}
             </div>
           </div>
 
@@ -400,22 +451,30 @@ export default function InvoiceDocument({
               <div className="invoice-party-content">
                 <p>
                   <strong>TIN:</strong>{' '}
-                  {displayValue(invoice.supplierTin)}
+                  {displayValue(
+                    invoice.supplierTin
+                  )}
                 </p>
 
                 <p>
                   <strong>Name:</strong>{' '}
-                  {displayValue(invoice.supplierName)}
+                  {displayValue(
+                    invoice.supplierName
+                  )}
                 </p>
 
                 <p className="invoice-address">
                   <strong>Address:</strong>{' '}
-                  {displayValue(invoice.supplierAddress)}
+                  {displayValue(
+                    invoice.supplierAddress
+                  )}
                 </p>
 
                 <p>
                   <strong>Telephone:</strong>{' '}
-                  {displayValue(invoice.supplierTelephone)}
+                  {displayValue(
+                    invoice.supplierTelephone
+                  )}
                 </p>
               </div>
             </section>
@@ -428,22 +487,30 @@ export default function InvoiceDocument({
               <div className="invoice-party-content">
                 <p>
                   <strong>TIN:</strong>{' '}
-                  {displayValue(invoice.purchaserTin)}
+                  {displayValue(
+                    invoice.purchaserTin
+                  )}
                 </p>
 
                 <p>
                   <strong>Name:</strong>{' '}
-                  {displayValue(invoice.purchaserName)}
+                  {displayValue(
+                    invoice.purchaserName
+                  )}
                 </p>
 
                 <p className="invoice-address">
                   <strong>Address:</strong>{' '}
-                  {displayValue(invoice.purchaserAddress)}
+                  {displayValue(
+                    invoice.purchaserAddress
+                  )}
                 </p>
 
                 <p>
                   <strong>Telephone:</strong>{' '}
-                  {displayValue(invoice.purchaserTelephone)}
+                  {displayValue(
+                    invoice.purchaserTelephone
+                  )}
                 </p>
               </div>
             </section>
@@ -451,19 +518,31 @@ export default function InvoiceDocument({
 
           <div className="invoice-two-column invoice-border-bottom">
             <div className="invoice-cell invoice-border-right">
-              <strong>Date of Delivery:</strong>{' '}
-              {displayValue(invoice.deliveryDate)}
+              <strong>
+                Date of Delivery:
+              </strong>{' '}
+              {formatInvoiceDate(
+                invoice.deliveryDate
+              )}
             </div>
 
             <div className="invoice-cell">
-              <strong>Place of Supply:</strong>{' '}
-              {displayValue(invoice.placeOfSupply)}
+              <strong>
+                Place of Supply:
+              </strong>{' '}
+              {displayValue(
+                invoice.placeOfSupply
+              )}
             </div>
           </div>
 
           <div className="invoice-additional">
-            <strong>Additional Information:</strong>{' '}
-            {displayValue(invoice.additionalInformation)}
+            <strong>
+              Additional Information:
+            </strong>{' '}
+            {displayValue(
+              invoice.additionalInformation
+            )}
           </div>
 
           <table className="invoice-table">
@@ -472,18 +551,23 @@ export default function InvoiceDocument({
                 <th className="invoice-number-column">
                   No.
                 </th>
+
                 <th className="invoice-reference-column">
-                  Reference
+                  PO/SOD NO
                 </th>
+
                 <th className="invoice-description-column">
                   Description of Goods or Services
                 </th>
+
                 <th className="invoice-quantity-column">
                   Quantity
                 </th>
+
                 <th className="invoice-unit-price-column">
                   Unit Price
                 </th>
+
                 <th className="invoice-amount-column">
                   Amount Excluding VAT (USD)
                 </th>
@@ -492,29 +576,41 @@ export default function InvoiceDocument({
 
             <tbody>
               {items.map((item, index) => (
-                <tr key={item.id || index}>
+                <tr
+                  key={item.id || index}
+                >
                   <td className="invoice-number-column">
                     {index + 1}
                   </td>
 
                   <td className="invoice-reference-column">
-                    {displayValue(item.reference)}
+                    {displayValue(
+                      item.reference
+                    )}
                   </td>
 
                   <td className="invoice-description-column">
-                    {displayValue(item.description)}
+                    {displayValue(
+                      item.description
+                    )}
                   </td>
 
                   <td className="invoice-quantity-column">
-                    {displayValue(item.quantity)}
+                    {displayValue(
+                      item.quantity
+                    )}
                   </td>
 
                   <td className="invoice-unit-price-column">
-                    {displayValue(item.unitPrice)}
+                    {displayValue(
+                      item.unitPrice
+                    )}
                   </td>
 
                   <td className="invoice-amount-column">
-                    {displayValue(item.amountExcludingVat)}
+                    {displayValue(
+                      item.amountExcludingVat
+                    )}
                   </td>
                 </tr>
               ))}
@@ -524,16 +620,26 @@ export default function InvoiceDocument({
           <div className="invoice-bottom">
             <div className="invoice-words-panel">
               <div className="invoice-words">
-                <strong>Total Amount in Words:</strong>
+                <strong>
+                  Total Amount in Words:
+                </strong>
 
-                <div style={{ marginTop: 6 }}>
-                  {displayValue(invoice.totalAmountInWords)}
+                <div
+                  style={{ marginTop: 6 }}
+                >
+                  {displayValue(
+                    invoice.totalAmountInWords
+                  )}
                 </div>
               </div>
 
               <div className="invoice-payment">
-                <strong>Mode of Payment:</strong>{' '}
-                {displayValue(invoice.modeOfPayment)}
+                <strong>
+                  Mode of Payment:
+                </strong>{' '}
+                {displayValue(
+                  invoice.modeOfPayment
+                )}
               </div>
             </div>
 
@@ -544,20 +650,31 @@ export default function InvoiceDocument({
                 </div>
 
                 <div className="invoice-total-value">
-                  {displayValue(invoice.totalValueOfSupply)}
+                  {displayValue(
+                    invoice.totalValueOfSupply
+                  )}
                 </div>
               </div>
 
               <div className="invoice-total-row">
                 <div className="invoice-total-label">
                   VAT Amount
-                  <span style={{ marginLeft: 4, fontWeight: 700 }}>
-                    (Total Value of Supply 18%)
+
+                  <span
+                    style={{
+                      marginLeft: 4,
+                      fontWeight: 700,
+                    }}
+                  >
+                    (Total Value of Supply
+                    18%)
                   </span>
                 </div>
 
                 <div className="invoice-total-value">
-                  {displayValue(invoice.vatAmount)}
+                  {displayValue(
+                    invoice.vatAmount
+                  )}
                 </div>
               </div>
 

@@ -24,6 +24,11 @@ import {
   TaxInvoiceSearchResponse,
 } from '../../types/invoice';
 
+
+import {
+  formatInvoiceDate,
+} from '../../utils/invoiceCalculations';
+
 const emptyFilters: TaxInvoiceSearchFilters = {
   invoiceNumber: '',
   supplierName: '',
@@ -283,7 +288,7 @@ export default function InvoiceSearchPage() {
                       {invoice.invoiceNumber}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {invoice.invoiceDate || '—'}
+                      {formatInvoiceDate(invoice.invoiceDate) || '—'}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {invoice.supplierName || '—'}
@@ -431,8 +436,10 @@ function FilterDate({
       <input
         type="date"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
+        onChange={(event) =>
+          onChange(event.target.value)
+        }
+        className="mt-1 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
       />
     </label>
   );

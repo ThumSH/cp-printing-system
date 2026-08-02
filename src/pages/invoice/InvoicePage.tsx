@@ -26,6 +26,10 @@ import type {
   Customer,
 } from '../../types/customer';
 
+import {
+  formatInvoiceDate,
+} from '../../utils/invoiceCalculations';
+
 export default function InvoicePage() {
 
   const [customers, setCustomers] =
@@ -139,7 +143,7 @@ const [loadingCustomers, setLoadingCustomers] =
           </div>
 
           <p className="mt-1 text-sm text-slate-500">
-            Create and save a fully manual Tax Invoice report.
+            Create Tax Invoices with automatic line amounts, totals, and VAT.
           </p>
         </div>
 
@@ -238,7 +242,7 @@ const [loadingCustomers, setLoadingCustomers] =
                       {invoice.invoiceNumber}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {invoice.invoiceDate || '—'}
+                      {formatInvoiceDate(invoice.invoiceDate) || '—'}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {invoice.supplierName || '—'}
