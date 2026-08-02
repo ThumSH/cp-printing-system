@@ -26,6 +26,7 @@ export interface TaxInvoicePayload {
   placeOfSupply: string;
   additionalInformation: string;
 
+  vatPercentage: string;
   totalValueOfSupply: string;
   vatAmount: string;
   totalAmountIncludingVat: string;
@@ -85,19 +86,23 @@ export interface InvoiceSecurityStatus {
 
 const getLocalDateString = (): string => {
   const now = new Date();
+
   const local = new Date(
-    now.getTime() - now.getTimezoneOffset() * 60_000
+    now.getTime() -
+      now.getTimezoneOffset() * 60_000
   );
+
   return local.toISOString().slice(0, 10);
 };
 
-export const createBlankInvoiceItem = (): TaxInvoiceItemInput => ({
-  reference: '',
-  description: '',
-  quantity: '',
-  unitPrice: '',
-  amountExcludingVat: '',
-});
+export const createBlankInvoiceItem =
+  (): TaxInvoiceItemInput => ({
+    reference: '',
+    description: '',
+    quantity: '',
+    unitPrice: '',
+    amountExcludingVat: '',
+  });
 
 export const DEFAULT_SUPPLIER = {
   tin: '174996555',
@@ -113,10 +118,10 @@ export const createBlankInvoice = (
   invoiceNumber: '',
   invoiceDate: getLocalDateString(),
 
- supplierTin: DEFAULT_SUPPLIER.tin,
-supplierName: DEFAULT_SUPPLIER.name,
-supplierAddress: DEFAULT_SUPPLIER.address,
-supplierTelephone: DEFAULT_SUPPLIER.telephone,
+  supplierTin: DEFAULT_SUPPLIER.tin,
+  supplierName: DEFAULT_SUPPLIER.name,
+  supplierAddress: DEFAULT_SUPPLIER.address,
+  supplierTelephone: DEFAULT_SUPPLIER.telephone,
 
   purchaserTin: '',
   purchaserName: '',
@@ -127,9 +132,10 @@ supplierTelephone: DEFAULT_SUPPLIER.telephone,
   placeOfSupply: '',
   additionalInformation: '',
 
-  totalValueOfSupply: '',
-  vatAmount: '',
-  totalAmountIncludingVat: '',
+  vatPercentage: '18',
+  totalValueOfSupply: '0.00',
+  vatAmount: '0',
+  totalAmountIncludingVat: '0.00',
   totalAmountInWords: '',
   modeOfPayment: '',
 
@@ -148,22 +154,39 @@ export const toInvoicePayload = (
   supplierTin: invoice.supplierTin,
   supplierName: invoice.supplierName,
   supplierAddress: invoice.supplierAddress,
-  supplierTelephone: invoice.supplierTelephone,
+  supplierTelephone:
+    invoice.supplierTelephone,
 
   purchaserTin: invoice.purchaserTin,
   purchaserName: invoice.purchaserName,
   purchaserAddress: invoice.purchaserAddress,
-  purchaserTelephone: invoice.purchaserTelephone,
+  purchaserTelephone:
+    invoice.purchaserTelephone,
 
   deliveryDate: invoice.deliveryDate,
   placeOfSupply: invoice.placeOfSupply,
-  additionalInformation: invoice.additionalInformation,
+  additionalInformation:
+    invoice.additionalInformation,
 
-  totalValueOfSupply: invoice.totalValueOfSupply,
+  // Existing invoices created before this update
+  // safely use the former default VAT rate.
+  vatPercentage:
+    invoice.vatPercentage?.trim() || '18',
+
+  totalValueOfSupply:
+    invoice.totalValueOfSupply,
+
   vatAmount: invoice.vatAmount,
-  totalAmountIncludingVat: invoice.totalAmountIncludingVat,
-  totalAmountInWords: invoice.totalAmountInWords,
+
+  totalAmountIncludingVat:
+    invoice.totalAmountIncludingVat,
+
+  totalAmountInWords:
+    invoice.totalAmountInWords,
+
   modeOfPayment: invoice.modeOfPayment,
 
-  items: invoice.items.map((item) => ({ ...item })),
+  items: invoice.items.map((item) => ({
+    ...item,
+  })),
 });
