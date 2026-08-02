@@ -38,6 +38,7 @@ import InvoicePage from './pages/invoice/InvoicePage';
 import InvoiceSearchPage from './pages/invoice/InvoiceSearchPage';
 import InvoiceDetailPage from './pages/invoice/InvoiceDetailPage';
 import InvoiceSecurityPage from './pages/superadmin/InvoiceSecurityPage';
+import CustomerRegistrationPage from './pages/admin/CustomerRegistrationPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -168,6 +169,12 @@ function App() {
             <Route path="search" element={
               <RoleRoute allowedRoles={['Admin']}>
                 <ApprovalSearch />
+              </RoleRoute>
+            } />
+
+              <Route path="customers" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <CustomerRegistrationPage />
               </RoleRoute>
             } />
           </Route>

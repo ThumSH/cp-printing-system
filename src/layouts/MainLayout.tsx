@@ -64,6 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
       { name: 'Users', href: '/admin/users', icon: Users, roles: ['Admin'] },
       { name: 'Activity Log', href: '/admin/activity-log', icon: Activity, roles: ['Admin'] },
       { name: 'Colour Master', href: '/admin/colours', icon: Palette, roles: ['Admin', 'Developer'] },
+      { name: 'Customers',href: '/admin/customers',icon: Users,roles: ['Admin'] },
     ],
   },
   {

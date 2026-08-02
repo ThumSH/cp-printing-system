@@ -27,10 +27,24 @@ import {
   TaxInvoicePayload,
   toInvoicePayload,
 } from '../../types/invoice';
+import {
+  getCustomers,
+} from '../../services/customerService';
+
+import type {
+  Customer,
+} from '../../types/customer';
 
 type PasswordAction = 'edit' | 'delete' | null;
 
 export default function InvoiceDetailPage() {
+
+  const [customers, setCustomers] =
+  useState<Customer[]>([]);
+
+const [loadingCustomers, setLoadingCustomers] =
+  useState(true);
+
   const { id = '' } = useParams();
   const navigate = useNavigate();
 
@@ -73,9 +87,29 @@ export default function InvoiceDetailPage() {
     }
   };
 
+  const loadCustomers = async () => {
+  setLoadingCustomers(true);
+
+  try {
+    setCustomers(await getCustomers());
+  } catch (caught) {
+    setError(
+      caught instanceof Error
+        ? caught.message
+        : 'Failed to load registered customers.'
+    );
+  } finally {
+    setLoadingCustomers(false);
+  }
+};
+
   useEffect(() => {
     void load();
   }, [id]);
+
+  useEffect(() => {
+  void loadCustomers();
+}, []);
 
   const confirmPassword = async (
     password: string
@@ -267,14 +301,16 @@ export default function InvoiceDetailPage() {
       )}
 
       {editing ? (
-        <InvoiceForm
-          value={draft}
-          onChange={setDraft}
-          onSubmit={saveUpdate}
-          submitting={saving}
-          submitLabel="Update Tax Invoice"
-          onCancel={cancelEditing}
-        />
+       <InvoiceForm
+        value={draft}
+        onChange={setDraft}
+        onSubmit={saveUpdate}
+        customers={customers}
+        customersLoading={loadingCustomers}
+        submitting={saving}
+        submitLabel="Update Tax Invoice"
+        onCancel={cancelEditing}
+      />
       ) : (
         <InvoiceDocument invoice={invoice} />
       )}

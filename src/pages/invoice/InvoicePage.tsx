@@ -18,7 +18,22 @@ import {
   createBlankInvoice,
 } from '../../types/invoice';
 
+import {
+  getCustomers,
+} from '../../services/customerService';
+
+import type {
+  Customer,
+} from '../../types/customer';
+
 export default function InvoicePage() {
+
+  const [customers, setCustomers] =
+  useState<Customer[]>([]);
+
+const [loadingCustomers, setLoadingCustomers] =
+  useState(true);
+
   const [form, setForm] =
     useState<TaxInvoicePayload>(
       createBlankInvoice(8)
@@ -50,8 +65,25 @@ export default function InvoicePage() {
     }
   };
 
+  const loadCustomers = async () => {
+  setLoadingCustomers(true);
+
+  try {
+    setCustomers(await getCustomers());
+  } catch (caught) {
+    setError(
+      caught instanceof Error
+        ? caught.message
+        : 'Failed to load registered customers.'
+    );
+  } finally {
+    setLoadingCustomers(false);
+  }
+};
+
   useEffect(() => {
     void loadRecent();
+    void loadCustomers();
   }, []);
 
   const submit = async () => {
@@ -136,6 +168,8 @@ export default function InvoicePage() {
         value={form}
         onChange={setForm}
         onSubmit={submit}
+        customers={customers}
+        customersLoading={loadingCustomers}
         submitting={saving}
       />
 

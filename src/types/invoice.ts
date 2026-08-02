@@ -99,16 +99,24 @@ export const createBlankInvoiceItem = (): TaxInvoiceItemInput => ({
   amountExcludingVat: '',
 });
 
+export const DEFAULT_SUPPLIER = {
+  tin: '174996555',
+  name: 'COLOUR PLUS PRINTING SYSTEMS (PVT) LTD',
+  address:
+    'NO 564, ATHURUGIYARA ROAD, KOTTAWA, SRI LANKA',
+  telephone: '0112781525',
+} as const;
+
 export const createBlankInvoice = (
   rowCount = 8
 ): TaxInvoicePayload => ({
   invoiceNumber: '',
   invoiceDate: getLocalDateString(),
 
-  supplierTin: '',
-  supplierName: '',
-  supplierAddress: '',
-  supplierTelephone: '',
+ supplierTin: DEFAULT_SUPPLIER.tin,
+supplierName: DEFAULT_SUPPLIER.name,
+supplierAddress: DEFAULT_SUPPLIER.address,
+supplierTelephone: DEFAULT_SUPPLIER.telephone,
 
   purchaserTin: '',
   purchaserName: '',

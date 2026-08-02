@@ -10,11 +10,14 @@ import {
   TaxInvoicePayload,
   createBlankInvoiceItem,
 } from '../../types/invoice';
+import type { Customer } from '../../types/customer';
 
 interface InvoiceFormProps {
-  value: TaxInvoicePayload;
+   value: TaxInvoicePayload;
   onChange: (value: TaxInvoicePayload) => void;
   onSubmit: () => Promise<void> | void;
+  customers?: Customer[];
+  customersLoading?: boolean;
   submitting?: boolean;
   submitLabel?: string;
   onCancel?: () => void;
@@ -57,6 +60,8 @@ export default function InvoiceForm({
   value,
   onChange,
   onSubmit,
+  customers = [],
+  customersLoading = false,
   submitting = false,
   submitLabel = 'Save Tax Invoice',
   onCancel,
@@ -70,6 +75,63 @@ export default function InvoiceForm({
       [field]: fieldValue,
     });
   };
+
+  const matchingCustomer =
+  customers.find(
+    (customer) =>
+      customer.customerName ===
+        value.purchaserName &&
+      customer.tinNumber ===
+        value.purchaserTin
+  ) ??
+  customers.find(
+    (customer) =>
+      customer.customerName ===
+      value.purchaserName
+  );
+
+const purchaserSelectValue =
+  matchingCustomer?.id ??
+  (value.purchaserName.trim()
+    ? '__existing__'
+    : '');
+
+const selectPurchaser = (
+  customerId: string
+) => {
+  if (customerId === '__existing__') {
+    return;
+  }
+
+  if (!customerId) {
+    onChange({
+      ...value,
+      purchaserName: '',
+      purchaserTin: '',
+      purchaserAddress: '',
+      purchaserTelephone: '',
+    });
+
+    return;
+  }
+
+  const customer = customers.find(
+    (item) => item.id === customerId
+  );
+
+  if (!customer) {
+    return;
+  }
+
+  onChange({
+    ...value,
+    purchaserName: customer.customerName,
+    purchaserTin: customer.tinNumber,
+    purchaserAddress: customer.address,
+    purchaserTelephone:
+      customer.telephoneNumber,
+  });
+};
 
   const updateItem = (
     index: number,
@@ -220,15 +282,52 @@ export default function InvoiceForm({
                 }
               />
 
-              <div className="sm:col-span-2">
-                <LabeledField
-                  label="Purchaser's Name"
-                  value={value.purchaserName}
-                  onChange={(next) =>
-                    updateField('purchaserName', next)
-                  }
-                />
-              </div>
+              <label className="block space-y-1 sm:col-span-2">
+  <span className={labelClass}>
+    Purchaser's Name
+  </span>
+
+  <select
+    value={purchaserSelectValue}
+    onChange={(event) =>
+      selectPurchaser(event.target.value)
+    }
+    disabled={customersLoading}
+    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-wait disabled:bg-slate-50"
+  >
+    <option value="">
+      {customersLoading
+        ? 'Loading registered customers...'
+        : 'Select a registered customer'}
+    </option>
+
+    {purchaserSelectValue ===
+      '__existing__' && (
+      <option value="__existing__">
+        Existing purchaser: {value.purchaserName}
+      </option>
+    )}
+
+    {customers.map((customer) => (
+      <option
+        key={customer.id}
+        value={customer.id}
+      >
+        {customer.customerName}
+      </option>
+    ))}
+  </select>
+
+  {!customersLoading &&
+    customers.length === 0 &&
+    !value.purchaserName && (
+      <span className="block text-xs text-amber-600">
+        No customers are registered yet.
+        Register a customer from the Admin
+        section first.
+      </span>
+    )}
+</label>
 
               <label className="block space-y-1 sm:col-span-2">
                 <span className={labelClass}>
