@@ -91,7 +91,7 @@ export const recalculateInvoice = (
     items,
     vatPercentage: String(vatPercentage),
     totalValueOfSupply: formatMoney(totalValue),
-    vatAmount: String(vatAmount),
+    vatAmount: formatMoney(vatAmount),
     totalAmountIncludingVat:
       formatMoney(totalIncludingVat),
   };

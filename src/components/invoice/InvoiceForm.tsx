@@ -49,6 +49,9 @@ const calculatedInputClass =
 const labelClass =
   'block text-[10px] font-bold uppercase tracking-wider text-slate-500';
 
+const FIXED_MODE_OF_PAYMENT =
+  'CREDIT - NET 30 DAYS';
+
 const normaliseCurrencyAmount = (
   value: string
 ): string =>
@@ -76,12 +79,26 @@ const formatCurrencyAmount = (
   });
 };
 
-const convertDollarWordsToRupees = (
+const removeCurrencyUnitWords = (
   words: string
 ): string =>
   words
-    .replace(/\bDOLLARS\b/g, 'RUPEES')
-    .replace(/\bDOLLAR\b/g, 'RUPEE');
+    .replace(/\bDOLLARS?\b/g, '')
+    .replace(/\bRUPEES?\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const formatMoneyDisplay = (
+  value: string
+): string => {
+  const parsed = Number(
+    value.replace(/,/g, '').trim()
+  );
+
+  return Number.isFinite(parsed)
+    ? parsed.toFixed(2)
+    : value;
+};
 
 function LabeledField({
   label,
@@ -215,6 +232,32 @@ export default function InvoiceForm({
   }, [
     value.totalAmountIncludingVat,
     value.totalAmountInWords,
+  ]);
+
+  useEffect(() => {
+    const fixedPlaceOfSupply =
+      value.supplierName;
+
+    if (
+      value.placeOfSupply ===
+        fixedPlaceOfSupply &&
+      value.modeOfPayment ===
+        FIXED_MODE_OF_PAYMENT
+    ) {
+      return;
+    }
+
+    onChange({
+      ...value,
+      placeOfSupply:
+        fixedPlaceOfSupply,
+      modeOfPayment:
+        FIXED_MODE_OF_PAYMENT,
+    });
+  }, [
+    value.supplierName,
+    value.placeOfSupply,
+    value.modeOfPayment,
   ]);
 
   const updateField = (
@@ -421,11 +464,11 @@ export default function InvoiceForm({
   };
 
   const convertTotalToWords = () => {
-    const usdWords = amountToWords(
+    const rawUsdWords = amountToWords(
       value.totalAmountIncludingVat
     );
 
-    if (!usdWords) {
+    if (!rawUsdWords) {
       return;
     }
 
@@ -450,14 +493,11 @@ export default function InvoiceForm({
       return;
     }
 
-    const rupeeWords =
-      convertDollarWordsToRupees(
-        amountToWords(
-          normalisedRupeeAmount
-        )
-      );
+    const rawLkrWords = amountToWords(
+      normalisedRupeeAmount
+    );
 
-    if (!rupeeWords) {
+    if (!rawLkrWords) {
       setRupeeError(
         'The rupee amount could not be converted.'
       );
@@ -465,11 +505,21 @@ export default function InvoiceForm({
       return;
     }
 
+    const usdWords =
+      removeCurrencyUnitWords(
+        rawUsdWords
+      );
+
+    const lkrWords =
+      removeCurrencyUnitWords(
+        rawLkrWords
+      );
+
     updateField(
       'totalAmountInWords',
       [
         `USD: ${usdWords}`,
-        `LKR: ${rupeeWords}`,
+        `LKR: ${lkrWords}`,
       ].join('\n')
     );
 
@@ -804,16 +854,18 @@ export default function InvoiceForm({
               }
             />
 
-            <LabeledField
-              label="Place of Supply"
-              value={value.placeOfSupply}
-              onChange={(next) =>
-                updateField(
-                  'placeOfSupply',
-                  next
-                )
-              }
-            />
+            <label className="block space-y-1">
+              <span className={labelClass}>
+                Place of Supply
+              </span>
+
+              <input
+                value={value.supplierName}
+                readOnly
+                tabIndex={-1}
+                className="w-full cursor-default rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+              />
+            </label>
 
             <label className="block space-y-1 md:col-span-2">
               <span className={labelClass}>
@@ -1007,16 +1059,18 @@ export default function InvoiceForm({
               </label>
 
               <div className="mt-3">
-                <LabeledField
-                  label="Mode of Payment"
-                  value={value.modeOfPayment}
-                  onChange={(next) =>
-                    updateField(
-                      'modeOfPayment',
-                      next
-                    )
-                  }
-                />
+                <label className="block space-y-1">
+                  <span className={labelClass}>
+                    Mode of Payment
+                  </span>
+
+                  <input
+                    value={FIXED_MODE_OF_PAYMENT}
+                    readOnly
+                    tabIndex={-1}
+                    className="w-full cursor-default rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+                  />
+                </label>
               </div>
             </div>
 
@@ -1047,7 +1101,9 @@ export default function InvoiceForm({
 
                 <div className="border-l border-slate-300 bg-slate-50 p-2">
                   <input
-                    value={value.vatAmount}
+                    value={formatMoneyDisplay(
+                      value.vatAmount
+                    )}
                     readOnly
                     tabIndex={-1}
                     className="w-full bg-transparent px-1 py-1 text-right text-sm font-bold text-slate-800 outline-none"
@@ -1227,9 +1283,9 @@ export default function InvoiceForm({
                 label={`VAT Amount (${
                   value.vatPercentage || '18'
                 }%)`}
-                value={
+                value={formatMoneyDisplay(
                   value.vatAmount || '0'
-                }
+                )}
               />
 
               <div className="sm:col-span-2">

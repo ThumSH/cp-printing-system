@@ -12,6 +12,29 @@ const displayValue = (
   value?: string | null
 ): string => value?.trim() || '\u00A0';
 
+const FIXED_MODE_OF_PAYMENT =
+  'CREDIT - NET 30 DAYS';
+
+const formatMoneyValue = (
+  value?: string | null
+): string => {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return '\u00A0';
+  }
+
+  const parsed = Number(
+    trimmed.replace(/,/g, '')
+  );
+
+  if (!Number.isFinite(parsed)) {
+    return trimmed;
+  }
+
+  return parsed.toFixed(2);
+};
+
 /**
  * Dates are stored internally as yyyy-MM-dd so the
  * browser calendar, backend, searching and sorting
@@ -531,7 +554,7 @@ export default function InvoiceDocument({
                 Place of Supply:
               </strong>{' '}
               {displayValue(
-                invoice.placeOfSupply
+                invoice.supplierName
               )}
             </div>
           </div>
@@ -638,7 +661,8 @@ export default function InvoiceDocument({
                   Mode of Payment:
                 </strong>{' '}
                 {displayValue(
-                  invoice.modeOfPayment
+                  invoice.modeOfPayment ||
+                    FIXED_MODE_OF_PAYMENT
                 )}
               </div>
             </div>
@@ -666,13 +690,13 @@ export default function InvoiceDocument({
                       fontWeight: 700,
                     }}
                   >
-                    (Total Value of Supply
-                    18%)
+                    (Total Value of Supply{' '}
+                    {invoice.vatPercentage?.trim() || '18'}%)
                   </span>
                 </div>
 
                 <div className="invoice-total-value">
-                  {displayValue(
+                  {formatMoneyValue(
                     invoice.vatAmount
                   )}
                 </div>
