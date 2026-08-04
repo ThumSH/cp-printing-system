@@ -1,5 +1,6 @@
 import {
   FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useState,
 } from 'react';
@@ -141,6 +142,40 @@ function CalendarField({
   );
 }
 
+function ReviewItem({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={
+        highlight
+          ? 'rounded-lg border border-blue-200 bg-blue-50 px-3 py-2'
+          : 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2'
+      }
+    >
+      <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+        {label}
+      </p>
+
+      <p
+        className={
+          highlight
+            ? 'mt-1 text-base font-black text-blue-800'
+            : 'mt-1 text-sm font-bold text-slate-800'
+        }
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
 export default function InvoiceForm({
   value,
   onChange,
@@ -165,6 +200,9 @@ export default function InvoiceForm({
 
   const [rupeeError, setRupeeError] =
     useState('');
+
+  const [reviewModalOpen, setReviewModalOpen] =
+    useState(false);
 
   useEffect(() => {
     if (
@@ -444,10 +482,89 @@ export default function InvoiceForm({
     setRupeeError('');
   };
 
-  const handleSubmit = async (
+  const handleFormKeyDown = (
+    event: ReactKeyboardEvent<HTMLFormElement>
+  ) => {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+
+    // Textareas keep their normal Enter behaviour so
+    // the user can add another line without submitting.
+    if (target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
+    // Buttons keep their normal keyboard behaviour.
+    if (target instanceof HTMLButtonElement) {
+      return;
+    }
+
+    if (
+      !(
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLSelectElement
+      )
+    ) {
+      return;
+    }
+
+    if (
+      target instanceof HTMLInputElement &&
+      (target.readOnly || target.disabled)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const editableFields = (
+      Array.from(
+        event.currentTarget.querySelectorAll(
+          [
+            'input:not([type="hidden"]):not([disabled]):not([readonly])',
+            'select:not([disabled])',
+            'textarea:not([disabled]):not([readonly])',
+          ].join(',')
+        )
+      ) as HTMLElement[]
+    ).filter(
+      (field) =>
+        field.tabIndex !== -1 &&
+        field.offsetParent !== null
+    );
+
+    const currentIndex =
+      editableFields.indexOf(target);
+
+    const nextField =
+      editableFields[currentIndex + 1];
+
+    nextField?.focus();
+
+    if (
+      nextField instanceof HTMLInputElement &&
+      nextField.type !== 'date'
+    ) {
+      nextField.select();
+    }
+  };
+
+  const handleSubmit = (
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
+    setReviewModalOpen(true);
+  };
+
+  const confirmSubmission = async () => {
+    setReviewModalOpen(false);
     await onSubmit();
   };
 
@@ -455,6 +572,7 @@ export default function InvoiceForm({
     <>
       <form
         onSubmit={handleSubmit}
+        onKeyDown={handleFormKeyDown}
         className="space-y-5"
       >
         <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
@@ -1029,6 +1147,140 @@ export default function InvoiceForm({
           </button>
         </div>
       </form>
+
+      {reviewModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          onKeyDown={(event) => {
+            // Confirmation must be an intentional button
+            // click, not another accidental Enter press.
+            if (event.key === 'Enter') {
+              event.preventDefault();
+            }
+          }}
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-2xl">
+            <header className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <h2 className="font-black text-slate-900">
+                  Recheck Tax Invoice
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Please verify the invoice details,
+                  purchaser, amounts, VAT, dates, and
+                  total before saving.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setReviewModalOpen(false)
+                }
+                disabled={submitting}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+                aria-label="Close review"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="grid gap-3 p-5 sm:grid-cols-2">
+              <ReviewItem
+                label="Invoice No."
+                value={
+                  value.invoiceNumber || '—'
+                }
+              />
+
+              <ReviewItem
+                label="Invoice Date"
+                value={
+                  value.invoiceDate || '—'
+                }
+              />
+
+              <ReviewItem
+                label="Purchaser"
+                value={
+                  value.purchaserName || '—'
+                }
+              />
+
+              <ReviewItem
+                label="Delivery Date"
+                value={
+                  value.deliveryDate || '—'
+                }
+              />
+
+              <ReviewItem
+                label="Total Value of Supply"
+                value={
+                  value.totalValueOfSupply ||
+                  '0.00'
+                }
+              />
+
+              <ReviewItem
+                label={`VAT Amount (${
+                  value.vatPercentage || '18'
+                }%)`}
+                value={
+                  value.vatAmount || '0'
+                }
+              />
+
+              <div className="sm:col-span-2">
+                <ReviewItem
+                  label="Total Amount Including VAT"
+                  value={
+                    value.totalAmountIncludingVat ||
+                    '0.00'
+                  }
+                  highlight
+                />
+              </div>
+
+              <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                Saving will write this invoice to the
+                database. Select Back to Invoice to
+                make corrections.
+              </div>
+            </div>
+
+            <footer className="flex flex-wrap justify-end gap-3 border-t border-slate-100 px-5 py-4">
+              <button
+                type="button"
+                autoFocus
+                onClick={() =>
+                  setReviewModalOpen(false)
+                }
+                disabled={submitting}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Back to Invoice
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void confirmSubmission()
+                }
+                disabled={submitting}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+
+                {submitting
+                  ? 'Saving...'
+                  : 'Confirm & Save'}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {vatModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
