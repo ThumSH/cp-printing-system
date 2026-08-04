@@ -79,3 +79,24 @@ export async function createCustomer(
 
   return response.json();
 }
+
+export async function updateCustomer(
+  id: string,
+  payload: CustomerPayload
+): Promise<Customer> {
+  const response = await fetch(
+    `${API.CUSTOMERS}/${encodeURIComponent(id)}`,
+    {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    }
+  );
+
+  await ensureOk(
+    response,
+    'Failed to update the customer.'
+  );
+
+  return response.json();
+}

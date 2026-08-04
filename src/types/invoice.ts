@@ -112,6 +112,9 @@ export const DEFAULT_SUPPLIER = {
   telephone: '0112781525',
 } as const;
 
+export const DEFAULT_MODE_OF_PAYMENT =
+  'CREDIT - NET 30 DAYS';
+
 export const createBlankInvoice = (
   rowCount = 8
 ): TaxInvoicePayload => ({
@@ -129,15 +132,15 @@ export const createBlankInvoice = (
   purchaserTelephone: '',
 
   deliveryDate: '',
-  placeOfSupply: '',
+  placeOfSupply: DEFAULT_SUPPLIER.name,
   additionalInformation: '',
 
   vatPercentage: '18',
   totalValueOfSupply: '0.00',
-  vatAmount: '0',
+  vatAmount: '0.00',
   totalAmountIncludingVat: '0.00',
   totalAmountInWords: '',
-  modeOfPayment: '',
+  modeOfPayment: DEFAULT_MODE_OF_PAYMENT,
 
   items: Array.from(
     { length: rowCount },

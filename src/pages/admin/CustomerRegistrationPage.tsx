@@ -7,6 +7,7 @@ import {
 import {
   CheckCircle2,
   Loader2,
+  PencilLine,
   RefreshCw,
   UserRoundPlus,
   X,
@@ -15,6 +16,7 @@ import {
 import {
   createCustomer,
   getCustomers,
+  updateCustomer,
 } from '../../services/customerService';
 
 import {
@@ -29,6 +31,30 @@ const inputClass =
 const labelClass =
   'text-[10px] font-bold uppercase tracking-wider text-slate-500';
 
+const normalisePayload = (
+  form: CustomerPayload
+): CustomerPayload => ({
+  customerName:
+    form.customerName.trim(),
+
+  customerCode:
+    form.customerCode
+      .trim()
+      .toUpperCase(),
+
+  address:
+    form.address.trim(),
+
+  tinNumber:
+    form.tinNumber.trim(),
+
+  telephoneNumber:
+    form.telephoneNumber.trim(),
+
+  email:
+    form.email.trim(),
+});
+
 export default function CustomerRegistrationPage() {
   const [form, setForm] =
     useState<CustomerPayload>(
@@ -37,6 +63,9 @@ export default function CustomerRegistrationPage() {
 
   const [customers, setCustomers] =
     useState<Customer[]>([]);
+
+  const [editingCustomerId, setEditingCustomerId] =
+    useState<string | null>(null);
 
   const [loadingCustomers, setLoadingCustomers] =
     useState(true);
@@ -52,6 +81,9 @@ export default function CustomerRegistrationPage() {
 
   const [success, setSuccess] =
     useState('');
+
+  const isEditing =
+    editingCustomerId !== null;
 
   const loadCustomers = async () => {
     setLoadingCustomers(true);
@@ -83,6 +115,30 @@ export default function CustomerRegistrationPage() {
     }));
   };
 
+  const validateForm = (): string | null => {
+    if (!form.customerName.trim()) {
+      return 'Customer name is required.';
+    }
+
+    if (!form.customerCode.trim()) {
+      return 'Customer code is required.';
+    }
+
+    if (!form.address.trim()) {
+      return 'Customer address is required.';
+    }
+
+    if (!form.tinNumber.trim()) {
+      return 'TIN number is required.';
+    }
+
+    if (!form.telephoneNumber.trim()) {
+      return 'Telephone number is required.';
+    }
+
+    return null;
+  };
+
   const openReview = (
     event: FormEvent<HTMLFormElement>
   ) => {
@@ -91,32 +147,56 @@ export default function CustomerRegistrationPage() {
     setError('');
     setSuccess('');
 
-    if (!form.customerName.trim()) {
-      setError('Customer name is required.');
-      return;
-    }
+    const validationError =
+      validateForm();
 
-    if (!form.customerCode.trim()) {
-      setError('Customer code is required.');
-      return;
-    }
-
-    if (!form.address.trim()) {
-      setError('Customer address is required.');
-      return;
-    }
-
-    if (!form.tinNumber.trim()) {
-      setError('TIN number is required.');
-      return;
-    }
-
-    if (!form.telephoneNumber.trim()) {
-      setError('Telephone number is required.');
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     setReviewOpen(true);
+  };
+
+  const resetForm = () => {
+    setForm(createBlankCustomer());
+    setEditingCustomerId(null);
+    setReviewOpen(false);
+    setError('');
+  };
+
+  const startEditing = (
+    customer: Customer
+  ) => {
+    setForm({
+      customerName:
+        customer.customerName,
+
+      customerCode:
+        customer.customerCode,
+
+      address:
+        customer.address,
+
+      tinNumber:
+        customer.tinNumber,
+
+      telephoneNumber:
+        customer.telephoneNumber,
+
+      email:
+        customer.email,
+    });
+
+    setEditingCustomerId(customer.id);
+    setReviewOpen(false);
+    setError('');
+    setSuccess('');
+
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
   };
 
   const confirmSave = async () => {
@@ -124,34 +204,25 @@ export default function CustomerRegistrationPage() {
     setError('');
 
     try {
-      const saved = await createCustomer({
-        ...form,
-        customerName:
-          form.customerName.trim(),
+      const payload =
+        normalisePayload(form);
 
-        customerCode:
-          form.customerCode
-            .trim()
-            .toUpperCase(),
-
-        address:
-          form.address.trim(),
-
-        tinNumber:
-          form.tinNumber.trim(),
-
-        telephoneNumber:
-          form.telephoneNumber.trim(),
-
-        email:
-          form.email.trim(),
-      });
+      const saved =
+        editingCustomerId
+          ? await updateCustomer(
+              editingCustomerId,
+              payload
+            )
+          : await createCustomer(payload);
 
       setSuccess(
-        `${saved.customerCode} - ${saved.customerName} was registered successfully.`
+        editingCustomerId
+          ? `${saved.customerCode} - ${saved.customerName} was updated successfully.`
+          : `${saved.customerCode} - ${saved.customerName} was registered successfully.`
       );
 
       setForm(createBlankCustomer());
+      setEditingCustomerId(null);
       setReviewOpen(false);
 
       await loadCustomers();
@@ -159,7 +230,9 @@ export default function CustomerRegistrationPage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Failed to register the customer.'
+          : isEditing
+            ? 'Failed to update the customer.'
+            : 'Failed to register the customer.'
       );
 
       setReviewOpen(false);
@@ -180,8 +253,8 @@ export default function CustomerRegistrationPage() {
         </div>
 
         <p className="mt-1 text-sm text-slate-500">
-          Register customers used as purchasers in
-          Tax Invoices.
+          Register and update customers used as
+          purchasers in Tax Invoices.
         </p>
       </header>
 
@@ -201,16 +274,32 @@ export default function CustomerRegistrationPage() {
         onSubmit={openReview}
         className="rounded-xl border border-slate-200 bg-white shadow-sm"
       >
-        <div className="border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-black text-slate-800">
-            Customer Details
-          </h2>
+        <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-black text-slate-800">
+              {isEditing
+                ? 'Update Customer Details'
+                : 'Customer Details'}
+            </h2>
 
-          <p className="mt-1 text-xs text-slate-400">
-            Press Enter or select Review Customer.
-            You must confirm the details before they
-            are saved.
-          </p>
+            <p className="mt-1 text-xs text-slate-400">
+              {isEditing
+                ? 'Review the corrected details before updating the customer.'
+                : 'Review the customer details before saving them.'}
+            </p>
+          </div>
+
+          {isEditing && (
+            <button
+              type="button"
+              onClick={resetForm}
+              disabled={saving}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <X className="h-4 w-4" />
+              Cancel Editing
+            </button>
+          )}
         </div>
 
         <div className="grid gap-4 p-5 md:grid-cols-2">
@@ -329,10 +418,14 @@ export default function CustomerRegistrationPage() {
         <div className="flex justify-end border-t border-slate-100 px-5 py-4">
           <button
             type="submit"
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <CheckCircle2 className="h-4 w-4" />
-            Review Customer
+
+            {isEditing
+              ? 'Review Update'
+              : 'Review Customer'}
           </button>
         </div>
       </form>
@@ -367,7 +460,7 @@ export default function CustomerRegistrationPage() {
         </header>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-200 text-sm">
+          <table className="w-full min-w-225 text-sm">
             <thead>
               <tr className="bg-slate-50 text-left">
                 {[
@@ -376,9 +469,10 @@ export default function CustomerRegistrationPage() {
                   'TIN',
                   'Telephone',
                   'Email',
-                ].map((heading) => (
+                  '',
+                ].map((heading, index) => (
                   <th
-                    key={heading}
+                    key={`${heading}-${index}`}
                     className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-500"
                   >
                     {heading}
@@ -413,13 +507,27 @@ export default function CustomerRegistrationPage() {
                     <td className="px-4 py-3 text-slate-600">
                       {customer.email || '—'}
                     </td>
+
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          startEditing(customer)
+                        }
+                        disabled={saving}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                      >
+                        <PencilLine className="h-3.5 w-3.5" />
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 ))}
 
               {loadingCustomers && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-4 py-10 text-center text-slate-400"
                   >
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
@@ -431,7 +539,7 @@ export default function CustomerRegistrationPage() {
                 customers.length === 0 && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-4 py-10 text-center text-slate-400"
                     >
                       No customers have been registered.
@@ -449,12 +557,15 @@ export default function CustomerRegistrationPage() {
             <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
                 <h2 className="font-black text-slate-900">
-                  Recheck Customer Details
+                  {isEditing
+                    ? 'Recheck Customer Update'
+                    : 'Recheck Customer Details'}
                 </h2>
 
                 <p className="mt-1 text-xs text-slate-500">
-                  Confirm that every detail is correct
-                  before saving.
+                  {isEditing
+                    ? 'Confirm that the corrected details are accurate before updating.'
+                    : 'Confirm that every detail is correct before saving.'}
                 </p>
               </div>
 
@@ -462,7 +573,7 @@ export default function CustomerRegistrationPage() {
                 type="button"
                 onClick={() => setReviewOpen(false)}
                 disabled={saving}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -507,7 +618,7 @@ export default function CustomerRegistrationPage() {
                 type="button"
                 onClick={() => setReviewOpen(false)}
                 disabled={saving}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
                 Back to Edit
               </button>
@@ -523,8 +634,12 @@ export default function CustomerRegistrationPage() {
                 )}
 
                 {saving
-                  ? 'Saving...'
-                  : 'Confirm & Save'}
+                  ? isEditing
+                    ? 'Updating...'
+                    : 'Saving...'
+                  : isEditing
+                    ? 'Confirm & Update'
+                    : 'Confirm & Save'}
               </button>
             </footer>
           </div>
