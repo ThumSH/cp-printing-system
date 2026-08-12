@@ -145,28 +145,42 @@ const calculateLkrBreakdown = (
     return null;
   }
 
-  const totalValueOfSupplyLkrNumber =
+  const rawSupply =
     vatPercentage === 0
       ? totalLkr
       : totalLkr /
         (1 + vatPercentage / 100);
 
-  const totalValueOfSupplyLkr =
-    formatStoredMoney(
-      totalValueOfSupplyLkrNumber
+  const rawVat =
+    totalLkr - rawSupply;
+
+  // LKR VAT is rounded to the nearest whole number.
+  // Example: 29472.89 -> 29473.00
+  const roundedVat =
+    Math.round(
+      rawVat + Number.EPSILON
     );
 
-  const vatAmountLkr =
-    formatStoredMoney(
-      totalLkr -
-        Number(totalValueOfSupplyLkr)
-    );
+  // Recalculate supply from the exact manually entered
+  // LKR total so supply + VAT always equals the total.
+  const adjustedSupply =
+    totalLkr - roundedVat;
 
   return {
-    totalValueOfSupplyLkr,
-    vatAmountLkr,
+    totalValueOfSupplyLkr:
+      formatStoredMoney(
+        adjustedSupply
+      ),
+
+    vatAmountLkr:
+      formatStoredMoney(
+        roundedVat
+      ),
+
     totalAmountIncludingVatLkr:
-      formatStoredMoney(totalLkr),
+      formatStoredMoney(
+        totalLkr
+      ),
   };
 };
 
