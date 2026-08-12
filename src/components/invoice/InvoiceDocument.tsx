@@ -420,12 +420,48 @@ export function printInvoiceDocument(): void {
 export default function InvoiceDocument({
   invoice,
 }: InvoiceDocumentProps) {
-  const minimumRows = 8;
-  const items = [...invoice.items];
+  const hasItemContent = (
+    item: (typeof invoice.items)[number]
+  ): boolean =>
+    Boolean(
+      item.reference?.trim() ||
+        item.description?.trim() ||
+        item.quantity?.trim() ||
+        item.unitPrice?.trim() ||
+        item.amountExcludingVat?.trim()
+    );
 
-  while (items.length < minimumRows) {
-    items.push(createBlankInvoiceItem());
-  }
+  // Keep every row up to the last row that contains invoice data.
+  // This preserves any intentional blank row between entered items,
+  // while removing only the unused trailing default rows.
+  const lastUsedItemIndex =
+    invoice.items.reduce(
+      (lastIndex, item, index) =>
+        hasItemContent(item)
+          ? index
+          : lastIndex,
+      -1
+    );
+
+  const enteredItems =
+    lastUsedItemIndex >= 0
+      ? invoice.items.slice(
+          0,
+          lastUsedItemIndex + 1
+        )
+      : [];
+
+  // The printed invoice should leave exactly two blank rows
+  // between the entered invoice items and the LKR details.
+  const items = [
+    ...enteredItems,
+    createBlankInvoiceItem(),
+    createBlankInvoiceItem(),
+  ];
+
+  const hasLkrConversion = Boolean(
+    invoice.totalAmountIncludingVatLkr?.trim()
+  );
 
   return (
     <>
@@ -637,6 +673,136 @@ export default function InvoiceDocument({
                   </td>
                 </tr>
               ))}
+
+              {hasLkrConversion && (
+                <>
+                  <tr>
+                    <td className="invoice-number-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-reference-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-description-column">
+                      <strong>
+                        EXCHANGE RATE : 1 USD :{' '}
+                        {displayValue(
+                          invoice.exchangeRate
+                        )}{' '}
+                        LKR
+                      </strong>
+                    </td>
+
+                    <td className="invoice-quantity-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-unit-price-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-amount-column">
+                      {'\u00A0'}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td className="invoice-number-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-reference-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-description-column">
+                      <strong>
+                        TOTAL VALUE OF SUPPLY LKR :{' '}
+                        {formatMoneyValue(
+                          invoice.totalValueOfSupplyLkr
+                        )}
+                      </strong>
+                    </td>
+
+                    <td className="invoice-quantity-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-unit-price-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-amount-column">
+                      {'\u00A0'}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td className="invoice-number-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-reference-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-description-column">
+                      <strong>
+                        VAT AMOUNT{' '}
+                        {invoice.vatPercentage?.trim() || '18'}% LKR :{' '}
+                        {formatMoneyValue(
+                          invoice.vatAmountLkr
+                        )}
+                      </strong>
+                    </td>
+
+                    <td className="invoice-quantity-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-unit-price-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-amount-column">
+                      {'\u00A0'}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td className="invoice-number-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-reference-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-description-column">
+                      <strong>
+                        TOTAL AMOUNT INCLUDING VAT LKR :{' '}
+                        {formatMoneyValue(
+                          invoice.totalAmountIncludingVatLkr
+                        )}
+                      </strong>
+                    </td>
+
+                    <td className="invoice-quantity-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-unit-price-column">
+                      {'\u00A0'}
+                    </td>
+
+                    <td className="invoice-amount-column">
+                      {'\u00A0'}
+                    </td>
+                  </tr>
+                </>
+              )}
             </tbody>
           </table>
 

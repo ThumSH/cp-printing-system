@@ -100,6 +100,76 @@ const formatMoneyDisplay = (
     : value;
 };
 
+const formatStoredMoney = (
+  value: number
+): string => {
+  const rounded =
+    Math.round(
+      (value + Number.EPSILON) * 100
+    ) / 100;
+
+  return rounded.toFixed(2);
+};
+
+const calculateLkrBreakdown = (
+  totalAmountIncludingVatLkr: string,
+  vatPercentageValue: string
+): {
+  totalValueOfSupplyLkr: string;
+  vatAmountLkr: string;
+  totalAmountIncludingVatLkr: string;
+} | null => {
+  const normalisedTotal =
+    normaliseCurrencyAmount(
+      totalAmountIncludingVatLkr
+    );
+
+  const totalLkr = Number(
+    normalisedTotal
+  );
+
+  const vatPercentage = Number(
+    normaliseCurrencyAmount(
+      vatPercentageValue || '18'
+    )
+  );
+
+  if (
+    !normalisedTotal ||
+    !Number.isFinite(totalLkr) ||
+    totalLkr < 0 ||
+    !Number.isFinite(vatPercentage) ||
+    vatPercentage < 0 ||
+    vatPercentage > 100
+  ) {
+    return null;
+  }
+
+  const totalValueOfSupplyLkrNumber =
+    vatPercentage === 0
+      ? totalLkr
+      : totalLkr /
+        (1 + vatPercentage / 100);
+
+  const totalValueOfSupplyLkr =
+    formatStoredMoney(
+      totalValueOfSupplyLkrNumber
+    );
+
+  const vatAmountLkr =
+    formatStoredMoney(
+      totalLkr -
+        Number(totalValueOfSupplyLkr)
+    );
+
+  return {
+    totalValueOfSupplyLkr,
+    vatAmountLkr,
+    totalAmountIncludingVatLkr:
+      formatStoredMoney(totalLkr),
+  };
+};
+
 function LabeledField({
   label,
   value,
@@ -213,7 +283,13 @@ export default function InvoiceForm({
     useState('');
 
   const [rupeeAmount, setRupeeAmount] =
-    useState('');
+    useState(
+      value.totalAmountIncludingVatLkr
+        ? formatCurrencyAmount(
+            value.totalAmountIncludingVatLkr
+          )
+        : ''
+    );
 
   const [rupeeError, setRupeeError] =
     useState('');
@@ -222,6 +298,18 @@ export default function InvoiceForm({
     useState(false);
 
   useEffect(() => {
+    const storedLkrAmount =
+      value.totalAmountIncludingVatLkr?.trim();
+
+    if (storedLkrAmount) {
+      setRupeeAmount(
+        formatCurrencyAmount(
+          storedLkrAmount
+        )
+      );
+      return;
+    }
+
     if (
       !value.totalAmountIncludingVat.trim() &&
       !value.totalAmountInWords.trim()
@@ -231,6 +319,7 @@ export default function InvoiceForm({
     }
   }, [
     value.totalAmountIncludingVat,
+    value.totalAmountIncludingVatLkr,
     value.totalAmountInWords,
   ]);
 
@@ -422,11 +511,30 @@ export default function InvoiceForm({
       return;
     }
 
-    onChange(
+    const recalculatedInvoice =
       recalculateInvoice({
         ...value,
         vatPercentage: String(parsed),
-      })
+      });
+
+    const storedLkrTotal =
+      value.totalAmountIncludingVatLkr?.trim();
+
+    const lkrBreakdown =
+      storedLkrTotal
+        ? calculateLkrBreakdown(
+            storedLkrTotal,
+            String(parsed)
+          )
+        : null;
+
+    onChange(
+      lkrBreakdown
+        ? {
+            ...recalculatedInvoice,
+            ...lkrBreakdown,
+          }
+        : recalculatedInvoice
     );
 
     setVatModalOpen(false);
@@ -463,6 +571,28 @@ export default function InvoiceForm({
     );
   };
 
+  const updateExchangeRate = (
+    input: string
+  ) => {
+    const withoutCommas =
+      input.replace(/,/g, '');
+
+    const validExchangeRatePattern =
+      /^\d*(?:\.\d{0,6})?$/;
+
+    if (
+      input === '' ||
+      validExchangeRatePattern.test(
+        withoutCommas
+      )
+    ) {
+      updateField(
+        'exchangeRate',
+        withoutCommas
+      );
+    }
+  };
+
   const convertTotalToWords = () => {
     const rawUsdWords = amountToWords(
       value.totalAmountIncludingVat
@@ -493,8 +623,22 @@ export default function InvoiceForm({
       return;
     }
 
+    const lkrBreakdown =
+      calculateLkrBreakdown(
+        normalisedRupeeAmount,
+        value.vatPercentage || '18'
+      );
+
+    if (!lkrBreakdown) {
+      setRupeeError(
+        'The rupee amount could not be converted.'
+      );
+
+      return;
+    }
+
     const rawLkrWords = amountToWords(
-      normalisedRupeeAmount
+      lkrBreakdown.totalAmountIncludingVatLkr
     );
 
     if (!rawLkrWords) {
@@ -515,17 +659,18 @@ export default function InvoiceForm({
         rawLkrWords
       );
 
-    updateField(
-      'totalAmountInWords',
-      [
+    onChange({
+      ...value,
+      ...lkrBreakdown,
+      totalAmountInWords: [
         `USD: ${usdWords}`,
         `LKR: ${lkrWords}`,
-      ].join('\n')
-    );
+      ].join('\n'),
+    });
 
     setRupeeAmount(
       formatCurrencyAmount(
-        normalisedRupeeAmount
+        lkrBreakdown.totalAmountIncludingVatLkr
       )
     );
 
@@ -1020,6 +1165,95 @@ export default function InvoiceForm({
                       </td>
                     </tr>
                   )
+                )}
+
+                {value.totalAmountIncludingVatLkr.trim() && (
+                  <>
+                    <tr className="border-b border-slate-300 bg-emerald-50/40">
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+
+                      <td className="border-r border-slate-300 px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-black uppercase text-slate-700">
+                          <span>
+                            EXCHANGE RATE : 1 USD :
+                          </span>
+
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={value.exchangeRate}
+                            onChange={(event) =>
+                              updateExchangeRate(
+                                event.target.value
+                              )
+                            }
+                            placeholder="331.55"
+                            className="w-28 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-black text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
+                          />
+
+                          <span>LKR</span>
+                        </div>
+                      </td>
+
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td />
+                    </tr>
+
+                    <tr className="border-b border-slate-300 bg-emerald-50/40">
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+
+                      <td className="border-r border-slate-300 px-3 py-2 text-xs font-black uppercase text-slate-700">
+                        TOTAL VALUE OF SUPPLY LKR :{' '}
+                        {formatCurrencyAmount(
+                          value.totalValueOfSupplyLkr
+                        )}
+                      </td>
+
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td />
+                    </tr>
+
+                    <tr className="border-b border-slate-300 bg-emerald-50/40">
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+
+                      <td className="border-r border-slate-300 px-3 py-2 text-xs font-black uppercase text-slate-700">
+                        VAT AMOUNT{' '}
+                        {value.vatPercentage || '18'}% LKR :{' '}
+                        {formatCurrencyAmount(
+                          value.vatAmountLkr
+                        )}
+                      </td>
+
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td />
+                    </tr>
+
+                    <tr className="border-b border-slate-300 bg-emerald-50/40">
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+
+                      <td className="border-r border-slate-300 px-3 py-2 text-xs font-black uppercase text-slate-700">
+                        TOTAL AMOUNT INCLUDING VAT LKR :{' '}
+                        {formatCurrencyAmount(
+                          value.totalAmountIncludingVatLkr
+                        )}
+                      </td>
+
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td className="border-r border-slate-300" />
+                      <td />
+                    </tr>
+                  </>
                 )}
               </tbody>
             </table>
