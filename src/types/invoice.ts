@@ -30,6 +30,12 @@ export interface TaxInvoicePayload {
   totalValueOfSupply: string;
   vatAmount: string;
   totalAmountIncludingVat: string;
+
+  exchangeRate: string;
+  totalValueOfSupplyLkr: string;
+  vatAmountLkr: string;
+  totalAmountIncludingVatLkr: string;
+
   totalAmountInWords: string;
   modeOfPayment: string;
 
@@ -139,6 +145,12 @@ export const createBlankInvoice = (
   totalValueOfSupply: '0.00',
   vatAmount: '0.00',
   totalAmountIncludingVat: '0.00',
+
+  exchangeRate: '',
+  totalValueOfSupplyLkr: '',
+  vatAmountLkr: '',
+  totalAmountIncludingVatLkr: '',
+
   totalAmountInWords: '',
   modeOfPayment: DEFAULT_MODE_OF_PAYMENT,
 
@@ -183,6 +195,18 @@ export const toInvoicePayload = (
 
   totalAmountIncludingVat:
     invoice.totalAmountIncludingVat,
+
+  exchangeRate:
+    invoice.exchangeRate?.trim() || '',
+
+  totalValueOfSupplyLkr:
+    invoice.totalValueOfSupplyLkr?.trim() || '',
+
+  vatAmountLkr:
+    invoice.vatAmountLkr?.trim() || '',
+
+  totalAmountIncludingVatLkr:
+    invoice.totalAmountIncludingVatLkr?.trim() || '',
 
   totalAmountInWords:
     invoice.totalAmountInWords,
