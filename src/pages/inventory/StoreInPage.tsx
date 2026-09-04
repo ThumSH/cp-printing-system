@@ -353,14 +353,58 @@ export default function StoreInPage() {
     )).sort();
   }, [eligibleStoreInItems, selectedStyleNo]);
 
+  const getRecordSubmissionId = (record: StoreInRecord) => {
+    const directSubId = String((record as any).submissionId || '').trim();
+    if (directSubId) return directSubId;
+
+    const cutSubId = record.cuts
+      .map(c => String((c as any).submissionId || '').trim())
+      .find(Boolean);
+    if (cutSubId) return cutSubId;
+
+    const recordComponent = String((record as any).components || '').trim();
+    const recordBodyColour = String((record as any).bodyColour || '').trim();
+
+    const matchedComponent = eligibleStoreInItems.find(item =>
+      item.styleNo === record.styleNo &&
+      item.customerName === record.customerName &&
+      item.components === recordComponent &&
+      (!recordBodyColour || item.bodyColour === recordBodyColour)
+    );
+
+    return matchedComponent?.submissionId || '';
+  };
+
+  const editingRecord = useMemo(() => {
+    if (!editingRecordId) return null;
+    return storeInRecords.find(record => record.id === editingRecordId) || null;
+  }, [editingRecordId, storeInRecords]);
+
+  const editingRecordSubmissionId = useMemo(() => {
+    if (!editingRecord) return '';
+    return getRecordSubmissionId(editingRecord);
+  }, [editingRecord, eligibleStoreInItems]);
+
+  const getEditingRecordQtyForComponent = (submissionId: string) => {
+    if (!editingRecord || !submissionId) return 0;
+
+    const resolvedSubmissionId = editingRecordSubmissionId || getRecordSubmissionId(editingRecord);
+    if (resolvedSubmissionId !== submissionId) return 0;
+
+    return editingRecord.inQty || editingRecord.cuts.reduce((sum, cut) => sum + (cut.cutQty || 0), 0);
+  };
+
+  const getEditableRemainingBulkQty = (comp: EligibleStoreInItem) =>
+    comp.remainingBulkQty + getEditingRecordQtyForComponent(comp.submissionId);
+
   const styleComponents = useMemo(() => {
     if (!selectedStyleNo || !selectedCustomer) return [];
     return eligibleStoreInItems.filter(
       i => i.styleNo === selectedStyleNo &&
            i.customerName === selectedCustomer &&
-           i.remainingBulkQty > 0   
+           (i.remainingBulkQty > 0 || i.submissionId === editingRecordSubmissionId)
     );
-  }, [eligibleStoreInItems, selectedStyleNo, selectedCustomer]);
+  }, [eligibleStoreInItems, selectedStyleNo, selectedCustomer, editingRecordSubmissionId]);
 
   const visibleBulkBalances = useMemo(() =>
     bulkBalances.filter(bal => bal.remainingBulkQty > 0),
@@ -513,7 +557,7 @@ export default function StoreInPage() {
 
   const handleConfirmComponentInQty = (comp: EligibleStoreInItem) => {
     const qty = getComponentInQty(comp.submissionId);
-    if (qty <= 0 || qty > comp.remainingBulkQty) return;
+    if (qty <= 0 || qty > getEditableRemainingBulkQty(comp)) return;
 
     const sourceCutsExist = savedCuts.some(c => c.submissionId !== comp.submissionId);
     const alreadyHasCuts = savedCuts.some(c => c.submissionId === comp.submissionId);
@@ -599,7 +643,7 @@ export default function StoreInPage() {
         const alreadyUsed = stagedCutQtyBySubmission[activeSubmissionId] || 0;
         const alreadyEditing = editingCutTempId
           ? savedCuts.find(c => c.tempId === editingCutTempId)?.cutQty || 0 : 0;
-        const remainingBulk = comp.remainingBulkQty - (alreadyUsed - alreadyEditing);
+        const remainingBulk = getEditableRemainingBulkQty(comp) - (alreadyUsed - alreadyEditing);
         if (cutQtyNum > remainingBulk)
           errs.cutQty = 'Exceeds remaining bulk for ' + comp.components + ' (' + remainingBulk + ' remaining)';
 
@@ -741,7 +785,8 @@ export default function StoreInPage() {
       const compInQty = getComponentInQty(comp.submissionId);
       if (compInQty > 0 && compCutQty > compInQty)
         errs.cuts = comp.components + ' cuts (' + compCutQty + ') exceed its IN Qty (' + compInQty + ')';
-      if (compInQty > comp.remainingBulkQty)
+      const editableRemaining = getEditableRemainingBulkQty(comp);
+      if (compInQty > editableRemaining)
         errs['inQty_' + comp.submissionId] = comp.components + ' IN Qty exceeds remaining bulk';
     });
 
@@ -931,33 +976,60 @@ export default function StoreInPage() {
   };
 
   const handleEdit = (record: StoreInRecord) => {
+    const primarySubId = getRecordSubmissionId(record);
+
     setSelectedStyleNo(record.styleNo);
     setSelectedCustomer(record.customerName);
     setInAdNo(record.inAdNo || '');
-    setScheduleNo(record.scheduleNo);
+    setScheduleNo(record.scheduleNo || '');
     setJobNo((record as any).jobNo || '');
     setCutInDate(record.cutInDate);
+
     const compQtyMap: Record<string, string> = {};
-    record.cuts.forEach(c => {
-      const subId = (c as any).submissionId;
-      if (subId) compQtyMap[subId] = String((parseInt(compQtyMap[subId] || '0') || 0) + c.cutQty);
+    const confirmedMap: Record<string, boolean> = {};
+    const cutSubmissionIds = Array.from(new Set(
+      record.cuts
+        .map(c => String((c as any).submissionId || '').trim())
+        .filter(Boolean)
+    ));
+    const resolvedSubmissionIds = primarySubId
+      ? [primarySubId]
+      : cutSubmissionIds;
+
+    resolvedSubmissionIds.forEach(subId => {
+      compQtyMap[subId] = record.inQty.toString();
+      confirmedMap[subId] = true;
     });
-    if (Object.keys(compQtyMap).length === 0) compQtyMap[''] = record.inQty.toString();
+
     setComponentInQty(compQtyMap);
-    setSavedCuts(record.cuts.map(c => ({
-      tempId:       crypto.randomUUID(),
-      cutNo:        c.cutNo,
-      component:    c.cutNo.split(' ')[0] ?? '',
-      submissionId: (c as any).submissionId ?? '',
-      bodyColour:   '',
-      cutQty:       c.cutQty,
-      bundles:      orderBundlesForDisplay(c.bundles).map((b, index) => ({
-        bundleNo: normalizeBundleNo(b.bundleNo), bundleQty: b.bundleQty,
-        size: b.size, numberRange: b.numberRange,
-        bundleOrder: b.bundleOrder ?? index + 1,
-      })),
-    })));
+    setConfirmedInQty(confirmedMap);
+    setSavedCuts(record.cuts.map(c => {
+      const subId = String((c as any).submissionId || primarySubId || '').trim();
+      const matchedComponent = eligibleStoreInItems.find(item => item.submissionId === subId);
+
+      return {
+        tempId:       crypto.randomUUID(),
+        cutNo:        c.cutNo,
+        component:    matchedComponent?.components || record.components || c.cutNo.split(' ')[0] || '',
+        submissionId: subId,
+        bodyColour:   matchedComponent?.bodyColour || record.bodyColour || '',
+        cutQty:       c.cutQty,
+        bundles:      orderBundlesForDisplay(c.bundles).map((b, index) => ({
+          bundleNo: normalizeBundleNo(b.bundleNo), bundleQty: b.bundleQty,
+          size: b.size, numberRange: b.numberRange,
+          bundleOrder: b.bundleOrder ?? index + 1,
+        })),
+      };
+    }));
     setEditingRecordId(record.id);
+    setActiveSubmissionId('');
+    setActiveCutNo('');
+    setActiveCutQty('');
+    setCutQtyConfirmed(false);
+    setActiveCutBundles([makeBundleRow(1)]);
+    setEditingCutTempId(null);
+    setStagedEntries([]);
+    setExpandedStagedId(null);
     setErrors({}); setCutErrors({}); setPageError('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -1227,7 +1299,7 @@ export default function StoreInPage() {
                   const compInQty  = getComponentInQty(comp.submissionId);
                   const compCutQty = stagedCutQtyBySubmission[comp.submissionId] || 0;
                   const compUncut  = Math.max(0, compInQty - compCutQty);
-                  const remaining  = comp.remainingBulkQty;
+                  const remaining  = getEditableRemainingBulkQty(comp);
                   const overLimit  = compInQty > remaining;
                   const confirmed  = isComponentConfirmed(comp.submissionId);
                   const hasCuts    = savedCuts.some(c => c.submissionId === comp.submissionId);

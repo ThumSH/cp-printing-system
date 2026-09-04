@@ -68,6 +68,7 @@ interface EligibleStyle {
   originalQty: number; // true production issue qty from DB
   orderQty: number;    // backward-compatible: max remaining qty across stages
   dispatchedQty: number;
+  scheduleNo: string;
 
   seatingAllocated?: number;
   printingAllocated?: number;
@@ -279,6 +280,7 @@ export default function DailyOutputPage() {
       ...payload.eligibleStyle,
       id: String(payload.eligibleStyle.id || productionRecordId).trim(),
       productionRecordId,
+      scheduleNo: String(payload.eligibleStyle.scheduleNo || '').trim(),
       storeInRecordId: String(
         payload.eligibleStyle.storeInRecordId ||
         sourceRecord.storeInRecordId ||
@@ -863,7 +865,7 @@ export default function DailyOutputPage() {
             {activeRecordId && <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">EDITING EXISTING RECORD</span>}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
             <div className="space-y-1">
               <label className="block text-xs font-medium text-slate-600">Style *</label>
               <select
@@ -937,6 +939,21 @@ export default function DailyOutputPage() {
                   );
                 })}
               </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-600">
+                Schedule No
+              </label>
+              <input
+                type="text"
+                value={selectedItem?.scheduleNo || ''}
+                readOnly
+                disabled
+                placeholder="Auto-filled"
+                title="Auto-filled from Store In schedule number"
+                className="w-full cursor-not-allowed rounded border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 outline-none"
+              />
             </div>
 
             <div className="space-y-1">
