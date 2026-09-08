@@ -85,7 +85,7 @@ function App() {
           <Route path="report" element={<ReconciliationReportPage />} />
           <Route path="report-search" element={<ReconciliationReportSearchPage />} />
            <Route path="reports" element={
-            <RoleRoute allowedRoles={['Admin']}>
+            <RoleRoute allowedRoles={['SuperAdmin']}>
               <ReportCenterPage />
             </RoleRoute>
           } />

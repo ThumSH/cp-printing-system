@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   BarChart3,
   BriefcaseBusiness,
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
@@ -14,7 +13,6 @@ import {
   PieChart as PieIcon,
   Printer,
   RefreshCw,
-  TrendingUp,
   Users,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
@@ -88,6 +86,21 @@ type EmployeePerformance = {
   qualityQty: number;
   defectQty: number;
   score: number;
+  loginCount?: number;
+  systemLoginTime?: string;
+  idleTime?: string;
+  userLogoutCount?: number;
+  userLogoutTime?: string;
+  systemLogoutCount?: number;
+  systemLogoutTime?: string;
+  totalLoginSeconds?: number;
+  totalIdleSeconds?: number;
+  totalActiveSeconds?: number;
+  totalLoginTime?: string;
+  totalIdleTime?: string;
+  totalActiveTime?: string;
+  attendanceScore?: number;
+  currentStatus?: string;
   basis: string;
 };
 
@@ -124,6 +137,20 @@ type UserReportRow = {
   activityCount: number;
   lastLogin: string;
   lastActivity: string;
+  loginCount?: number;
+  systemLoginTime?: string;
+  idleTime?: string;
+  userLogoutCount?: number;
+  userLogoutTime?: string;
+  systemLogoutCount?: number;
+  systemLogoutTime?: string;
+  totalLoginSeconds?: number;
+  totalIdleSeconds?: number;
+  totalActiveSeconds?: number;
+  totalLoginTime?: string;
+  totalIdleTime?: string;
+  totalActiveTime?: string;
+  currentStatus?: string;
 };
 
 type FilterOptions = {
@@ -325,7 +352,7 @@ function ReportHeader({ title, dateFrom, dateTo, generatedAt }: {
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-4">
-          <img src="/report-header.svg" alt="Colour Plus report header" className="h-14 w-auto object-contain" />
+          <img src="/logo.svg" alt="Colour Plus report header" className="h-14 w-auto object-contain" />
           <div className="min-w-0">
             <h1 className="text-2xl font-black text-slate-950">Colour Plus Printing Systems (Pvt) Ltd</h1>
             <p className="text-sm font-bold text-slate-700">{title}</p>
@@ -523,7 +550,7 @@ function DepartmentOverview({ departments, onOpen }: { departments: DepartmentSu
           onClick={() => onOpen(dept.section)}
           className="group overflow-hidden rounded-3xl border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg"
         >
-          <div className="border-b border-slate-100 bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white">
+          <div className="border-b border-slate-100 bg-linear-to-br from-slate-950 to-slate-800 p-5 text-white">
             <p className="text-[10px] font-black uppercase tracking-widest text-blue-200">Department report</p>
             <div className="mt-2 flex items-start justify-between gap-4">
               <div>
@@ -695,7 +722,7 @@ function LineChart({ chart }: { chart: ReportChart }) {
 
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[560px]">
+      <svg viewBox={`0 0 ${width} ${height}`} className="min-w-140">
         {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
           const yy = padding.top + chartHeight - ratio * chartHeight;
           return (
@@ -739,7 +766,7 @@ function EmployeePerformanceTable({ rows }: { rows: EmployeePerformance[] }) {
           <Users className="h-4 w-4 text-blue-700" />
           <h3 className="text-base font-black text-slate-950">Employee performance support</h3>
         </div>
-        <p className="mt-1 text-sm text-slate-500">Shows completed work, pending work, output, quality and defects. It supports wage review but does not calculate salary.</p>
+        <p className="mt-1 text-sm text-slate-500">Shows session attendance, work output, completed work, pending work and quality support for wage/performance review.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -747,6 +774,14 @@ function EmployeePerformanceTable({ rows }: { rows: EmployeePerformance[] }) {
             <tr>
               <th className="px-4 py-3 text-left">Employee / Operator</th>
               <th className="px-4 py-3 text-left">Role</th>
+              <th className="px-4 py-3 text-right">Login Count</th>
+              <th className="px-4 py-3 text-left">System Login Time</th>
+              <th className="px-4 py-3 text-left">Idle Time</th>
+              <th className="px-4 py-3 text-left">Logout Time - User</th>
+              <th className="px-4 py-3 text-left">Logout Time - System</th>
+              <th className="px-4 py-3 text-left">Total Login Time</th>
+              <th className="px-4 py-3 text-left">Total Idle Time</th>
+              <th className="px-4 py-3 text-left">Active Time</th>
               <th className="px-4 py-3 text-right">Records</th>
               <th className="px-4 py-3 text-right">Output</th>
               <th className="px-4 py-3 text-right">Completed</th>
@@ -758,12 +793,20 @@ function EmployeePerformanceTable({ rows }: { rows: EmployeePerformance[] }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.length === 0 && (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500">No employee performance data stored for this report in this period.</td></tr>
+              <tr><td colSpan={17} className="px-4 py-8 text-center text-slate-500">No employee performance data stored for this report in this period.</td></tr>
             )}
             {rows.map((row, idx) => (
               <tr key={`${row.employeeName}-${row.role}-${idx}`} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-bold text-slate-950">{row.employeeName}</td>
                 <td className="px-4 py-3 text-slate-600">{row.role}</td>
+                <td className="px-4 py-3 text-right font-semibold text-slate-700">{formatNumber(row.loginCount || 0)}</td>
+                <td className="min-w-48 px-4 py-3 text-slate-600">{row.systemLoginTime || '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{row.idleTime || '—'}</td>
+                <td className="min-w-48 px-4 py-3 text-slate-600">{row.userLogoutTime || (row.userLogoutCount ? `${row.userLogoutCount} time(s)` : '—')}</td>
+                <td className="min-w-48 px-4 py-3 text-slate-600">{row.systemLogoutTime || (row.systemLogoutCount ? `${row.systemLogoutCount} time(s)` : '—')}</td>
+                <td className="px-4 py-3 font-bold text-slate-800">{row.totalLoginTime || '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{row.totalIdleTime || '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{row.totalActiveTime || '—'}</td>
                 <td className="px-4 py-3 text-right font-semibold text-slate-700">{formatNumber(row.recordCount)}</td>
                 <td className="px-4 py-3 text-right font-black text-slate-900">{formatNumber(row.outputQty)}</td>
                 <td className="px-4 py-3 text-right text-slate-600">{formatNumber(row.completedQty)}</td>
@@ -786,7 +829,7 @@ function ScoreBar({ score }: { score: number }) {
       <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100">
         <div className="h-full rounded-full bg-blue-600" style={{ width: `${clamp(score)}%` }} />
       </div>
-      <span className="w-12 text-right text-xs font-black text-slate-700">{formatPercent(score)}</span>
+      <span className="w-16 text-right text-xs font-black text-slate-700">{formatNumber(score)} /100</span>
     </div>
   );
 }
@@ -854,7 +897,7 @@ function UsersTable({ users }: { users: UserReportRow[] }) {
     <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-5 py-4">
         <h3 className="text-base font-black text-slate-950">All users report</h3>
-        <p className="text-sm text-slate-500">System users with role, activity count and last known activity.</p>
+        <p className="text-sm text-slate-500">System users with login count, logout method, idle time and last known activity.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -864,18 +907,37 @@ function UsersTable({ users }: { users: UserReportRow[] }) {
               <th className="px-4 py-3 text-left">Username</th>
               <th className="px-4 py-3 text-left">Role</th>
               <th className="px-4 py-3 text-right">Activities</th>
-              <th className="px-4 py-3 text-left">Last Login</th>
+              <th className="px-4 py-3 text-right">Login Count</th>
+              <th className="px-4 py-3 text-left">System Login Time</th>
+              <th className="px-4 py-3 text-left">Idle Time</th>
+              <th className="px-4 py-3 text-left">Logout Time - User</th>
+              <th className="px-4 py-3 text-left">Logout Time - System</th>
+              <th className="px-4 py-3 text-left">Total Login Time</th>
+              <th className="px-4 py-3 text-left">Total Idle Time</th>
+              <th className="px-4 py-3 text-left">Active Time</th>
+              <th className="px-4 py-3 text-left">Status</th>
               <th className="px-4 py-3 text-left">Last Activity</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
+            {users.length === 0 && (
+              <tr><td colSpan={14} className="px-4 py-8 text-center text-slate-500">No users found for the selected filters.</td></tr>
+            )}
             {users.map((user) => (
               <tr key={user.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-bold text-slate-950">{user.name}</td>
                 <td className="px-4 py-3 text-slate-600">{user.username}</td>
                 <td className="px-4 py-3"><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{user.role}</span></td>
                 <td className="px-4 py-3 text-right font-semibold text-slate-800">{formatNumber(user.activityCount)}</td>
-                <td className="px-4 py-3 text-slate-600">{user.lastLogin || '—'}</td>
+                <td className="px-4 py-3 text-right font-semibold text-slate-800">{formatNumber(user.loginCount || 0)}</td>
+                <td className="min-w-48 px-4 py-3 text-slate-600">{user.systemLoginTime || user.lastLogin || '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{user.idleTime || '—'}</td>
+                <td className="min-w-48 px-4 py-3 text-slate-600">{user.userLogoutTime || (user.userLogoutCount ? `${user.userLogoutCount} time(s)` : '—')}</td>
+                <td className="min-w-48 px-4 py-3 text-slate-600">{user.systemLogoutTime || (user.systemLogoutCount ? `${user.systemLogoutCount} time(s)` : '—')}</td>
+                <td className="px-4 py-3 font-bold text-slate-800">{user.totalLoginTime || '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{user.totalIdleTime || '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{user.totalActiveTime || '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{user.currentStatus || '—'}</td>
                 <td className="px-4 py-3 text-slate-600">{user.lastActivity || '—'}</td>
               </tr>
             ))}
@@ -928,7 +990,7 @@ function PrintReport({
             <div className="print-title">{title}</div>
             <div className="print-subtitle">Period: {dateFrom} to {dateTo} · Generated: {generatedAt || '—'}</div>
           </div>
-          <img src="/report-header.svg" alt="Colour Plus" className="print-logo" />
+          <img src="/logo.svg" alt="Colour Plus" className="print-logo" />
         </div>
 
         {view === 'Overview' && dashboard && (
@@ -973,11 +1035,11 @@ function PrintReport({
 
             <PrintSectionHeading title="Employee performance support" />
             <table className="print-table compact">
-              <thead><tr><th>Employee</th><th>Role</th><th>Records</th><th>Output</th><th>Completed</th><th>Pending</th><th>Defects</th><th>Score</th></tr></thead>
+              <thead><tr><th>Employee</th><th>Role</th><th>System Login Time</th><th>Idle Time</th><th>Logout Time - User</th><th>Logout Time - System</th><th>Total Login Time</th><th>Total Idle Time</th><th>Records</th><th>Output</th><th>Completed</th><th>Pending</th><th>Defects</th><th>Score</th></tr></thead>
               <tbody>
                 {sectionReport.employeeRows.slice(0, 12).map((r, idx) => (
                   <tr key={`${r.employeeName}-${idx}`}>
-                    <td>{r.employeeName}</td><td>{r.role}</td><td className="num">{formatNumber(r.recordCount)}</td><td className="num">{formatNumber(r.outputQty)}</td><td className="num">{formatNumber(r.completedQty)}</td><td className="num">{formatNumber(r.pendingQty)}</td><td className="num">{formatNumber(r.defectQty)}</td><td className="num">{formatPercent(r.score)}</td>
+                    <td>{r.employeeName}</td><td>{r.role}</td><td>{r.systemLoginTime || '—'}</td><td>{r.idleTime || '—'}</td><td>{r.userLogoutTime || '—'}</td><td>{r.systemLogoutTime || '—'}</td><td>{r.totalLoginTime || '—'}</td><td>{r.totalIdleTime || '—'}</td><td className="num">{formatNumber(r.recordCount)}</td><td className="num">{formatNumber(r.outputQty)}</td><td className="num">{formatNumber(r.completedQty)}</td><td className="num">{formatNumber(r.pendingQty)}</td><td className="num">{formatNumber(r.defectQty)}</td><td className="num">{formatNumber(r.score)} /100</td>
                   </tr>
                 ))}
               </tbody>
@@ -1012,9 +1074,9 @@ function PrintReport({
           <>
             <PrintSectionHeading title="All users" />
             <table className="print-table">
-              <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Activities</th><th>Last login</th><th>Last activity</th></tr></thead>
+              <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Activities</th><th>System Login Time</th><th>Idle Time</th><th>Logout Time - User</th><th>Logout Time - System</th><th>Total Login Time</th><th>Total Idle Time</th><th>Status</th><th>Last activity</th></tr></thead>
               <tbody>
-                {users.map((user) => <tr key={user.id}><td>{user.name}</td><td>{user.username}</td><td>{user.role}</td><td className="num">{formatNumber(user.activityCount)}</td><td>{user.lastLogin || '—'}</td><td>{user.lastActivity || '—'}</td></tr>)}
+                {users.map((user) => <tr key={user.id}><td>{user.name}</td><td>{user.username}</td><td>{user.role}</td><td className="num">{formatNumber(user.activityCount)}</td><td>{user.systemLoginTime || user.lastLogin || '—'}</td><td>{user.idleTime || '—'}</td><td>{user.userLogoutTime || '—'}</td><td>{user.systemLogoutTime || '—'}</td><td>{user.totalLoginTime || '—'}</td><td>{user.totalIdleTime || '—'}</td><td>{user.currentStatus || '—'}</td><td>{user.lastActivity || '—'}</td></tr>)}
               </tbody>
             </table>
           </>
@@ -1097,7 +1159,8 @@ export default function ReportCenterPage() {
   };
 
   const loadUsers = async () => {
-    const data = await fetchJson<UserReportRow[]>(`${API_BASE}/users`);
+    const q = toQuery({ dateFrom, dateTo, role: filters.role });
+    const data = await fetchJson<UserReportRow[]>(`${API_BASE}/users?${q}`);
     setUsers(data);
   };
 
