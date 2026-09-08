@@ -529,11 +529,19 @@ export default function AdviceNotePage() {
                   className={'w-full rounded border bg-white px-3 py-2 text-sm outline-none ' + (errors.storeInRecordId ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:ring-2 focus:ring-blue-500') + (editingId || !selComponentFilter ? ' cursor-not-allowed bg-slate-100' : '')}
                 >
                   <option value="">Select schedule/batch…</option>
-                  {storeInOptions.map(item => (
-                    <option key={item.storeInRecordId} value={item.storeInRecordId}>
-                      {item.scheduleNo ? `Sch: ${item.scheduleNo}` : 'No Schedule'}{item.jobNo ? ` | Job: ${item.jobNo}` : ''} | Rem: {item.remainingDispatchQty}
-                    </option>
-                  ))}
+                  {storeInOptions.map(item => {
+                    const availableCutNos = item.cuts
+                      .filter(c => c.bundles.some(b => !usedBundles.has(`${item.storeInRecordId}|||${c.cutNo}|||${b.bundleNo}`)))
+                      .map(c => c.cutNo)
+                      .filter(Boolean)
+                      .join(', ');
+
+                    return (
+                      <option key={item.storeInRecordId} value={item.storeInRecordId}>
+                        {item.scheduleNo ? `Sch: ${item.scheduleNo}` : 'No Schedule'}{item.jobNo ? ` | Job: ${item.jobNo}` : ''}{availableCutNos ? ` | Cut: ${availableCutNos}` : ''} | Rem: {item.remainingDispatchQty}
+                      </option>
+                    );
+                  })}
                 </select>
                 {errors.storeInRecordId && <p className="text-[11px] text-red-600"><AlertCircle className="mr-1 inline h-3 w-3" />Select a batch</p>}
               </div>
