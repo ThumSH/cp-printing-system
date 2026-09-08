@@ -39,6 +39,7 @@ import InvoiceSearchPage from './pages/invoice/InvoiceSearchPage';
 import InvoiceDetailPage from './pages/invoice/InvoiceDetailPage';
 import InvoiceSecurityPage from './pages/superadmin/InvoiceSecurityPage';
 import CustomerRegistrationPage from './pages/admin/CustomerRegistrationPage';
+import ReportCenterPage from './pages/report/ReportCenterPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -83,6 +84,11 @@ function App() {
           <Route path="about" element={<AboutUsPage />} />
           <Route path="report" element={<ReconciliationReportPage />} />
           <Route path="report-search" element={<ReconciliationReportSearchPage />} />
+           <Route path="reports" element={
+            <RoleRoute allowedRoles={['SuperAdmin']}>
+              <ReportCenterPage />
+            </RoleRoute>
+          } />
 
            {/* ── Tax Invoice: Admin and SuperAdmin only ── */}
           <Route path="invoice">

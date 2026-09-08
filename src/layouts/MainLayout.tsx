@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
+import IdleSessionManager from '../components/session/IdleSessionManager';
 
 interface NavItem {
   name: string;
@@ -118,6 +119,7 @@ const NAV_GROUPS: NavGroup[] = [
    {
     label: 'Report',
     items: [
+      { name: 'Report Center', href: '/reports', icon: Activity, roles: ['SuperAdmin'] },
       { name: 'Report', href: '/report', icon: Receipt, roles: ['Admin', 'QC', 'Gatepass', 'Stores'] },
       { name: 'Report Search', href: '/report-search', icon: Receipt, roles: ['Admin', 'QC', 'Gatepass', 'Stores'] },
     ],
@@ -162,6 +164,7 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-900 overflow-hidden">
+      <IdleSessionManager />
 
       {/* SIDEBAR */}
       <motion.aside

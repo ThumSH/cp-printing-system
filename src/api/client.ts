@@ -15,6 +15,7 @@ export const API = {
   TAX_INVOICES: `${API_URL}/api/tax-invoices`,
   INVOICE_SECURITY: `${API_URL}/api/invoice-security`,
   CUSTOMERS: `${API_URL}/api/customers`,
+  REPORTS: `${API_URL}/api/reports`,
 } as const;
 
 export const getAuthHeaders = () => ({

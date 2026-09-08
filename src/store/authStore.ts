@@ -1,9 +1,9 @@
 // src/store/authStore.ts
-// FIXES:
-//   - On init, validates that token is a non-empty string before setting isAuthenticated
-//   - Added tokenExpired helper that checks JWT exp claim without a library
-//   - If stored JWT is clearly expired on boot, auto-clears storage so user must re-login
-//     (instead of appearing authenticated until the first 401 comes back from the API)
+// Session tracking update:
+//   - Stores backend sessionId returned from /api/auth/login
+//   - Sends manual/system logout to backend before clearing local storage
+//   - Keeps the existing operator selection flow
+//   - Keeps JWT expiry cleanup on app boot
 
 import { create } from 'zustand';
 import { User } from '../types';
@@ -36,9 +36,15 @@ const getStoredUser = (): User | null => {
   }
 };
 
+const toNumber = (value: string | null) => {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+};
+
 const storedToken    = localStorage.getItem('token');
 const storedUser     = getStoredUser();
 const storedOperator = localStorage.getItem('operatorName');
+const storedSession  = localStorage.getItem('sessionId');
 
 // FIX: If token is expired on boot, clear storage immediately so the
 // user is sent to the login screen rather than hitting a 401 mid-session.
@@ -47,29 +53,59 @@ if (tokenExpired && (storedToken || storedUser)) {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   localStorage.removeItem('operatorName');
+  localStorage.removeItem('sessionId');
+  localStorage.removeItem('sessionActiveSeconds');
+  localStorage.removeItem('sessionIdleSeconds');
+  localStorage.removeItem('idleWarningSeconds');
+  localStorage.removeItem('idleLogoutGraceSeconds');
 }
 
 const validSession = !tokenExpired && !!storedUser && !!storedToken;
+
+type LogoutType = 'User' | 'SystemIdle' | 'TokenExpired' | 'BrowserClosed' | 'Forced';
+
+interface LogoutTotals {
+  activeSeconds?: number;
+  idleSeconds?: number;
+}
 
 // ── Store ──────────────────────────────────────────────────────────────────────
 interface AuthState {
   user:                User | null;
   token:               string | null;
+  sessionId:           string | null;
   isAuthenticated:     boolean;
   operatorName:        string | null;
   needsOperatorSelect: boolean;
+  idleWarningSeconds:  number;
+  idleLogoutGraceSeconds: number;
 
   login:       (username: string, password: string) => Promise<boolean>;
   setOperator: (name: string) => void;
-  logout:      () => void;
+  logout:      (logoutType?: LogoutType, logoutReason?: string, totals?: LogoutTotals) => Promise<void>;
+  clearLocalSession: () => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+const clearLocalStorage = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('operatorName');
+  localStorage.removeItem('sessionId');
+  localStorage.removeItem('sessionActiveSeconds');
+  localStorage.removeItem('sessionIdleSeconds');
+  localStorage.removeItem('idleWarningSeconds');
+  localStorage.removeItem('idleLogoutGraceSeconds');
+};
+
+export const useAuthStore = create<AuthState>((set, get) => ({
   user:                validSession ? storedUser    : null,
   token:               validSession ? storedToken   : null,
+  sessionId:           validSession ? storedSession : null,
   isAuthenticated:     validSession && !!storedOperator,
   operatorName:        validSession ? storedOperator : null,
   needsOperatorSelect: validSession && !storedOperator,
+  idleWarningSeconds:  toNumber(localStorage.getItem('idleWarningSeconds')) || 300,
+  idleLogoutGraceSeconds: toNumber(localStorage.getItem('idleLogoutGraceSeconds')) || 60,
 
   login: async (username, password) => {
     try {
@@ -85,12 +121,29 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('token', data.token);
       localStorage.setItem('user',  JSON.stringify(data.user));
 
+      if (data.sessionId) {
+        localStorage.setItem('sessionId', data.sessionId);
+      } else {
+        localStorage.removeItem('sessionId');
+      }
+
+      const idleWarningSeconds = Number(data.idleWarningSeconds || 300);
+      const idleLogoutGraceSeconds = Number(data.idleLogoutGraceSeconds || 60);
+
+      localStorage.setItem('idleWarningSeconds', String(idleWarningSeconds));
+      localStorage.setItem('idleLogoutGraceSeconds', String(idleLogoutGraceSeconds));
+      localStorage.setItem('sessionActiveSeconds', '0');
+      localStorage.setItem('sessionIdleSeconds', '0');
+
       set({
         user:                data.user,
         token:               data.token,
+        sessionId:           data.sessionId || null,
         isAuthenticated:     false,   // waits for operator selection
         needsOperatorSelect: true,
         operatorName:        null,
+        idleWarningSeconds,
+        idleLogoutGraceSeconds,
       });
       return true;
     } catch (e) {
@@ -104,16 +157,59 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ operatorName: name, isAuthenticated: true, needsOperatorSelect: false });
   },
 
-  logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('operatorName');
+  logout: async (logoutType = 'User', logoutReason = 'Manual logout', totals) => {
+    const state = get();
+    const token = state.token || localStorage.getItem('token') || '';
+    const sessionId = state.sessionId || localStorage.getItem('sessionId') || '';
+    const activeSeconds = Math.max(0, Math.round(totals?.activeSeconds ?? toNumber(localStorage.getItem('sessionActiveSeconds'))));
+    const idleSeconds = Math.max(0, Math.round(totals?.idleSeconds ?? toNumber(localStorage.getItem('sessionIdleSeconds'))));
+
+    if (token && sessionId) {
+      try {
+        await fetch(`${API.AUTH}/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            'X-Session-Id': sessionId,
+          },
+          body: JSON.stringify({
+            sessionId,
+            logoutType,
+            logoutReason,
+            activeSeconds,
+            idleSeconds,
+          }),
+        });
+      } catch (e) {
+        console.error('authStore.logout:', e);
+      }
+    }
+
+    clearLocalStorage();
     set({
       user:                null,
       token:               null,
+      sessionId:           null,
       isAuthenticated:     false,
       operatorName:        null,
       needsOperatorSelect: false,
+      idleWarningSeconds:  300,
+      idleLogoutGraceSeconds: 60,
+    });
+  },
+
+  clearLocalSession: () => {
+    clearLocalStorage();
+    set({
+      user:                null,
+      token:               null,
+      sessionId:           null,
+      isAuthenticated:     false,
+      operatorName:        null,
+      needsOperatorSelect: false,
+      idleWarningSeconds:  300,
+      idleLogoutGraceSeconds: 60,
     });
   },
 }));
