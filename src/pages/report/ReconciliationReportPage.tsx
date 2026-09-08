@@ -12,6 +12,7 @@ import {
 import { API, getAuthHeaders } from '../../api/client';
 
 const NO_SCHEDULE_KEY = '__NO_SCHEDULE__';
+const NO_COLOUR_KEY = '__NO_COLOUR__';
 const MANUAL_STORAGE_KEY = 'cp-reconciliation-manual-entries-v2';
 
 // Put the real logo in public/cp-logo.png, or change this path.
@@ -116,6 +117,23 @@ function same(a?: string, b?: string) {
   return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
 }
 
+function getRecordColourLabel(record: Pick<ReconciliationStoreInRecord, 'bodyColour' | 'printColour'>) {
+  return uniq([record.bodyColour || '', record.printColour || '']).join(' / ');
+}
+
+function getRecordColourValue(record: Pick<ReconciliationStoreInRecord, 'bodyColour' | 'printColour'>) {
+  return getRecordColourLabel(record) || NO_COLOUR_KEY;
+}
+
+function formatColourOption(value: string) {
+  return value === NO_COLOUR_KEY ? 'No Colour' : value;
+}
+
+function recordColourMatches(record: ReconciliationStoreInRecord, selectedColour: string) {
+  if (!selectedColour) return true;
+  return getRecordColourValue(record) === selectedColour;
+}
+
 function num(value: unknown) {
   const parsed = typeof value === 'number' ? value : parseInt(String(value || '0'), 10);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -193,6 +211,7 @@ export default function ReconciliationReportPage() {
 
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [selectedStyle, setSelectedStyle] = useState('');
+  const [selectedColour, setSelectedColour] = useState('');
   const [selectedComponent, setSelectedComponent] = useState('');
   const [selectedSchedule, setSelectedSchedule] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
@@ -264,7 +283,7 @@ export default function ReconciliationReportPage() {
     );
   }, [storeInRecords, selectedCustomer]);
 
-  const componentOptions = useMemo(() => {
+  const colourOptions = useMemo(() => {
     if (!selectedCustomer || !selectedStyle) return [];
     return uniq(
       storeInRecords
@@ -272,18 +291,32 @@ export default function ReconciliationReportPage() {
           same(record.customerName, selectedCustomer) &&
           same(record.styleNo, selectedStyle)
         )
-        .map(record => record.components)
+        .map(record => getRecordColourValue(record))
     );
   }, [storeInRecords, selectedCustomer, selectedStyle]);
 
+  const componentOptions = useMemo(() => {
+    if (!selectedCustomer || !selectedStyle || !selectedColour) return [];
+    return uniq(
+      storeInRecords
+        .filter(record =>
+          same(record.customerName, selectedCustomer) &&
+          same(record.styleNo, selectedStyle) &&
+          recordColourMatches(record, selectedColour)
+        )
+        .map(record => record.components)
+    );
+  }, [storeInRecords, selectedCustomer, selectedStyle, selectedColour]);
+
   const scheduleContextRecords = useMemo(() => {
-    if (!selectedCustomer || !selectedStyle || !selectedComponent) return [];
+    if (!selectedCustomer || !selectedStyle || !selectedColour || !selectedComponent) return [];
     return storeInRecords.filter(record =>
       same(record.customerName, selectedCustomer) &&
       same(record.styleNo, selectedStyle) &&
+      recordColourMatches(record, selectedColour) &&
       same(record.components, selectedComponent)
     );
-  }, [storeInRecords, selectedCustomer, selectedStyle, selectedComponent]);
+  }, [storeInRecords, selectedCustomer, selectedStyle, selectedColour, selectedComponent]);
 
   const scheduleOptions = useMemo(
     () => uniq(scheduleContextRecords.map(record => record.scheduleNo)),
@@ -299,14 +332,14 @@ export default function ReconciliationReportPage() {
 
   const matchingStoreIns = useMemo(
     () => getStoreInMatches(
-      storeInRecords,
+      storeInRecords.filter(record => recordColourMatches(record, selectedColour)),
       selectedCustomer,
       selectedStyle,
       selectedComponent,
       selectedSchedule,
       hasRealSchedules
     ),
-    [storeInRecords, selectedCustomer, selectedStyle, selectedComponent, selectedSchedule, hasRealSchedules]
+    [storeInRecords, selectedCustomer, selectedStyle, selectedColour, selectedComponent, selectedSchedule, hasRealSchedules]
   );
 
   const storeInById = useMemo(() => {
@@ -341,9 +374,12 @@ export default function ReconciliationReportPage() {
       jobNos,
       invoiceNo: invoiceNo.trim(),
       poNo: poNo.trim(),
-      colour: colours.join(' / ') || first?.bodyColour || '',
+      colour:
+        selectedColour === NO_COLOUR_KEY
+          ? ''
+          : selectedColour || colours.join(' / ') || first?.bodyColour || '',
     };
-  }, [matchingStoreIns, selectedCustomer, selectedStyle, selectedComponent, selectedSchedule, hasRealSchedules, invoiceNo, poNo]);
+  }, [matchingStoreIns, selectedCustomer, selectedStyle, selectedColour, selectedComponent, selectedSchedule, hasRealSchedules, invoiceNo, poNo]);
 
   const receivedRows = useMemo<ReceivedRow[]>(() => {
     let runningTotal = 0;
@@ -459,7 +495,7 @@ export default function ReconciliationReportPage() {
   const lastReceivedRunningTotal = getLastNumber(receivedRows, 'runningTotal');
   const lastSentGoodTotal = getLastNumber(sentRows, 'goodTotal');
 
-  const reportReady = !!selectedCustomer && !!selectedStyle && !!selectedComponent && (!hasRealSchedules || !!selectedSchedule);
+  const reportReady = !!selectedCustomer && !!selectedStyle && !!selectedColour && !!selectedComponent && (!hasRealSchedules || !!selectedSchedule);
 
   const updateManualEntry = (rowKey: string, field: keyof ManualEntry, value: string) => {
     const parsed = Math.max(0, parseInt(value || '0', 10) || 0);
@@ -477,6 +513,7 @@ export default function ReconciliationReportPage() {
   const resetFilters = () => {
     setSelectedCustomer('');
     setSelectedStyle('');
+    setSelectedColour('');
     setSelectedComponent('');
     setSelectedSchedule('');
     setInvoiceNo('');
@@ -499,6 +536,7 @@ export default function ReconciliationReportPage() {
 
     setSelectedCustomer('');
     setSelectedStyle('');
+    setSelectedColour('');
     setSelectedComponent('');
     setSelectedSchedule('');
     setInvoiceNo('');
@@ -750,15 +788,15 @@ export default function ReconciliationReportPage() {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Report Scope</p>
-            <p className="text-sm text-slate-500">Select customer, style, component and schedule if available.</p>
+            <p className="text-sm text-slate-500">Select customer, style, colour, component and schedule if available.</p>
           </div>
           <button type="button" onClick={resetFilters} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100"><RotateCcw className="h-3.5 w-3.5" />Clear</button>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-600">Customer</label>
-            <select value={selectedCustomer} onChange={(event) => { setSelectedCustomer(event.target.value); setSelectedStyle(''); setSelectedComponent(''); setSelectedSchedule(''); }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500">
+            <select value={selectedCustomer} onChange={(event) => { setSelectedCustomer(event.target.value); setSelectedStyle(''); setSelectedColour(''); setSelectedComponent(''); setSelectedSchedule(''); }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500">
               <option value="">Select customer...</option>
               {customerOptions.map(customer => <option key={customer} value={customer}>{customer}</option>)}
             </select>
@@ -766,16 +804,24 @@ export default function ReconciliationReportPage() {
 
           <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-600">Style No</label>
-            <select value={selectedStyle} onChange={(event) => { setSelectedStyle(event.target.value); setSelectedComponent(''); setSelectedSchedule(''); }} disabled={!selectedCustomer} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+            <select value={selectedStyle} onChange={(event) => { setSelectedStyle(event.target.value); setSelectedColour(''); setSelectedComponent(''); setSelectedSchedule(''); }} disabled={!selectedCustomer} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
               <option value="">{selectedCustomer ? 'Select style...' : 'Select customer first...'}</option>
               {styleOptions.map(style => <option key={style} value={style}>{style}</option>)}
             </select>
           </div>
 
           <div className="space-y-1">
+            <label className="block text-xs font-medium text-slate-600">Colour</label>
+            <select value={selectedColour} onChange={(event) => { setSelectedColour(event.target.value); setSelectedComponent(''); setSelectedSchedule(''); }} disabled={!selectedStyle} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+              <option value="">{selectedStyle ? 'Select colour...' : 'Select style first...'}</option>
+              {colourOptions.map(colour => <option key={colour} value={colour}>{formatColourOption(colour)}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1">
             <label className="block text-xs font-medium text-slate-600">Component</label>
-            <select value={selectedComponent} onChange={(event) => { setSelectedComponent(event.target.value); setSelectedSchedule(''); }} disabled={!selectedStyle} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
-              <option value="">{selectedStyle ? 'Select component...' : 'Select style first...'}</option>
+            <select value={selectedComponent} onChange={(event) => { setSelectedComponent(event.target.value); setSelectedSchedule(''); }} disabled={!selectedColour} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+              <option value="">{selectedColour ? 'Select component...' : 'Select colour first...'}</option>
               {componentOptions.map(component => <option key={component} value={component}>{component}</option>)}
             </select>
           </div>
@@ -834,6 +880,7 @@ export default function ReconciliationReportPage() {
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 py-14 text-center">
           <FileSpreadsheet className="mx-auto mb-3 h-12 w-12 text-slate-300" />
           <p className="text-sm font-medium text-slate-500">Select the report scope to generate the reconciliation table.</p>
+          {selectedStyle && !selectedColour && <p className="mt-1 text-xs text-amber-600">Choose a colour before selecting the component.</p>}
           {selectedComponent && hasRealSchedules && !selectedSchedule && <p className="mt-1 text-xs text-amber-600">This style/component has schedule numbers, so choose a Schedule No before generating the report.</p>}
         </div>
       )}
