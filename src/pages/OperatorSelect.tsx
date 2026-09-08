@@ -254,7 +254,9 @@ export default function OperatorSelect() {
 
               {/* Logout option */}
               <button
-                onClick={logout}
+               onClick={() => {
+                void logout();
+              }}
                 className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors mt-2"
               >
                 <LogIn className="h-3.5 w-3.5 rotate-180" /> Sign out and switch account

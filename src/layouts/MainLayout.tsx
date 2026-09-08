@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { Role } from '../types';
+import IdleSessionManager from '../components/session/IdleSessionManager';
 
 interface NavItem {
   name: string;
@@ -163,6 +164,7 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-900 overflow-hidden">
+      <IdleSessionManager />
 
       {/* SIDEBAR */}
       <motion.aside
