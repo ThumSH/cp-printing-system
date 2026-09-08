@@ -2,9 +2,190 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, PackageOpen, ChevronDown, ChevronRight, Layers,
-  GitBranch, Filter, CalendarDays, RotateCcw,
+  GitBranch, Filter, CalendarDays, RotateCcw, Printer,
 } from 'lucide-react';
-import { useInventoryStore } from '../../store/inventoryStore';
+import { useInventoryStore, StoreInRecord } from '../../store/inventoryStore';
+
+
+const PRINT_COMPANY_NAME = 'COLOUR PLUS PRINTING SYSTEMS (PVT) LTD';
+const PRINT_REPORT_TITLE = 'STORE-IN CUT REPORT';
+const PRINT_LOGO_SRC = '/cp-logo.png';
+
+type PrintableBundle = {
+  bundleNo: string;
+  bundleQty: number;
+  size: string;
+  numberRange: string;
+  bundleOrder?: number;
+};
+
+function escapePrintHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatPrintQty(value: unknown) {
+  const parsed = typeof value === 'number' ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed.toLocaleString() : '';
+}
+
+function orderBundlesForPrint(bundles: PrintableBundle[]) {
+  const hasSavedOrder = bundles.some(bundle => typeof bundle.bundleOrder === 'number');
+  if (!hasSavedOrder) return bundles;
+
+  return bundles
+    .map((bundle, originalIndex) => ({ bundle, originalIndex }))
+    .sort((a, b) => {
+      const aOrder = a.bundle.bundleOrder ?? a.originalIndex + 1;
+      const bOrder = b.bundle.bundleOrder ?? b.originalIndex + 1;
+      return aOrder === bOrder ? a.originalIndex - b.originalIndex : aOrder - bOrder;
+    })
+    .map(({ bundle }) => bundle);
+}
+
+function printStoreInCutReport(record: StoreInRecord) {
+  const cuts = record.cuts || [];
+  const totalBundles = cuts.reduce((sum, cut) => sum + ((cut.bundles || []).length), 0);
+  const colourText = [record.bodyColour, record.printColour].map(v => String(v || '').trim()).filter(Boolean).join(' / ');
+
+  const cutSectionsHtml = cuts.map((cut, cutIndex) => {
+    const bundles = orderBundlesForPrint((cut.bundles || []) as PrintableBundle[]);
+    const bundleRowsHtml = bundles.map(bundle => `
+      <tr>
+        <td>${escapePrintHtml(bundle.bundleNo)}</td>
+        <td class="num">${formatPrintQty(bundle.bundleQty)}</td>
+        <td>${escapePrintHtml(bundle.size)}</td>
+        <td>${escapePrintHtml(bundle.numberRange || '-')}</td>
+        <td class="tick"></td>
+        <td class="tick"></td>
+      </tr>
+    `).join('') || `
+      <tr>
+        <td colspan="6" class="center muted">No bundle details found.</td>
+      </tr>
+    `;
+
+    return `
+      <section class="cut-section">
+        <div class="cut-title">
+          <div>
+            <span class="cut-index">Cut ${cutIndex + 1}</span>
+            <h3>${escapePrintHtml(cut.cutNo || '-')}</h3>
+          </div>
+          <div class="cut-qty">Qty: <strong>${formatPrintQty(cut.cutQty)}</strong></div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Bundle</th>
+              <th>Qty</th>
+              <th>Size</th>
+              <th>Range</th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${bundleRowsHtml}</tbody>
+        </table>
+      </section>
+    `;
+  }).join('') || '<p class="center muted">No cuts found for this Store-In record.</p>';
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>${escapePrintHtml(PRINT_REPORT_TITLE)} - ${escapePrintHtml(record.styleNo)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; font-size: 11px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #111827; padding-bottom: 8px; margin-bottom: 10px; }
+    .logo { width: 64px; height: 50px; border: 1px solid #d1d5db; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; text-align: center; color: #64748b; }
+    .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .title { flex: 1; }
+    .company { font-size: 15px; font-weight: 900; letter-spacing: .03em; text-transform: uppercase; }
+    .report-title { font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; margin-top: 2px; color: #334155; }
+    .generated { font-size: 10px; color: #64748b; text-align: right; }
+    .meta { display: grid; grid-template-columns: 80px 1fr 75px 1fr; gap: 6px 10px; border: 1px solid #cbd5e1; padding: 8px; margin-bottom: 10px; }
+    .label { font-weight: 800; text-transform: uppercase; color: #475569; }
+    .value { border-bottom: 1px solid #94a3b8; min-height: 14px; font-weight: 700; padding: 0 2px 2px; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+    .summary-card { border: 1px solid #cbd5e1; padding: 6px; }
+    .summary-card .small { color: #64748b; text-transform: uppercase; font-size: 9px; font-weight: 800; }
+    .summary-card .big { font-size: 15px; font-weight: 900; margin-top: 2px; }
+    .cut-section { page-break-inside: avoid; margin-top: 10px; }
+    .cut-title { display: flex; justify-content: space-between; align-items: end; margin-bottom: 4px; }
+    .cut-title h3 { margin: 0; font-size: 13px; font-weight: 900; color: #1e293b; }
+    .cut-index { display: block; font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: .08em; }
+    .cut-qty { font-size: 11px; color: #334155; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #334155; padding: 5px 6px; text-align: left; vertical-align: middle; height: 24px; }
+    th { background: #f1f5f9; color: #334155; font-size: 10px; text-transform: uppercase; font-weight: 900; }
+    .num { text-align: right; font-weight: 800; }
+    .tick { width: 42px; }
+    .center { text-align: center; }
+    .muted { color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo"><img src="${escapePrintHtml(PRINT_LOGO_SRC)}" onerror="this.style.display='none'; this.parentElement.innerHTML='CP<br/>LOGO';" /></div>
+    <div class="title">
+      <div class="company">${escapePrintHtml(PRINT_COMPANY_NAME)}</div>
+      <div class="report-title">${escapePrintHtml(PRINT_REPORT_TITLE)}</div>
+    </div>
+    <div class="generated">Generated<br/>${escapePrintHtml(new Date().toLocaleString())}</div>
+  </div>
+
+  <div class="meta">
+    <div class="label">Style No</div><div class="value">${escapePrintHtml(record.styleNo)}</div>
+    <div class="label">Customer</div><div class="value">${escapePrintHtml(record.customerName)}</div>
+    <div class="label">Revision</div><div class="value">${escapePrintHtml(record.revisionNo)}</div>
+    <div class="label">Component</div><div class="value">${escapePrintHtml(record.components)}</div>
+    <div class="label">IN-AD No</div><div class="value">${escapePrintHtml(record.inAdNo || '-')}</div>
+    <div class="label">Schedule</div><div class="value">${escapePrintHtml(record.scheduleNo || '-')}</div>
+    <div class="label">Job No</div><div class="value">${escapePrintHtml(record.jobNo || '-')}</div>
+    <div class="label">Date</div><div class="value">${escapePrintHtml(record.cutInDate || '-')}</div>
+    <div class="label">Colour</div><div class="value">${escapePrintHtml(colourText || '-')}</div>
+    <div class="label">Season</div><div class="value">${escapePrintHtml(record.season || '-')}</div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-card"><div class="small">IN Qty</div><div class="big">${formatPrintQty(record.inQty)}</div></div>
+    <div class="summary-card"><div class="small">Total Cut Qty</div><div class="big">${formatPrintQty(record.totalCutQty)}</div></div>
+    <div class="summary-card"><div class="small">Cuts</div><div class="big">${formatPrintQty(cuts.length)}</div></div>
+    <div class="summary-card"><div class="small">Bundles</div><div class="big">${formatPrintQty(totalBundles)}</div></div>
+  </div>
+
+  ${cutSectionsHtml}
+</body>
+</html>`;
+
+  const oldFrame = document.getElementById('store-in-search-cut-print-frame') as HTMLIFrameElement | null;
+  if (oldFrame) oldFrame.remove();
+
+  const frame = document.createElement('iframe');
+  frame.id = 'store-in-search-cut-print-frame';
+  frame.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:900px;height:1200px;';
+  document.body.appendChild(frame);
+
+  const doc = frame.contentDocument || frame.contentWindow?.document;
+  if (!doc) return;
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  setTimeout(() => {
+    frame.contentWindow?.focus();
+    frame.contentWindow?.print();
+    setTimeout(() => frame.remove(), 1000);
+  }, 300);
+}
 
 
 export default function StoreInSearchPage() {
@@ -518,6 +699,16 @@ export default function StoreInSearchPage() {
                         exit={{ opacity: 0, height: 0 }}
                         className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 overflow-hidden"
                       >
+                        <div className="mb-3 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => printStoreInCutReport(record)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                            Print Cut Report
+                          </button>
+                        </div>
                         <div className="grid grid-cols-2 gap-3 md:grid-cols-6 mb-4">
                           <MiniStat label="Approved Bulk" value={record.bulkQty} />
                           <MiniStat label="IN Qty" value={record.inQty} color="orange" />
