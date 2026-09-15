@@ -5,7 +5,7 @@ import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
 import {
   Factory, Save, Trash2, AlertCircle, CheckCircle2, X, Clock,
-  TrendingDown, Package,
+  TrendingDown, Package, Printer, RefreshCw,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 import { useDashboardStore } from '../../store/dashboardStore';
@@ -113,6 +113,59 @@ interface WorkerResumePayload {
   message?: string;
 }
 
+interface WorkerCutReportBundle {
+  id: string;
+  bundleNo: string;
+  bundleQty: number;
+  size: string;
+  numberRange: string;
+  bundleOrder?: number;
+}
+
+interface WorkerCutReportCut {
+  id: string;
+  cutNo: string;
+  cutQty: number;
+  bundles: WorkerCutReportBundle[];
+}
+
+interface WorkerCutReport {
+  id: string;
+  storeInRecordId: string;
+  submissionId: string;
+  revisionNo: number;
+  styleNo: string;
+  customerName: string;
+  bodyColour: string;
+  printColour: string;
+  component: string;
+  season: string;
+  inAdNo: string;
+  scheduleNo: string;
+  jobNo: string;
+  cutInDate: string;
+  inQty: number;
+  totalCutQty: number;
+  cut: WorkerCutReportCut;
+}
+
+type CutReportCheckField =
+  | 'productionIn'
+  | 'productionOut'
+  | 'handedOverToQc'
+  | 'checkingStatus'
+  | 'curingStatus';
+
+type CutReportTickState = Record<string, Partial<Record<CutReportCheckField, boolean>>>;
+
+const CUT_REPORT_CHECK_COLUMNS: { key: CutReportCheckField; label: string; printLabel: string }[] = [
+  { key: 'productionIn', label: 'Production IN', printLabel: 'Production<br/>IN' },
+  { key: 'productionOut', label: 'Production Out', printLabel: 'Production<br/>OUT' },
+  { key: 'handedOverToQc', label: 'Handed over to QC department', printLabel: 'Handed Over<br/>to QC Dept.' },
+  { key: 'checkingStatus', label: 'Checking status', printLabel: 'Checking<br/>Status' },
+  { key: 'curingStatus', label: 'Curing status', printLabel: 'Curing<br/>Status' },
+];
+
 // ==========================================
 // HELPERS
 // ==========================================
@@ -175,6 +228,175 @@ const maxStageValue = (totals: StageTotals) =>
 const minStageValue = (totals: StageTotals) =>
   Math.min(...SECTIONS.map(sec => totals[sec.key]));
 
+
+const WORKER_CUT_REPORT_TITLE = 'STORE-IN CUT REPORT';
+const WORKER_CUT_REPORT_LOGO_SRC = '/cp-logo.png';
+const WORKER_CUT_REPORT_COMPANY = 'COLOUR PLUS PRINTING SYSTEMS (PVT) LTD';
+
+function escapeCutReportHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatCutReportQty(value: unknown) {
+  const parsed = typeof value === 'number' ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed.toLocaleString() : '';
+}
+
+function makeCutReportBundleKey(bundle: WorkerCutReportBundle, index: number) {
+  return `${bundle.id || bundle.bundleNo || 'bundle'}_${index}`;
+}
+
+function printWorkerCutReport(report: WorkerCutReport, tickState: CutReportTickState) {
+  const cut = report.cut;
+  const bundles = Array.isArray(cut?.bundles) ? cut.bundles : [];
+  const colourText = [report.bodyColour, report.printColour]
+    .map(v => String(v || '').trim())
+    .filter(Boolean)
+    .join(' / ');
+
+  const checkHeaders = CUT_REPORT_CHECK_COLUMNS
+    .map(column => `<th class="check-head">${column.printLabel}</th>`)
+    .join('');
+
+  const bundleRowsHtml = bundles.map((bundle, index) => {
+    const bundleKey = makeCutReportBundleKey(bundle, index);
+    const checkCells = CUT_REPORT_CHECK_COLUMNS.map((column) => {
+      const checked = tickState[bundleKey]?.[column.key] === true;
+      return `<td class="check-cell"><span class="box">${checked ? '✓' : ''}</span></td>`;
+    }).join('');
+
+    return `
+      <tr>
+        <td>${escapeCutReportHtml(bundle.bundleNo)}</td>
+        <td class="num">${formatCutReportQty(bundle.bundleQty)}</td>
+        <td>${escapeCutReportHtml(bundle.size)}</td>
+        <td>${escapeCutReportHtml(bundle.numberRange || '-')}</td>
+        ${checkCells}
+      </tr>
+    `;
+  }).join('') || `
+      <tr>
+        <td colspan="9" class="center muted">No bundle details found for the selected cut.</td>
+      </tr>
+    `;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>${escapeCutReportHtml(WORKER_CUT_REPORT_TITLE)} - ${escapeCutReportHtml(report.styleNo)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; font-size: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #111827; padding-bottom: 8px; margin-bottom: 10px; }
+    .logo { width: 64px; height: 50px; border: 1px solid #d1d5db; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; text-align: center; color: #64748b; }
+    .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .title { flex: 1; }
+    .company { font-size: 15px; font-weight: 900; letter-spacing: .03em; text-transform: uppercase; }
+    .report-title { font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; margin-top: 2px; color: #334155; }
+    .generated { font-size: 10px; color: #64748b; text-align: right; }
+    .meta { display: grid; grid-template-columns: 80px 1fr 75px 1fr; gap: 6px 10px; border: 1px solid #cbd5e1; padding: 8px; margin-bottom: 10px; }
+    .label { font-weight: 800; text-transform: uppercase; color: #475569; }
+    .value { border-bottom: 1px solid #94a3b8; min-height: 14px; font-weight: 700; padding: 0 2px 2px; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+    .summary-card { border: 1px solid #cbd5e1; padding: 6px; }
+    .summary-card .small { color: #64748b; text-transform: uppercase; font-size: 9px; font-weight: 800; }
+    .summary-card .big { font-size: 15px; font-weight: 900; margin-top: 2px; }
+    .cut-title { display: flex; justify-content: space-between; align-items: end; margin: 10px 0 4px; }
+    .cut-title h3 { margin: 0; font-size: 13px; font-weight: 900; color: #1e293b; }
+    .cut-index { display: block; font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: .08em; }
+    .cut-qty { font-size: 11px; color: #334155; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #334155; padding: 4px 5px; text-align: left; vertical-align: middle; height: 24px; }
+    th { background: #f1f5f9; color: #334155; font-size: 8px; text-transform: uppercase; font-weight: 900; }
+    .num { text-align: right; font-weight: 800; }
+    .check-head { text-align: center; line-height: 1.15; }
+    .check-cell { text-align: center; width: 72px; }
+    .box { display: inline-flex; width: 13px; height: 13px; border: 1.5px solid #111827; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 900; }
+    .center { text-align: center; }
+    .muted { color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo"><img src="${escapeCutReportHtml(WORKER_CUT_REPORT_LOGO_SRC)}" onerror="this.style.display='none'; this.parentElement.innerHTML='CP<br/>LOGO';" /></div>
+    <div class="title">
+      <div class="company">${escapeCutReportHtml(WORKER_CUT_REPORT_COMPANY)}</div>
+      <div class="report-title">${escapeCutReportHtml(WORKER_CUT_REPORT_TITLE)}</div>
+    </div>
+    <div class="generated">Generated<br/>${escapeCutReportHtml(new Date().toLocaleString())}</div>
+  </div>
+
+  <div class="meta">
+    <div class="label">Style No</div><div class="value">${escapeCutReportHtml(report.styleNo)}</div>
+    <div class="label">Customer</div><div class="value">${escapeCutReportHtml(report.customerName)}</div>
+    <div class="label">Revision</div><div class="value">${escapeCutReportHtml(report.revisionNo)}</div>
+    <div class="label">Component</div><div class="value">${escapeCutReportHtml(report.component)}</div>
+    <div class="label">IN-AD No</div><div class="value">${escapeCutReportHtml(report.inAdNo || '-')}</div>
+    <div class="label">Schedule</div><div class="value">${escapeCutReportHtml(report.scheduleNo || '-')}</div>
+    <div class="label">Job No</div><div class="value">${escapeCutReportHtml(report.jobNo || '-')}</div>
+    <div class="label">Date</div><div class="value">${escapeCutReportHtml(report.cutInDate || '-')}</div>
+    <div class="label">Colour</div><div class="value">${escapeCutReportHtml(colourText || '-')}</div>
+    <div class="label">Season</div><div class="value">${escapeCutReportHtml(report.season || '-')}</div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-card"><div class="small">IN Qty</div><div class="big">${formatCutReportQty(report.inQty)}</div></div>
+    <div class="summary-card"><div class="small">Total Cut Qty</div><div class="big">${formatCutReportQty(report.totalCutQty)}</div></div>
+    <div class="summary-card"><div class="small">Cuts</div><div class="big">1</div></div>
+    <div class="summary-card"><div class="small">Bundles</div><div class="big">${formatCutReportQty(bundles.length)}</div></div>
+  </div>
+
+  <div class="cut-title">
+    <div>
+      <span class="cut-index">Selected Cut</span>
+      <h3>${escapeCutReportHtml(cut?.cutNo || '-')}</h3>
+    </div>
+    <div class="cut-qty">Qty: <strong>${formatCutReportQty(cut?.cutQty)}</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Bundle</th>
+        <th>Qty</th>
+        <th>Size</th>
+        <th>Range</th>
+        ${checkHeaders}
+      </tr>
+    </thead>
+    <tbody>${bundleRowsHtml}</tbody>
+  </table>
+</body>
+</html>`;
+
+  const oldFrame = document.getElementById('worker-cut-report-print-frame') as HTMLIFrameElement | null;
+  if (oldFrame) oldFrame.remove();
+
+  const frame = document.createElement('iframe');
+  frame.id = 'worker-cut-report-print-frame';
+  frame.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:900px;height:1200px;';
+  document.body.appendChild(frame);
+
+  const doc = frame.contentDocument || frame.contentWindow?.document;
+  if (!doc) return;
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  setTimeout(() => {
+    frame.contentWindow?.focus();
+    frame.contentWindow?.print();
+    setTimeout(() => frame.remove(), 1000);
+  }, 300);
+}
+
 // ==========================================
 // COMPONENT
 // ==========================================
@@ -201,6 +423,10 @@ export default function DailyOutputPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isCompletingJob, setIsCompletingJob] = useState(false);
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
+  const [workerCutReport, setWorkerCutReport] = useState<WorkerCutReport | null>(null);
+  const [isCutReportLoading, setIsCutReportLoading] = useState(false);
+  const [cutReportError, setCutReportError] = useState('');
+  const [cutReportTicks, setCutReportTicks] = useState<CutReportTickState>({});
 
   const [confirmModal, setConfirmModal] = useState<{ rowIndex: number; slot: TimeSlot } | null>(null);
 
@@ -465,6 +691,99 @@ export default function DailyOutputPage() {
   );
 
   const effectiveStoreInId = selectedItem?.storeInRecordId || '';
+
+  const loadWorkerCutReport = async (item: EligibleStyle | null, resetTicks = true) => {
+    const storeInRecordId = item?.storeInRecordId?.trim() || '';
+    const cutNo = item?.cutNo?.trim() || '';
+
+    if (!storeInRecordId || !cutNo) {
+      setWorkerCutReport(null);
+      setCutReportError('');
+      if (resetTicks) setCutReportTicks({});
+      return;
+    }
+
+    setIsCutReportLoading(true);
+    setCutReportError('');
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/store-in-cut-report?storeInRecordId=${encodeURIComponent(storeInRecordId)}&cutNo=${encodeURIComponent(cutNo)}`,
+        { headers: getHeaders() }
+      );
+
+      if (!response.ok) {
+        throw new Error(await response.text() || 'Failed to load Store-In cut report.');
+      }
+
+      const data = await response.json();
+      setWorkerCutReport(data);
+      if (resetTicks) setCutReportTicks({});
+    } catch (error) {
+      setWorkerCutReport(null);
+      setCutReportError(error instanceof Error ? error.message : 'Failed to load Store-In cut report.');
+      if (resetTicks) setCutReportTicks({});
+    } finally {
+      setIsCutReportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      const storeInRecordId = selectedItem?.storeInRecordId?.trim() || '';
+      const cutNo = selectedItem?.cutNo?.trim() || '';
+
+      if (!storeInRecordId || !cutNo) {
+        setWorkerCutReport(null);
+        setCutReportError('');
+        setCutReportTicks({});
+        return;
+      }
+
+      setIsCutReportLoading(true);
+      setCutReportError('');
+      setCutReportTicks({});
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/store-in-cut-report?storeInRecordId=${encodeURIComponent(storeInRecordId)}&cutNo=${encodeURIComponent(cutNo)}`,
+          { headers: getHeaders() }
+        );
+
+        if (!response.ok) {
+          throw new Error(await response.text() || 'Failed to load Store-In cut report.');
+        }
+
+        const data = await response.json();
+        if (!cancelled) setWorkerCutReport(data);
+      } catch (error) {
+        if (!cancelled) {
+          setWorkerCutReport(null);
+          setCutReportError(error instanceof Error ? error.message : 'Failed to load Store-In cut report.');
+        }
+      } finally {
+        if (!cancelled) setIsCutReportLoading(false);
+      }
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedItem?.storeInRecordId, selectedItem?.cutNo]);
+
+  const toggleCutReportTick = (bundleKey: string, field: CutReportCheckField) => {
+    setCutReportTicks(prev => ({
+      ...prev,
+      [bundleKey]: {
+        ...(prev[bundleKey] || {}),
+        [field]: !prev[bundleKey]?.[field],
+      },
+    }));
+  };
 
   const distinctStyles = useMemo(() => {
     const map = new Map<string, {
@@ -1174,6 +1493,142 @@ export default function DailyOutputPage() {
                 </tr>
               </tbody>
             </table>
+          </div>
+        )}
+
+        {selectedItem && (
+          <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                  <Package className="h-4 w-4 text-teal-600" />
+                  Selected Cut Report
+                </div>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Store-In bundle details for the selected cut. Tick the status boxes only when needed before printing.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void loadWorkerCutReport(selectedItem, false)}
+                  disabled={isCutReportLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isCutReportLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => workerCutReport && printWorkerCutReport(workerCutReport, cutReportTicks)}
+                  disabled={!workerCutReport || isCutReportLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print Cut Report
+                </button>
+              </div>
+            </div>
+
+            {isCutReportLoading ? (
+              <div className="flex items-center gap-2 px-4 py-5 text-sm text-slate-500">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Loading selected cut report...
+              </div>
+            ) : cutReportError ? (
+              <div className="flex items-center gap-2 px-4 py-4 text-sm text-red-600">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {cutReportError}
+              </div>
+            ) : workerCutReport ? (
+              <div className="space-y-4 p-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Style / Customer</p>
+                    <p className="mt-1 text-sm font-black text-slate-800">{workerCutReport.styleNo}</p>
+                    <p className="text-xs text-slate-500">{workerCutReport.customerName}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Cut / Component</p>
+                    <p className="mt-1 text-sm font-black text-slate-800">{workerCutReport.cut?.cutNo || '-'}</p>
+                    <p className="text-xs text-slate-500">{workerCutReport.component || '-'}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">IN-AD / Schedule</p>
+                    <p className="mt-1 text-sm font-black text-slate-800">{workerCutReport.inAdNo || '-'}</p>
+                    <p className="text-xs text-slate-500">Sch: {workerCutReport.scheduleNo || '-'}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Cut Qty / Bundles</p>
+                    <p className="mt-1 text-sm font-black text-slate-800">{formatCutReportQty(workerCutReport.cut?.cutQty)}</p>
+                    <p className="text-xs text-slate-500">{formatCutReportQty(workerCutReport.cut?.bundles?.length || 0)} bundles</p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <span className="font-bold text-slate-700">Colour:</span>{' '}
+                  {[workerCutReport.bodyColour, workerCutReport.printColour].filter(Boolean).join(' / ') || '-'}
+                  <span className="mx-2 text-slate-300">|</span>
+                  <span className="font-bold text-slate-700">Job:</span> {workerCutReport.jobNo || '-'}
+                  <span className="mx-2 text-slate-300">|</span>
+                  <span className="font-bold text-slate-700">Date:</span> {workerCutReport.cutInDate || '-'}
+                </div>
+
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="min-w-275 w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-800 text-white">
+                        <th className="px-3 py-2 text-left font-bold">Bundle</th>
+                        <th className="px-3 py-2 text-right font-bold">Qty</th>
+                        <th className="px-3 py-2 text-left font-bold">Size</th>
+                        <th className="px-3 py-2 text-left font-bold">Range</th>
+                        {CUT_REPORT_CHECK_COLUMNS.map(column => (
+                          <th key={column.key} className="px-3 py-2 text-center font-bold">
+                            {column.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {(workerCutReport.cut?.bundles || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
+                            No bundle details found for this cut.
+                          </td>
+                        </tr>
+                      ) : (
+                        workerCutReport.cut.bundles.map((bundle, index) => {
+                          const bundleKey = makeCutReportBundleKey(bundle, index);
+                          return (
+                            <tr key={bundleKey} className="text-slate-700 hover:bg-slate-50">
+                              <td className="px-3 py-2 font-semibold">{bundle.bundleNo}</td>
+                              <td className="px-3 py-2 text-right font-bold">{formatCutReportQty(bundle.bundleQty)}</td>
+                              <td className="px-3 py-2">{bundle.size}</td>
+                              <td className="px-3 py-2 text-slate-500">{bundle.numberRange || '-'}</td>
+                              {CUT_REPORT_CHECK_COLUMNS.map(column => (
+                                <td key={column.key} className="px-3 py-2 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={cutReportTicks[bundleKey]?.[column.key] === true}
+                                    onChange={() => toggleCutReportTick(bundleKey, column.key)}
+                                    className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                                    aria-label={`${column.label} for bundle ${bundle.bundleNo}`}
+                                  />
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="px-4 py-5 text-sm text-slate-400">
+                Select a cut and line to load the Store-In cut report.
+              </div>
+            )}
           </div>
         )}
       </div>
