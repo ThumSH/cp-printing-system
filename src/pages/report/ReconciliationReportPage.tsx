@@ -109,6 +109,44 @@ interface ManualEntry {
   rtn: number;
 }
 
+interface ReconciliationSaveConflict {
+  reason: string;
+  message: string;
+  existingReportId: string;
+  existingReportDate: string;
+  existingCreatedAt: string;
+  existingUpdatedAt: string;
+  isExactDuplicate: boolean;
+}
+
+type ReconciliationSavePayload = {
+  customerName: string;
+  styleNo: string;
+  component: string;
+  scheduleNo: string;
+  jobNos: string;
+  invoiceNo: string;
+  poNo: string;
+  colour: string;
+  reportDate: string;
+  totals: {
+    receivedQty: number;
+    sentTotal: number;
+    pdTotal: number;
+    fdTotal: number;
+    sampleTestingTotal: number;
+    rtnTotal: number;
+    goodQtyTotal: number;
+  };
+  rows: ReturnType<typeof buildSavedRowsPlaceholder>;
+};
+
+// Type-only helper so ReconciliationSavePayload can describe the saved row array shape
+// without changing the runtime report logic.
+function buildSavedRowsPlaceholder(): Array<Record<string, string | number | null>> {
+  return [];
+}
+
 function uniq(values: string[]) {
   return Array.from(new Set(values.map(v => (v || '').trim()).filter(Boolean))).sort();
 }
@@ -222,6 +260,7 @@ export default function ReconciliationReportPage() {
   const [pageError, setPageError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isSavingReport, setIsSavingReport] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<{ conflict: ReconciliationSaveConflict; payload: ReconciliationSavePayload } | null>(null);
 
   useEffect(() => {
     try {
@@ -518,6 +557,7 @@ export default function ReconciliationReportPage() {
     setSelectedSchedule('');
     setInvoiceNo('');
     setPoNo('');
+    setPendingUpdate(null);
   };
 
   const clearCurrentReportAfterSave = () => {
@@ -541,6 +581,7 @@ export default function ReconciliationReportPage() {
     setSelectedSchedule('');
     setInvoiceNo('');
     setPoNo('');
+    setPendingUpdate(null);
   };
 
 
@@ -576,45 +617,91 @@ export default function ReconciliationReportPage() {
     return rows;
   };
 
+  const buildSavePayload = (): ReconciliationSavePayload => {
+    const today = new Date().toISOString().split('T')[0];
+
+    return {
+      customerName: reportMeta.customer,
+      styleNo: reportMeta.styleNo,
+      component: reportMeta.component,
+      scheduleNo: reportMeta.scheduleNo || '',
+      jobNos: reportMeta.jobNos || '',
+      invoiceNo: reportMeta.invoiceNo || '',
+      poNo: reportMeta.poNo || '',
+      colour: reportMeta.colour || '',
+      reportDate: today,
+      totals: {
+        receivedQty: totals.receivedQty,
+        sentTotal: totals.sentTotal,
+        pdTotal: totals.pd,
+        fdTotal: totals.fd,
+        sampleTestingTotal: totals.sampleTesting,
+        rtnTotal: totals.rtn,
+        goodQtyTotal: totals.goodQty,
+      },
+      rows: buildSavedRows(),
+    };
+  };
+
+  const readSaveError = async (res: Response) => {
+    const text = await res.text();
+
+    try {
+      const parsed = JSON.parse(text) as Partial<ReconciliationSaveConflict>;
+      return {
+        reason: parsed.reason || '',
+        message: parsed.message || text || 'Failed to save reconciliation report.',
+        existingReportId: parsed.existingReportId || '',
+        existingReportDate: parsed.existingReportDate || '',
+        existingCreatedAt: parsed.existingCreatedAt || '',
+        existingUpdatedAt: parsed.existingUpdatedAt || '',
+        isExactDuplicate: !!parsed.isExactDuplicate,
+      };
+    } catch {
+      return {
+        reason: '',
+        message: text || 'Failed to save reconciliation report.',
+        existingReportId: '',
+        existingReportDate: '',
+        existingCreatedAt: '',
+        existingUpdatedAt: '',
+        isExactDuplicate: false,
+      };
+    }
+  };
+
   const saveReport = async () => {
     if (!reportReady || maxRows === 0) return;
 
     setIsSavingReport(true);
     setPageError('');
     setSuccessMsg('');
+    setPendingUpdate(null);
+
+    const payload = buildSavePayload();
 
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const payload = {
-        customerName: reportMeta.customer,
-        styleNo: reportMeta.styleNo,
-        component: reportMeta.component,
-        scheduleNo: reportMeta.scheduleNo || '',
-        jobNos: reportMeta.jobNos || '',
-        invoiceNo: reportMeta.invoiceNo || '',
-        poNo: reportMeta.poNo || '',
-        colour: reportMeta.colour || '',
-        reportDate: today,
-        totals: {
-          receivedQty: totals.receivedQty,
-          sentTotal: totals.sentTotal,
-          pdTotal: totals.pd,
-          fdTotal: totals.fd,
-          sampleTestingTotal: totals.sampleTesting,
-          rtnTotal: totals.rtn,
-          goodQtyTotal: totals.goodQty,
-        },
-        rows: buildSavedRows(),
-      };
-
       const res = await fetch(`${API.BASE}/api/reconciliation/saved`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(payload),
       });
 
+      if (res.status === 409) {
+        const conflict = await readSaveError(res);
+
+        if (conflict.reason === 'SAME_SCOPE_EXISTS' && conflict.existingReportId) {
+          setPendingUpdate({ conflict, payload });
+          return;
+        }
+
+        setPageError(conflict.message || 'This exact reconciliation report is already saved.');
+        return;
+      }
+
       if (!res.ok) {
-        throw new Error(await res.text() || 'Failed to save reconciliation report.');
+        const error = await readSaveError(res);
+        throw new Error(error.message || 'Failed to save reconciliation report.');
       }
 
       setSuccessMsg('Reconciliation report saved successfully. You can access it from the Reconciliation Report Search page.');
@@ -623,6 +710,37 @@ export default function ReconciliationReportPage() {
       window.setTimeout(() => setSuccessMsg(''), 5000);
     } catch (error) {
       setPageError(error instanceof Error ? error.message : 'Failed to save reconciliation report.');
+    } finally {
+      setIsSavingReport(false);
+    }
+  };
+
+  const updateExistingReport = async () => {
+    if (!pendingUpdate) return;
+
+    setIsSavingReport(true);
+    setPageError('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch(`${API.BASE}/api/reconciliation/saved/${pendingUpdate.conflict.existingReportId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(pendingUpdate.payload),
+      });
+
+      if (!res.ok) {
+        const error = await readSaveError(res);
+        throw new Error(error.message || 'Failed to update existing reconciliation report.');
+      }
+
+      setPendingUpdate(null);
+      setSuccessMsg('Existing reconciliation report updated successfully. You can access it from the Reconciliation Report Search page.');
+      clearCurrentReportAfterSave();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : 'Failed to update existing reconciliation report.');
     } finally {
       setIsSavingReport(false);
     }
@@ -783,6 +901,47 @@ export default function ReconciliationReportPage() {
 
       {pageError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"><AlertCircle className="mr-1 inline h-4 w-4" />{pageError}</div>}
       {successMsg && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{successMsg}</div>}
+
+      {pendingUpdate && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-700" />
+                <p className="text-sm font-black text-amber-900">A saved reconciliation report already exists for this scope.</p>
+              </div>
+              <p className="text-sm text-amber-800">
+                Same customer, style, colour, component and schedule already has a saved report.
+                Update the existing report if these new quantities or invoice details belong to the same report.
+              </p>
+              <p className="text-xs text-amber-700">
+                Existing saved date: <span className="font-bold">{pendingUpdate.conflict.existingReportDate || '—'}</span>
+                {pendingUpdate.conflict.existingUpdatedAt ? (
+                  <> · Last updated: <span className="font-bold">{pendingUpdate.conflict.existingUpdatedAt}</span></>
+                ) : null}
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingUpdate(null)}
+                disabled={isSavingReport}
+                className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={updateExistingReport}
+                disabled={isSavingReport}
+                className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSavingReport ? 'Updating...' : 'Update Existing Report'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
