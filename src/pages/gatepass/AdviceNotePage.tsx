@@ -983,73 +983,226 @@ function printAdviceNote(note: AdviceNoteRecord) {
     <td class="bold" style="color:#166534;">${grandGood}</td>
   </tr>`;
 
-  const html = `<!DOCTYPE html><html><head>
-    <title>${note.adNo}</title>
-    <style>
-      @page { size: A4 portrait; margin: 0; }
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; font-size: 12px; color: #000; padding: 10mm; }
-      .hdr { display: flex; justify-content: space-between; margin-bottom: 6px; }
-      .hdr-left h1 { font-size: 16px; font-weight: 900; }
-      .hdr-left p, .hdr-right p { margin: 2px 0; font-size: 11px; }
-      .hdr-right { text-align: right; }
-      .ad-block { text-align: center; margin: 8px 0; }
-      .ad-no { font-size: 22px; font-weight: 900; border: 2px solid #000; padding: 4px 16px; display: inline-block; }
-      .info .row { display: flex; margin: 4px 0; font-size: 12px;}
-      .info .lbl { font-weight: 700; min-width: 100px; }
-      .info .val { border-bottom: 1px solid #000; flex: 1; min-height: 16px; padding: 0 4px; }
-      table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-top: 8px; }
-      th, td { border: 0.5px solid #000; padding: 4px; font-size: 11px; text-align: center; height: 22px; }
-      th { background: #e0e0e0; font-weight: 700; font-size: 12px;}
-      .bold { font-weight: 700; }
-      .red { color: #c00; }
-      .comp { color: #1a6b3c; font-weight: 600; }
-      .sub-row td { background: #fff8e7; font-weight: 700; border-top: 1.5px solid #d97706; border-bottom: 1.5px solid #d97706; }
-      .total-row td { border-top: 2px solid #000; font-weight: 700; background: #f0f0f0; }
-      .remarks { margin-top: 8px; font-size: 12px; border-top: 1px solid #000; padding-top: 5px; }
-      .footer { display: flex; justify-content: space-between; margin-top: 24px; }
-      .footer .sig { flex: 1; text-align: center; font-size: 12px; }
-      .footer .sig .lbl { font-weight: 700; font-style: italic; margin-bottom: 24px; }
-      .footer .sig .line { border-top: 1px solid #000; padding-top: 4px; margin: 0 15px; }
-      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-    </style>
-    </head><body>
+ const html = `<!DOCTYPE html><html><head>
+  <title>${note.adNo}</title>
+  <style>
+    @page { size: A4 portrait; margin: 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      color: #000;
+      padding: 10mm;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .watermark {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .watermark img {
+      width: 65%;
+      max-width: 520px;
+      height: auto;
+      opacity: 0.07;
+      transform: rotate(-28deg);
+    }
+
+    .page-content {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hdr { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .hdr-left h1 { font-size: 16px; font-weight: 900; }
+    .hdr-left p, .hdr-right p { margin: 2px 0; font-size: 11px; }
+    .hdr-right { text-align: right; }
+    .ad-block { text-align: center; margin: 8px 0; }
+    .ad-no {
+      font-size: 22px;
+      font-weight: 900;
+      border: 2px solid #000;
+      padding: 4px 16px;
+      display: inline-block;
+    }
+
+    .info .row { display: flex; margin: 4px 0; font-size: 12px; }
+    .info .lbl { font-weight: 700; min-width: 100px; }
+    .info .val {
+      border-bottom: 1px solid #000;
+      flex: 1;
+      min-height: 16px;
+      padding: 0 4px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1.5px solid #000;
+      margin-top: 8px;
+      background: transparent;
+    }
+
+    th, td {
+      border: 0.5px solid #000;
+      padding: 4px;
+      font-size: 11px;
+      text-align: center;
+      height: 22px;
+      background: transparent;
+    }
+
+    th {
+      background: #e0e0e0;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .bold { font-weight: 700; }
+    .red { color: #c00; }
+    .comp { color: #1a6b3c; font-weight: 600; }
+
+    .sub-row td {
+      background: #fff8e7;
+      font-weight: 700;
+      border-top: 1.5px solid #d97706;
+      border-bottom: 1.5px solid #d97706;
+    }
+
+    .total-row td {
+      border-top: 2px solid #000;
+      font-weight: 700;
+      background: #f0f0f0;
+    }
+
+    .remarks {
+      margin-top: 8px;
+      font-size: 12px;
+      border-top: 1px solid #000;
+      padding-top: 5px;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 24px;
+    }
+
+    .footer .sig {
+      flex: 1;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .footer .sig .lbl {
+      font-weight: 700;
+      font-style: italic;
+      margin-bottom: 24px;
+    }
+
+    .footer .sig .line {
+      border-top: 1px solid #000;
+      padding-top: 4px;
+      margin: 0 15px;
+    }
+
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
+  </head><body>
+
+  <div class="watermark">
+    <img src="/logo.svg" alt="CP Watermark" />
+  </div>
+
+  <div class="page-content">
     <div class="hdr">
       <div class="hdr-left" style="display: flex; align-items: center; gap: 10px;">
         <img src="/logo.svg" alt="Logo" style="height: 40px; width: auto;" />
-        <div><h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
-        <p>SCREEN PRINTERS FOR TEXTILES</p>
-        <p>E-mail: colourplus@sitnet.lk</p></div>
+        <div>
+          <h1>COLOUR PLUS PRINTING SYSTEMS (PVT) LTD.</h1>
+          <p>SCREEN PRINTERS FOR TEXTILES</p>
+          <p>E-mail: colourplus@sitnet.lk</p>
+        </div>
       </div>
-      <div class="hdr-right"><p>564, Athurugiriya Road, Kottawa.</p><p>Tel: 011 278 1525</p></div>
+      <div class="hdr-right">
+        <p>564, Athurugiriya Road, Kottawa.</p>
+        <p>Tel: 011 278 1525</p>
+      </div>
     </div>
+
     <div class="ad-block">
       <span style="font-size:12px;font-weight:700">AD No:</span>
       <span class="ad-no">${note.adNo}</span>
       <span style="margin-left:40px;font-size:12px"><b>Date:</b> ${note.deliveryDate}</span>
     </div>
-    <div class="info">
-      <div class="row"><span class="lbl">Customer:</span><span class="val">${note.customerName}</span>
-      <span class="lbl" style="margin-left:20px">Attn:</span><span class="val">${note.attn}</span></div>
-      <div class="row"><span class="lbl">Style #:</span><span class="val">${note.styleNo}</span></div>
-      <div class="row"><span class="lbl">Address:</span><span class="val">${note.address}</span></div>
-      <div class="row"><span class="lbl">Schedule No:</span><span class="val">${note.scheduleNo || ''}</span>
-      <span class="lbl" style="margin-left:20px">Job No:</span><span class="val">${note.jobNo || ''}</span></div>
-    </div>
-    <table><thead><tr>
-      <th style="width:24px"></th>
-      <th>COLOUR</th><th>BUN NO.</th><th>SIZE</th><th>CUT FORM</th>
-      <th>COMPONENT</th>
-      <th>TOTAL PCS</th><th>P/D</th><th>F/D</th><th>GOOD QTY</th>
-    </tr></thead><tbody>${tableRows}</tbody></table>
-    <div class="remarks"><b>Remarks.</b> ${note.remarks || ''}</div>
-    <div class="footer">
-      <div class="sig"><div class="lbl">Received by</div><div class="line">${note.receivedByName || ''}</div></div>
-      <div class="sig"><div class="lbl">Prep. & Checked by</div><div class="line">${note.prepByName || ''}</div></div>
-      <div class="sig"><div class="lbl">Authorized by</div><div class="line">${note.authByName || ''}</div></div>
-    </div>
-    </body></html>`;
 
+    <div class="info">
+      <div class="row">
+        <span class="lbl">Customer:</span><span class="val">${note.customerName}</span>
+        <span class="lbl" style="margin-left:20px">Attn:</span><span class="val">${note.attn}</span>
+      </div>
+      <div class="row">
+        <span class="lbl">Style #:</span><span class="val">${note.styleNo}</span>
+      </div>
+      <div class="row">
+        <span class="lbl">Address:</span><span class="val">${note.address}</span>
+      </div>
+      <div class="row">
+        <span class="lbl">Schedule No:</span><span class="val">${note.scheduleNo || ''}</span>
+        <span class="lbl" style="margin-left:20px">Job No:</span><span class="val">${note.jobNo || ''}</span>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:24px"></th>
+          <th>COLOUR</th>
+          <th>BUN NO.</th>
+          <th>SIZE</th>
+          <th>CUT FORM</th>
+          <th>COMPONENT</th>
+          <th>TOTAL PCS</th>
+          <th>P/D</th>
+          <th>F/D</th>
+          <th>GOOD QTY</th>
+        </tr>
+      </thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+
+    <div class="remarks"><b>Remarks.</b> ${note.remarks || ''}</div>
+
+    <div class="footer">
+      <div class="sig">
+        <div class="lbl">Received by</div>
+        <div class="line">${note.receivedByName || ''}</div>
+      </div>
+      <div class="sig">
+        <div class="lbl">Prep. & Checked by</div>
+        <div class="line">${note.prepByName || ''}</div>
+      </div>
+      <div class="sig">
+        <div class="lbl">Authorized by</div>
+        <div class="line">${note.authByName || ''}</div>
+      </div>
+    </div>
+  </div>
+
+  </body></html>`;
   const old = document.getElementById('gatepass-print-frame') as HTMLIFrameElement | null;
   if (old) old.remove();
   const frame = document.createElement('iframe');
