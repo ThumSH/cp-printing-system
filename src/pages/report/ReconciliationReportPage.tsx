@@ -3,10 +3,12 @@ import { motion } from 'framer-motion';
 import {
   AlertCircle,
   FileSpreadsheet,
+  Plus,
   Printer,
   RefreshCw,
   RotateCcw,
   Save,
+  Trash2,
 } from 'lucide-react';
 
 import { API, getAuthHeaders } from '../../api/client';
@@ -109,6 +111,25 @@ interface ManualEntry {
   rtn: number;
 }
 
+interface InvoiceDetailRow {
+  id: string;
+  invoiceNo: string;
+  qty: string;
+}
+
+interface PoDetailRow {
+  id: string;
+  poNo: string;
+  qty: string;
+}
+
+interface DocumentDetailValidation {
+  formatted: string;
+  errors: string[];
+  totalQty: number;
+  hasAnyValue: boolean;
+}
+
 interface ReconciliationSaveConflict {
   reason: string;
   message: string;
@@ -145,6 +166,154 @@ type ReconciliationSavePayload = {
 // without changing the runtime report logic.
 function buildSavedRowsPlaceholder(): Array<Record<string, string | number | null>> {
   return [];
+}
+
+
+function makeDocumentDetailId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function makeInvoiceDetailRow(): InvoiceDetailRow {
+  return { id: makeDocumentDetailId(), invoiceNo: '', qty: '' };
+}
+
+function makePoDetailRow(): PoDetailRow {
+  return { id: makeDocumentDetailId(), poNo: '', qty: '' };
+}
+
+function cleanInvoiceNoInput(value: string) {
+  return value
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trimStart();
+}
+
+function cleanPoNoInput(value: string) {
+  return value
+    .toUpperCase()
+    .replace(/[^A-Z0-9.\-\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trimStart();
+}
+
+function normalizeInvoiceNoInput(value: string) {
+  const raw = cleanInvoiceNoInput(value).trim();
+  if (!raw) return '';
+
+  const match = raw.match(/^(?:CPPS\s*)?(\d+)$/i);
+  return match ? `CPPS ${match[1]}` : '';
+}
+
+function normalizePoNoInput(value: string) {
+  let raw = cleanPoNoInput(value).trim();
+  if (!raw) return '';
+
+  raw = raw
+    .replace(/^PO\s*NO\.?\s*/i, '')
+    .replace(/^PO\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!raw || /\b(QTY|PCS)\b/i.test(raw)) return '';
+  if (!/^[A-Z0-9][A-Z0-9.\-\s]*$/i.test(raw)) return '';
+
+  return raw.toUpperCase();
+}
+
+function getNumericQty(value: string) {
+  const qty = parseInt(String(value || '').replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(qty) ? qty : 0;
+}
+
+function buildInvoiceDetailValidation(rows: InvoiceDetailRow[]): DocumentDetailValidation {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  let totalQty = 0;
+  let hasAnyValue = false;
+
+  rows.forEach((row, index) => {
+    const invoiceText = row.invoiceNo.trim();
+    const qtyText = row.qty.trim();
+
+    if (!invoiceText && !qtyText) return;
+    hasAnyValue = true;
+
+    const rowLabel = `Invoice row ${index + 1}`;
+    const invoiceNo = normalizeInvoiceNoInput(invoiceText);
+    const qty = getNumericQty(qtyText);
+
+    if (!invoiceText) errors.push(`${rowLabel}: enter the invoice number.`);
+    if (invoiceText && !invoiceNo) errors.push(`${rowLabel}: use only the invoice number, like CPPS 4169. Put quantity in the Qty box.`);
+    if (!qtyText) errors.push(`${rowLabel}: enter the invoice quantity.`);
+    if (qtyText && qty <= 0) errors.push(`${rowLabel}: quantity must be greater than 0.`);
+
+    if (invoiceNo) {
+      if (seen.has(invoiceNo)) {
+        errors.push(`${rowLabel}: ${invoiceNo} is already added. Do not repeat the same invoice number.`);
+      } else {
+        seen.add(invoiceNo);
+      }
+    }
+
+    if (invoiceNo && qty > 0) {
+      parts.push(`${invoiceNo} - ${qty} PCS`);
+      totalQty += qty;
+    }
+  });
+
+  return {
+    formatted: errors.length === 0 ? parts.join(' / ') : '',
+    errors,
+    totalQty,
+    hasAnyValue,
+  };
+}
+
+function buildPoDetailValidation(rows: PoDetailRow[]): DocumentDetailValidation {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  let totalQty = 0;
+  let hasAnyValue = false;
+
+  rows.forEach((row, index) => {
+    const poText = row.poNo.trim();
+    const qtyText = row.qty.trim();
+
+    if (!poText && !qtyText) return;
+    hasAnyValue = true;
+
+    const rowLabel = `PO row ${index + 1}`;
+    const poNo = normalizePoNoInput(poText);
+    const qty = getNumericQty(qtyText);
+
+    if (!poText) errors.push(`${rowLabel}: enter the PO number.`);
+    if (poText && !poNo) errors.push(`${rowLabel}: enter only the PO number, like 192083. Put quantity in the Qty box.`);
+    if (!qtyText) errors.push(`${rowLabel}: enter the PO quantity.`);
+    if (qtyText && qty <= 0) errors.push(`${rowLabel}: quantity must be greater than 0.`);
+
+    if (poNo) {
+      if (seen.has(poNo)) {
+        errors.push(`${rowLabel}: ${poNo} is already added. Do not repeat the same PO number.`);
+      } else {
+        seen.add(poNo);
+      }
+    }
+
+    if (poNo && qty > 0) {
+      parts.push(`${poNo} - QTY ${qty}`);
+      totalQty += qty;
+    }
+  });
+
+  return {
+    formatted: errors.length === 0 ? parts.join(' / ') : '',
+    errors,
+    totalQty,
+    hasAnyValue,
+  };
 }
 
 function uniq(values: string[]) {
@@ -252,8 +421,9 @@ export default function ReconciliationReportPage() {
   const [selectedColour, setSelectedColour] = useState('');
   const [selectedComponent, setSelectedComponent] = useState('');
   const [selectedSchedule, setSelectedSchedule] = useState('');
-  const [invoiceNo, setInvoiceNo] = useState('');
-  const [poNo, setPoNo] = useState('');
+  const [invoiceRows, setInvoiceRows] = useState<InvoiceDetailRow[]>([makeInvoiceDetailRow()]);
+  const [poRows, setPoRows] = useState<PoDetailRow[]>([makePoDetailRow()]);
+  const [documentDetailErrorsVisible, setDocumentDetailErrorsVisible] = useState(false);
 
   const [manualEntries, setManualEntries] = useState<Record<string, ManualEntry>>({});
   const [loading, setLoading] = useState(true);
@@ -387,6 +557,12 @@ export default function ReconciliationReportPage() {
     return map;
   }, [storeInRecords]);
 
+  const invoiceValidation = useMemo(() => buildInvoiceDetailValidation(invoiceRows), [invoiceRows]);
+  const poValidation = useMemo(() => buildPoDetailValidation(poRows), [poRows]);
+
+  const formattedInvoiceNo = invoiceValidation.formatted;
+  const formattedPoNo = poValidation.formatted;
+
   const reportMeta = useMemo(() => {
     const first = matchingStoreIns[0];
 
@@ -411,14 +587,14 @@ export default function ReconciliationReportPage() {
             : selectedSchedule
           : '',
       jobNos,
-      invoiceNo: invoiceNo.trim(),
-      poNo: poNo.trim(),
+      invoiceNo: formattedInvoiceNo,
+      poNo: formattedPoNo,
       colour:
         selectedColour === NO_COLOUR_KEY
           ? ''
           : selectedColour || colours.join(' / ') || first?.bodyColour || '',
     };
-  }, [matchingStoreIns, selectedCustomer, selectedStyle, selectedColour, selectedComponent, selectedSchedule, hasRealSchedules, invoiceNo, poNo]);
+  }, [matchingStoreIns, selectedCustomer, selectedStyle, selectedColour, selectedComponent, selectedSchedule, hasRealSchedules, formattedInvoiceNo, formattedPoNo]);
 
   const receivedRows = useMemo<ReceivedRow[]>(() => {
     let runningTotal = 0;
@@ -555,8 +731,9 @@ export default function ReconciliationReportPage() {
     setSelectedColour('');
     setSelectedComponent('');
     setSelectedSchedule('');
-    setInvoiceNo('');
-    setPoNo('');
+    setInvoiceRows([makeInvoiceDetailRow()]);
+    setPoRows([makePoDetailRow()]);
+    setDocumentDetailErrorsVisible(false);
     setPendingUpdate(null);
   };
 
@@ -579,8 +756,9 @@ export default function ReconciliationReportPage() {
     setSelectedColour('');
     setSelectedComponent('');
     setSelectedSchedule('');
-    setInvoiceNo('');
-    setPoNo('');
+    setInvoiceRows([makeInvoiceDetailRow()]);
+    setPoRows([makePoDetailRow()]);
+    setDocumentDetailErrorsVisible(false);
     setPendingUpdate(null);
   };
 
@@ -615,6 +793,55 @@ export default function ReconciliationReportPage() {
     }
 
     return rows;
+  };
+
+  const addInvoiceRow = () => {
+    setInvoiceRows(prev => [...prev, makeInvoiceDetailRow()]);
+  };
+
+  const updateInvoiceRow = (id: string, field: keyof Omit<InvoiceDetailRow, 'id'>, value: string) => {
+    setInvoiceRows(prev => prev.map(row => {
+      if (row.id !== id) return row;
+      return {
+        ...row,
+        [field]: field === 'qty' ? value.replace(/[^0-9]/g, '') : cleanInvoiceNoInput(value),
+      };
+    }));
+  };
+
+  const removeInvoiceRow = (id: string) => {
+    setInvoiceRows(prev => prev.length === 1 ? [makeInvoiceDetailRow()] : prev.filter(row => row.id !== id));
+  };
+
+  const addPoRow = () => {
+    setPoRows(prev => [...prev, makePoDetailRow()]);
+  };
+
+  const updatePoRow = (id: string, field: keyof Omit<PoDetailRow, 'id'>, value: string) => {
+    setPoRows(prev => prev.map(row => {
+      if (row.id !== id) return row;
+      return {
+        ...row,
+        [field]: field === 'qty' ? value.replace(/[^0-9]/g, '') : cleanPoNoInput(value),
+      };
+    }));
+  };
+
+  const removePoRow = (id: string) => {
+    setPoRows(prev => prev.length === 1 ? [makePoDetailRow()] : prev.filter(row => row.id !== id));
+  };
+
+  const validateDocumentDetails = () => {
+    const errors = [...invoiceValidation.errors, ...poValidation.errors];
+    setDocumentDetailErrorsVisible(errors.length > 0);
+
+    if (errors.length > 0) {
+      setPageError(errors[0]);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return false;
+    }
+
+    return true;
   };
 
   const buildSavePayload = (): ReconciliationSavePayload => {
@@ -672,6 +899,7 @@ export default function ReconciliationReportPage() {
 
   const saveReport = async () => {
     if (!reportReady || maxRows === 0) return;
+    if (!validateDocumentDetails()) return;
 
     setIsSavingReport(true);
     setPageError('');
@@ -908,11 +1136,12 @@ export default function ReconciliationReportPage() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 text-amber-700" />
-                <p className="text-sm font-black text-amber-900">A saved reconciliation report already exists for this scope.</p>
+                <p className="text-sm font-black text-amber-900">A saved reconciliation report already exists for this report identity.</p>
               </div>
               <p className="text-sm text-amber-800">
-                Same customer, style, colour, component and schedule already has a saved report.
-                Update the existing report if these new quantities or invoice details belong to the same report.
+                Same customer, style, colour, component, schedule and invoice no already has a saved report.
+                Update the existing report only when these new quantities belong to the same invoice/no-invoice report.
+                Different invoice numbers can be saved separately.
               </p>
               <p className="text-xs text-amber-700">
                 Existing saved date: <span className="font-bold">{pendingUpdate.conflict.existingReportDate || '—'}</span>
@@ -1010,26 +1239,100 @@ export default function ReconciliationReportPage() {
               </p>
             </div>
 
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">Invoice No</label>
-              <input
-                type="text"
-                value={invoiceNo}
-                onChange={(event) => setInvoiceNo(event.target.value)}
-                placeholder="Enter invoice no..."
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500"
-              />
+            <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 xl:col-span-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wide text-emerald-800">Invoice Details</label>
+                  <p className="text-[11px] text-emerald-700">Optional. Add one row per invoice. Do not type PCS or QTY manually.</p>
+                </div>
+                <button type="button" onClick={addInvoiceRow} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700">
+                  <Plus className="h-3.5 w-3.5" /> Add
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {invoiceRows.map((row, index) => (
+                  <div key={row.id} className="grid grid-cols-12 gap-2">
+                    <input
+                      type="text"
+                      value={row.invoiceNo}
+                      onChange={(event) => updateInvoiceRow(row.id, 'invoiceNo', event.target.value)}
+                      placeholder={`Invoice ${index + 1}: CPPS 4169`}
+                      className="col-span-7 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={row.qty}
+                      onChange={(event) => updateInvoiceRow(row.id, 'qty', event.target.value)}
+                      placeholder="Qty"
+                      className="col-span-4 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button type="button" onClick={() => removeInvoiceRow(row.id)} className="col-span-1 rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-red-50 hover:text-red-600" title="Remove invoice row">
+                      <Trash2 className="mx-auto h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2 text-[11px] text-slate-600">
+                <span className="font-bold text-emerald-800">Preview:</span> {invoiceValidation.formatted || 'No invoice number will be saved'}
+                {invoiceValidation.totalQty > 0 && <span className="ml-2 font-bold text-slate-700">Total invoice qty: {formatQty(invoiceValidation.totalQty)}</span>}
+              </div>
+
+              {documentDetailErrorsVisible && invoiceValidation.errors.length > 0 && (
+                <div className="space-y-1 text-[11px] text-red-600">
+                  {invoiceValidation.errors.map(error => <p key={error}><AlertCircle className="mr-1 inline h-3 w-3" />{error}</p>)}
+                </div>
+              )}
             </div>
 
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-slate-600">PO No</label>
-              <input
-                type="text"
-                value={poNo}
-                onChange={(event) => setPoNo(event.target.value)}
-                placeholder="Enter PO no..."
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500"
-              />
+            <div className="space-y-3 rounded-xl border border-purple-100 bg-purple-50/40 p-3 xl:col-span-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wide text-purple-800">PO Details</label>
+                  <p className="text-[11px] text-purple-700">Optional. Add one row per PO. Do not type PO NO, PCS or QTY manually.</p>
+                </div>
+                <button type="button" onClick={addPoRow} className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-purple-700">
+                  <Plus className="h-3.5 w-3.5" /> Add
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {poRows.map((row, index) => (
+                  <div key={row.id} className="grid grid-cols-12 gap-2">
+                    <input
+                      type="text"
+                      value={row.poNo}
+                      onChange={(event) => updatePoRow(row.id, 'poNo', event.target.value)}
+                      placeholder={`PO ${index + 1}: 192083`}
+                      className="col-span-7 rounded-lg border border-purple-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={row.qty}
+                      onChange={(event) => updatePoRow(row.id, 'qty', event.target.value)}
+                      placeholder="Qty"
+                      className="col-span-4 rounded-lg border border-purple-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <button type="button" onClick={() => removePoRow(row.id)} className="col-span-1 rounded-lg border border-purple-200 bg-white text-purple-700 hover:bg-red-50 hover:text-red-600" title="Remove PO row">
+                      <Trash2 className="mx-auto h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-lg border border-purple-100 bg-white px-3 py-2 text-[11px] text-slate-600">
+                <span className="font-bold text-purple-800">Preview:</span> {poValidation.formatted || 'No PO number will be saved'}
+                {poValidation.totalQty > 0 && <span className="ml-2 font-bold text-slate-700">Total PO qty: {formatQty(poValidation.totalQty)}</span>}
+              </div>
+
+              {documentDetailErrorsVisible && poValidation.errors.length > 0 && (
+                <div className="space-y-1 text-[11px] text-red-600">
+                  {poValidation.errors.map(error => <p key={error}><AlertCircle className="mr-1 inline h-3 w-3" />{error}</p>)}
+                </div>
+              )}
             </div>
           </div>
         )}

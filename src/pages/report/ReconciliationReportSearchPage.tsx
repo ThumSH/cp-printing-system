@@ -130,6 +130,68 @@ function getReportPoNo(report: ReconciliationSavedReport) {
   return String(report.poNo || (report as any).PoNo || (report as any).PONo || (report as any).poNumber || '').trim();
 }
 
+function getInvoiceIdentityFromText(value?: string) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const invoiceNumbers = raw
+    .split(/\s+\/\s+/)
+    .map(part => {
+      const match = part.match(/CPPS\s*-?\s*(\d+)/i);
+      return match ? `CPPS ${match[1]}` : part.trim();
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  return invoiceNumbers.join(' / ');
+}
+
+function getReportInvoiceIdentity(report: ReconciliationSavedReport) {
+  return getInvoiceIdentityFromText(getReportInvoiceNo(report));
+}
+
+function hasStructuredInvoiceQty(report: ReconciliationSavedReport) {
+  const invoiceNo = getReportInvoiceNo(report);
+  if (!invoiceNo) return false;
+
+  return invoiceNo
+    .split(/\s+\/\s+/)
+    .filter(Boolean)
+    .every(part => /^CPPS\s+\d+\s*-\s*[1-9]\d*\s*PCS$/i.test(part.trim()));
+}
+
+function hasStructuredPoQty(report: ReconciliationSavedReport) {
+  const poNo = getReportPoNo(report);
+  if (!poNo) return false;
+
+  return poNo
+    .split(/\s+\/\s+/)
+    .filter(Boolean)
+    .every(part => /^[A-Z0-9][A-Z0-9.\-\s]*?\s*-\s*QTY\s+[1-9]\d*$/i.test(part.trim()) && !/\b(PO\s*NO|PCS)\b/i.test(part));
+}
+
+function getReportCompletenessScore(report: ReconciliationSavedReport) {
+  let score = 0;
+
+  if (getReportInvoiceNo(report)) score += 20;
+  if (getReportInvoiceIdentity(report)) score += 10;
+  if (hasStructuredInvoiceQty(report)) score += 10;
+  if (getReportPoNo(report)) score += 6;
+  if (hasStructuredPoQty(report)) score += 12;
+  if (report.totals.goodQtyTotal > 0) score += 2;
+  if (report.totals.receivedQty > 0) score += 1;
+
+  return score;
+}
+
+function isBetterCurrentReport(candidate: ReconciliationSavedReport, existing: ReconciliationSavedReport) {
+  const candidateScore = getReportCompletenessScore(candidate);
+  const existingScore = getReportCompletenessScore(existing);
+
+  if (candidateScore !== existingScore) return candidateScore > existingScore;
+  return getReportTimestamp(candidate) > getReportTimestamp(existing);
+}
+
 function hasJobNo(report: ReconciliationSavedReport, jobNo: string) {
   if (!jobNo) return true;
   return getJobNoValues(report.jobNos).some(value => value.toLowerCase() === jobNo.toLowerCase());
@@ -168,6 +230,91 @@ function scheduleMatches(reportSchedule?: string, sourceSchedule?: string) {
   }
 
   return sameText(reportValue, sourceValue);
+}
+
+function getReportIdentityKey(report: ReconciliationSavedReport) {
+  return [
+    normalized(report.customerName),
+    normalized(report.styleNo),
+    normalized(report.component),
+    normalized(report.scheduleNo),
+    normalized(report.colour),
+    normalized(getReportInvoiceIdentity(report)),
+  ].join('|||');
+}
+
+function getReportBaseScopeKey(report: ReconciliationSavedReport) {
+  return [
+    normalized(report.customerName),
+    normalized(report.styleNo),
+    normalized(report.component),
+    normalized(report.scheduleNo),
+    normalized(report.colour),
+  ].join('|||');
+}
+
+function hasInvoiceReference(report: ReconciliationSavedReport) {
+  return Boolean(getReportInvoiceNo(report));
+}
+
+function getLatestReport(reports: ReconciliationSavedReport[]) {
+  return reports.reduce<ReconciliationSavedReport | null>((latest, report) => {
+    if (!latest || isBetterCurrentReport(report, latest)) return report;
+    return latest;
+  }, null);
+}
+
+function getCurrentVisibleReports(reports: ReconciliationSavedReport[]) {
+  const byBaseScope = new Map<string, ReconciliationSavedReport[]>();
+
+  reports.forEach(report => {
+    const baseKey = getReportBaseScopeKey(report);
+    const list = byBaseScope.get(baseKey) || [];
+    list.push(report);
+    byBaseScope.set(baseKey, list);
+  });
+
+  const currentReports: ReconciliationSavedReport[] = [];
+
+  byBaseScope.forEach(group => {
+    const invoiceReports = group.filter(hasInvoiceReference);
+
+    // If invoice-based records exist for the same base scope, they are the current visible records.
+    // Different invoice numbers are valid separate reports, so keep the latest copy per invoice identity.
+    if (invoiceReports.length > 0) {
+      const latestByInvoiceIdentity = new Map<string, ReconciliationSavedReport>();
+
+      invoiceReports.forEach(report => {
+        const identityKey = getReportIdentityKey(report);
+        const existing = latestByInvoiceIdentity.get(identityKey);
+
+        if (!existing || isBetterCurrentReport(report, existing)) {
+          latestByInvoiceIdentity.set(identityKey, report);
+        }
+      });
+
+      currentReports.push(...latestByInvoiceIdentity.values());
+      return;
+    }
+
+    // Some valid reconciliation reports do not have invoice numbers yet.
+    // When no invoice record exists for the base scope, show the latest no-invoice version.
+    const latestNoInvoice = getLatestReport(group);
+    if (latestNoInvoice) currentReports.push(latestNoInvoice);
+  });
+
+  return currentReports.sort((a, b) => getReportTimestamp(b) - getReportTimestamp(a));
+}
+
+function getReportTimestamp(report: ReconciliationSavedReport) {
+  const values = [report.updatedAt, report.createdAt, report.reportDate];
+
+  for (const value of values) {
+    const parsed = Date.parse(String(value || ''));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return 0;
 }
 
 function sourceMatchesReportScope(
@@ -416,6 +563,7 @@ export default function ReconciliationReportSearchPage() {
   const [filterJobNo, setFilterJobNo] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [showCurrentOnly, setShowCurrentOnly] = useState(true);
 
   const loadReports = async () => {
     setLoading(true);
@@ -489,7 +637,7 @@ export default function ReconciliationReportSearchPage() {
 
   const hasFilters = !!(filterCustomer || filterStyle || filterComponent || filterJobNo || filterDateFrom || filterDateTo);
 
-  const filteredReports = useMemo(() => {
+  const allFilteredReports = useMemo(() => {
     let list = reports.slice();
 
     if (filterCustomer) list = list.filter(report => report.customerName === filterCustomer);
@@ -501,6 +649,27 @@ export default function ReconciliationReportSearchPage() {
 
     return list;
   }, [reports, filterCustomer, filterStyle, filterComponent, filterJobNo, filterDateFrom, filterDateTo]);
+
+  const versionCountByKey = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    allFilteredReports.forEach(report => {
+      const key = hasInvoiceReference(report)
+        ? getReportIdentityKey(report)
+        : getReportBaseScopeKey(report);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+
+    return counts;
+  }, [allFilteredReports]);
+
+  const filteredReports = useMemo(() => {
+    if (!showCurrentOnly) return allFilteredReports;
+
+    return getCurrentVisibleReports(allFilteredReports);
+  }, [allFilteredReports, showCurrentOnly]);
+
+  const hiddenVersionCount = Math.max(0, allFilteredReports.length - filteredReports.length);
 
   const clearFilters = () => {
     setFilterCustomer('');
@@ -532,15 +701,26 @@ export default function ReconciliationReportSearchPage() {
       {pageError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"><AlertCircle className="mr-1 inline h-4 w-4" />{pageError}</div>}
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-slate-500" />
             <h3 className="text-sm font-bold text-slate-700">Filters</h3>
             {activeFilterCount > 0 && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">{activeFilterCount} active</span>}
           </div>
-          <button type="button" onClick={clearFilters} className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${hasFilters ? 'bg-red-50 border border-red-200 text-red-700 hover:bg-red-100' : 'bg-slate-50 border border-slate-200 text-slate-400 cursor-default'}`}>
-            <RotateCcw className="h-3.5 w-3.5" /> Clear All
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+              <input
+                type="checkbox"
+                checked={showCurrentOnly}
+                onChange={event => setShowCurrentOnly(event.target.checked)}
+                className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              Current reports only
+            </label>
+            <button type="button" onClick={clearFilters} className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${hasFilters ? 'bg-red-50 border border-red-200 text-red-700 hover:bg-red-100' : 'bg-slate-50 border border-slate-200 text-slate-400 cursor-default'}`}>
+              <RotateCcw className="h-3.5 w-3.5" /> Clear All
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
@@ -599,7 +779,15 @@ export default function ReconciliationReportSearchPage() {
       {hasFilters && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-3">
-            <p className="text-sm font-medium text-slate-700">{filteredReports.length} saved report{filteredReports.length !== 1 ? 's' : ''} found</p>
+            <p className="text-sm font-medium text-slate-700">
+              {filteredReports.length} {showCurrentOnly ? 'current report' : 'saved report'}{filteredReports.length !== 1 ? 's' : ''} found
+              {showCurrentOnly && hiddenVersionCount > 0 && (
+                <span className="text-slate-500"> · {hiddenVersionCount} old/no-invoice saved version{hiddenVersionCount !== 1 ? 's' : ''} hidden</span>
+              )}
+              {!showCurrentOnly && allFilteredReports.length > 0 && (
+                <span className="text-slate-500"> · showing all saved versions</span>
+              )}
+            </p>
           </div>
 
           {loading ? (
@@ -612,6 +800,9 @@ export default function ReconciliationReportSearchPage() {
                 const isExpanded = expandedId === report.id;
                 const resolvedRows = getResolvedSavedRows(report, sourceStoreIns, sourceAdviceNotes, filterJobNo);
                 const showJobNoColumns = shouldShowJobNoColumns(report, resolvedRows);
+                const versionCount = versionCountByKey.get(
+                  hasInvoiceReference(report) ? getReportIdentityKey(report) : getReportBaseScopeKey(report)
+                ) || 1;
 
                 return (
                   <div key={report.id}>
@@ -631,6 +822,11 @@ export default function ReconciliationReportSearchPage() {
                           )}
                           {getReportPoNo(report) && (
                             <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700">PO: {getReportPoNo(report)}</span>
+                          )}
+                          {showCurrentOnly && versionCount > 1 && (
+                            <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                              {versionCount - 1} old version{versionCount - 1 !== 1 ? 's' : ''} hidden
+                            </span>
                           )}
                         </div>
                         <p className="mt-0.5 text-xs text-slate-500">
