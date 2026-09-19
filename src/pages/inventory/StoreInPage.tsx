@@ -343,6 +343,9 @@ export default function StoreInPage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingToDb, setIsSavingToDb] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<StoreInDraftSnapshot | null>(null);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(false);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, { isLocked: boolean }>>({});
   const [, setSystemStyleSchedules] = useState<StyleScheduleOption[]>([]);
@@ -393,6 +396,8 @@ export default function StoreInPage() {
         else setSystemStyleSchedules([]);
       } catch (error) {
         setPageError(error instanceof Error ? error.message : 'Failed to load data.');
+      } finally {
+        setDataLoaded(true);
       }
     };
     load();
@@ -400,55 +405,103 @@ export default function StoreInPage() {
 
 
   // ── Draft persistence ─────────────────────────────────────────────────────
-  // Keeps unsaved cuts/staging safe when the user accidentally navigates away.
+  // Saves unsaved Store-In work locally and restores it only after source data has loaded.
+  const hasMeaningfulStoreInDraft = (draft: Partial<StoreInDraftSnapshot>) => Boolean(
+    draft.selectedStyleNo || draft.selectedCustomer || draft.inAdNo || draft.scheduleNo || draft.jobNo || draft.cutInDate ||
+    Object.values(draft.componentInQty || {}).some(Boolean) || Object.values(draft.confirmedInQty || {}).some(Boolean) ||
+    draft.activeSubmissionId || draft.activeCutNo || draft.activeCutQty ||
+    (draft.savedCuts && draft.savedCuts.length > 0) ||
+    (draft.stagedEntries && draft.stagedEntries.length > 0) ||
+    (draft.activeCutBundles || []).some(b => b.bundleNo !== 'b-1' || b.bundleQty || b.size || b.numberRange)
+  );
+
+  const selectedDraftStyleIsStillAvailable = (draft: Partial<StoreInDraftSnapshot>) => {
+    if (!draft.selectedStyleNo) return true;
+    return eligibleStoreInItems.some(item =>
+      item.styleNo === draft.selectedStyleNo &&
+      (!draft.selectedCustomer || item.customerName === draft.selectedCustomer)
+    );
+  };
+
+  const discardStoreInDraft = (showMessage = true) => {
+    localStorage.removeItem(STORE_IN_DRAFT_KEY);
+    setPendingDraft(null);
+    setShowDraftPrompt(false);
+    if (showMessage) {
+      setSuccessMsg('Store-In draft discarded.');
+      window.setTimeout(() => setSuccessMsg(''), 2500);
+    }
+  };
+
+  const restoreStoreInDraft = (draft = pendingDraft) => {
+    if (!draft) return;
+
+    if (!selectedDraftStyleIsStillAvailable(draft)) {
+      localStorage.removeItem(STORE_IN_DRAFT_KEY);
+      setPendingDraft(null);
+      setShowDraftPrompt(false);
+      setPageError('An unsaved Store-In draft was found, but its selected style/customer is no longer available. The old draft was discarded to avoid restoring invalid data.');
+      return;
+    }
+
+    skipNextDraftSaveRef.current = true;
+    setSelectedStyleNo(draft.selectedStyleNo || '');
+    setSelectedCustomer(draft.selectedCustomer || '');
+    setInAdNo(draft.inAdNo || '');
+    setScheduleNo(draft.scheduleNo || '');
+    setJobNo((draft as any).jobNo || '');
+    setCutInDate(draft.cutInDate || '');
+    setComponentInQty(draft.componentInQty || {});
+    setConfirmedInQty(draft.confirmedInQty || {});
+    setActiveSubmissionId(draft.activeSubmissionId || '');
+    setActiveCutNo(draft.activeCutNo || '');
+    setActiveCutBundles(draft.activeCutBundles?.length ? draft.activeCutBundles : [makeBundleRow(1)]);
+    setActiveCutQty(draft.activeCutQty || '');
+    setCutQtyConfirmed(!!draft.cutQtyConfirmed);
+    setEditingCutTempId(draft.editingCutTempId || null);
+    setSavedCuts(draft.savedCuts || []);
+    setStagedEntries(draft.stagedEntries || []);
+    setExpandedStagedId(draft.expandedStagedId || null);
+    setEditingRecordId(null);
+    setErrors({});
+    setCutErrors({});
+    setPageError('');
+    setPendingDraft(null);
+    setShowDraftPrompt(false);
+    setSuccessMsg('Unsaved Store-In draft restored.');
+    window.setTimeout(() => setSuccessMsg(''), 3500);
+  };
+
   useEffect(() => {
+    if (!dataLoaded || hasRestoredDraftRef.current) return;
+    hasRestoredDraftRef.current = true;
+
     try {
       const raw = localStorage.getItem(STORE_IN_DRAFT_KEY);
-      if (!raw) {
-        hasRestoredDraftRef.current = true;
-        return;
-      }
+      if (!raw) return;
 
       const draft = JSON.parse(raw) as Partial<StoreInDraftSnapshot>;
-      skipNextDraftSaveRef.current = true;
-      if (draft.version !== 3) {
+      if (draft.version !== 3 || !hasMeaningfulStoreInDraft(draft)) {
         localStorage.removeItem(STORE_IN_DRAFT_KEY);
-        hasRestoredDraftRef.current = true;
         return;
       }
 
-      setSelectedStyleNo(draft.selectedStyleNo || '');
-      setSelectedCustomer(draft.selectedCustomer || '');
-      setInAdNo(draft.inAdNo || '');
-      setScheduleNo(draft.scheduleNo || '');
-      setJobNo((draft as any).jobNo || '');
-      setCutInDate(draft.cutInDate || '');
-      setComponentInQty(draft.componentInQty || {});
-      setConfirmedInQty(draft.confirmedInQty || {});
-      setActiveSubmissionId(draft.activeSubmissionId || '');
-      setActiveCutNo(draft.activeCutNo || '');
-      setActiveCutBundles(draft.activeCutBundles?.length ? draft.activeCutBundles : [makeBundleRow(1)]);
-      setActiveCutQty(draft.activeCutQty || '');
-      setCutQtyConfirmed(!!draft.cutQtyConfirmed);
-      setEditingCutTempId(draft.editingCutTempId || null);
-      setSavedCuts(draft.savedCuts || []);
-      setStagedEntries(draft.stagedEntries || []);
-      setExpandedStagedId(draft.expandedStagedId || null);
-
-      if ((draft.stagedEntries?.length || 0) > 0 || (draft.savedCuts?.length || 0) > 0 || draft.activeSubmissionId) {
-        setSuccessMsg('Unsaved Store-In draft restored.');
-        window.setTimeout(() => setSuccessMsg(''), 3500);
+      if (!selectedDraftStyleIsStillAvailable(draft)) {
+        localStorage.removeItem(STORE_IN_DRAFT_KEY);
+        setPageError('An unsaved Store-In draft was found, but its selected style/customer is no longer available. The old draft was discarded to avoid restoring invalid data.');
+        return;
       }
+
+      setPendingDraft(draft as StoreInDraftSnapshot);
+      setShowDraftPrompt(true);
     } catch (error) {
-      console.error('Failed to restore Store-In draft:', error);
+      console.error('Failed to read Store-In draft:', error);
       localStorage.removeItem(STORE_IN_DRAFT_KEY);
-    } finally {
-      hasRestoredDraftRef.current = true;
     }
-  }, []);
+  }, [dataLoaded, eligibleStoreInItems]);
 
   useEffect(() => {
-    if (!hasRestoredDraftRef.current) return;
+    if (!dataLoaded || !hasRestoredDraftRef.current || showDraftPrompt || editingRecordId) return;
     if (skipNextDraftSaveRef.current) {
       skipNextDraftSaveRef.current = false;
       return;
@@ -494,6 +547,7 @@ export default function StoreInPage() {
       console.error('Failed to save Store-In draft:', error);
     }
   }, [
+    dataLoaded, showDraftPrompt, editingRecordId,
     selectedStyleNo, selectedCustomer, inAdNo, scheduleNo, jobNo, cutInDate,
     componentInQty, confirmedInQty, activeSubmissionId, activeCutNo,
     activeCutBundles, activeCutQty, cutQtyConfirmed, editingCutTempId,
@@ -961,6 +1015,7 @@ export default function StoreInPage() {
     setActiveCutQty(''); setActiveCutNo(''); setActiveSubmissionId('');
     setCutQtyConfirmed(false);
     setEditingCutTempId(null); setEditingRecordId(null);
+    setPendingDraft(null); setShowDraftPrompt(false);
     setErrors({}); setCutErrors({}); setPageError('');
     localStorage.removeItem(STORE_IN_DRAFT_KEY);
   };
@@ -1135,6 +1190,7 @@ export default function StoreInPage() {
   };
 
   const handleEdit = (record: StoreInRecord) => {
+    discardStoreInDraft(false);
     const primarySubId = getRecordSubmissionId(record);
 
     setSelectedStyleNo(record.styleNo);
@@ -1328,6 +1384,26 @@ export default function StoreInPage() {
 
       {pageError  && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"><AlertCircle className="mr-1 inline h-4 w-4" />{pageError}</div>}
       {successMsg && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><CheckCircle2 className="mr-1 inline h-4 w-4" />{successMsg}</div>}
+      {showDraftPrompt && pendingDraft && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-black text-amber-900">Unsaved Store-In draft found</p>
+              <p className="text-xs text-amber-700">
+                Saved at {new Date(pendingDraft.savedAt).toLocaleString()}. Continue it or discard it before entering new Store-In data.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => discardStoreInDraft()} className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100">
+                Discard Draft
+              </button>
+              <button type="button" onClick={() => restoreStoreInDraft()} className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-800">
+                Continue Draft
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Form */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
