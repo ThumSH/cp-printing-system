@@ -1,5 +1,5 @@
 // src/pages/gatepass/AdviceNotePage.tsx
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Save, Edit2, Trash2, AlertCircle, Printer, Plus, ChevronDown, ChevronRight, X,
@@ -52,6 +52,42 @@ function getCutSubtotals(rows: AdviceNoteRow[]) {
   return map;
 }
 
+
+interface AdviceNoteDraftSnapshot {
+  version: number;
+  savedAt: string;
+  selStyle: string;
+  selCustomer: string;
+  selComponentFilter: string;
+  selectedStoreInId: string;
+  selectedCutNo: string;
+  selectedComponent: string;
+  deliveryDate: string;
+  attn: string;
+  address: string;
+  remarks: string;
+  receivedByName: string;
+  prepByName: string;
+  authByName: string;
+  bundleRows: AdviceNoteRow[];
+  addedCutNos: string[];
+}
+
+const ADVICE_NOTE_DRAFT_KEY = 'cp-advice-note-page-draft-v1';
+
+const todayIso = () => new Date().toISOString().split('T')[0];
+
+function hasMeaningfulAdviceNoteDraft(draft: Partial<AdviceNoteDraftSnapshot>) {
+  return Boolean(
+    draft.selStyle || draft.selCustomer || draft.selComponentFilter || draft.selectedStoreInId ||
+    draft.selectedCutNo || draft.selectedComponent ||
+    (draft.deliveryDate && draft.deliveryDate !== todayIso()) ||
+    draft.attn || draft.address || draft.remarks || draft.receivedByName || draft.prepByName || draft.authByName ||
+    (draft.bundleRows && draft.bundleRows.length > 0) ||
+    (draft.addedCutNos && draft.addedCutNos.length > 0)
+  );
+}
+
 export default function AdviceNotePage() {
   const {
     adviceNotes, eligibleDispatchItems,
@@ -81,6 +117,13 @@ export default function AdviceNotePage() {
   const [pageError, setPageError]           = useState('');
   const [isSaving, setIsSaving]             = useState(false);
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg]         = useState('');
+  const [dataLoaded, setDataLoaded]         = useState(false);
+  const [pendingDraft, setPendingDraft]     = useState<AdviceNoteDraftSnapshot | null>(null);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(false);
+
+  const hasCheckedDraftRef = useRef(false);
+  const skipNextDraftSaveRef = useRef(false);
 
   const notesPagination = usePaginatedSearch({
     data: adviceNotes,
@@ -90,11 +133,134 @@ export default function AdviceNotePage() {
 
   useEffect(() => {
     const load = async () => {
-      try { await Promise.all([fetchAdviceNotes(), fetchEligibleDispatchItems()]); }
-      catch (e) { setPageError(e instanceof Error ? e.message : 'Failed to load.'); }
+      try {
+        await Promise.all([fetchAdviceNotes(), fetchEligibleDispatchItems()]);
+      } catch (e) {
+        setPageError(e instanceof Error ? e.message : 'Failed to load.');
+      } finally {
+        setDataLoaded(true);
+      }
     };
     load();
   }, [fetchAdviceNotes, fetchEligibleDispatchItems]);
+
+  const restoreAdviceNoteDraft = (draft = pendingDraft) => {
+    if (!draft) return;
+
+    if (draft.selectedStoreInId && !eligibleDispatchItems.some(item => item.storeInRecordId === draft.selectedStoreInId)) {
+      localStorage.removeItem(ADVICE_NOTE_DRAFT_KEY);
+      setPendingDraft(null);
+      setShowDraftPrompt(false);
+      setPageError('An unsaved Gatepass draft was found, but its selected Store-In batch is no longer available. The old draft was discarded to avoid restoring invalid data.');
+      return;
+    }
+
+    skipNextDraftSaveRef.current = true;
+    setSelStyle(draft.selStyle || '');
+    setSelCustomer(draft.selCustomer || '');
+    setSelComponentFilter(draft.selComponentFilter || '');
+    setSelectedStoreInId(draft.selectedStoreInId || '');
+    setSelectedCutNo(draft.selectedCutNo || '');
+    setSelectedComponent(draft.selectedComponent || '');
+    setDeliveryDate(draft.deliveryDate || todayIso());
+    setAttn(draft.attn || '');
+    setAddress(draft.address || '');
+    setRemarks(draft.remarks || '');
+    setReceivedByName(draft.receivedByName || '');
+    setPrepByName(draft.prepByName || '');
+    setAuthByName(draft.authByName || '');
+    setBundleRows(draft.bundleRows || []);
+    setAddedCutNos(draft.addedCutNos || []);
+    setEditingId(null);
+    setErrors({});
+    setPageError('');
+    setPendingDraft(null);
+    setShowDraftPrompt(false);
+    setSuccessMsg('Unsaved Gatepass draft restored.');
+    window.setTimeout(() => setSuccessMsg(''), 3500);
+  };
+
+  const discardAdviceNoteDraft = (showMessage = true) => {
+    localStorage.removeItem(ADVICE_NOTE_DRAFT_KEY);
+    setPendingDraft(null);
+    setShowDraftPrompt(false);
+    if (showMessage) {
+      setSuccessMsg('Gatepass draft discarded.');
+      window.setTimeout(() => setSuccessMsg(''), 2500);
+    }
+  };
+
+  useEffect(() => {
+    if (!dataLoaded || hasCheckedDraftRef.current) return;
+    hasCheckedDraftRef.current = true;
+
+    try {
+      const raw = localStorage.getItem(ADVICE_NOTE_DRAFT_KEY);
+      if (!raw) return;
+
+      const draft = JSON.parse(raw) as Partial<AdviceNoteDraftSnapshot>;
+      if (draft.version !== 1 || !hasMeaningfulAdviceNoteDraft(draft)) {
+        localStorage.removeItem(ADVICE_NOTE_DRAFT_KEY);
+        return;
+      }
+
+      if (draft.selectedStoreInId && !eligibleDispatchItems.some(item => item.storeInRecordId === draft.selectedStoreInId)) {
+        localStorage.removeItem(ADVICE_NOTE_DRAFT_KEY);
+        setPageError('An unsaved Gatepass draft was found, but its selected Store-In batch is no longer available. The old draft was discarded to avoid restoring invalid data.');
+        return;
+      }
+
+      setPendingDraft(draft as AdviceNoteDraftSnapshot);
+      setShowDraftPrompt(true);
+    } catch (error) {
+      console.error('Failed to read Gatepass draft:', error);
+      localStorage.removeItem(ADVICE_NOTE_DRAFT_KEY);
+    }
+  }, [dataLoaded, eligibleDispatchItems]);
+
+  useEffect(() => {
+    if (!dataLoaded || !hasCheckedDraftRef.current || showDraftPrompt || editingId) return;
+    if (skipNextDraftSaveRef.current) {
+      skipNextDraftSaveRef.current = false;
+      return;
+    }
+
+    const draft: AdviceNoteDraftSnapshot = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      selStyle,
+      selCustomer,
+      selComponentFilter,
+      selectedStoreInId,
+      selectedCutNo,
+      selectedComponent,
+      deliveryDate,
+      attn,
+      address,
+      remarks,
+      receivedByName,
+      prepByName,
+      authByName,
+      bundleRows,
+      addedCutNos,
+    };
+
+    try {
+      if (!hasMeaningfulAdviceNoteDraft(draft)) {
+        localStorage.removeItem(ADVICE_NOTE_DRAFT_KEY);
+        return;
+      }
+
+      localStorage.setItem(ADVICE_NOTE_DRAFT_KEY, JSON.stringify(draft));
+    } catch (error) {
+      console.error('Failed to save Gatepass draft:', error);
+    }
+  }, [
+    dataLoaded, showDraftPrompt, editingId,
+    selStyle, selCustomer, selComponentFilter, selectedStoreInId,
+    selectedCutNo, selectedComponent, deliveryDate, attn, address, remarks,
+    receivedByName, prepByName, authByName, bundleRows, addedCutNos,
+  ]);
 
   const selectedItem = useMemo(
     () => eligibleDispatchItems.find(i => i.storeInRecordId === selectedStoreInId) ?? null,
@@ -282,11 +448,12 @@ export default function AdviceNotePage() {
   const resetForm = () => {
     setSelStyle(''); setSelCustomer(''); setSelComponentFilter(''); setSelectedStoreInId(''); 
     setSelectedCutNo(''); setSelectedComponent('');
-    setDeliveryDate(new Date().toISOString().split('T')[0]);
+    setDeliveryDate(todayIso());
     setAttn(''); setAddress(''); setRemarks('');
     setReceivedByName(''); setPrepByName(''); setAuthByName('');
     setBundleRows([]); setAddedCutNos([]);
     setEditingId(null); setErrors({}); setPageError('');
+    discardAdviceNoteDraft(false);
   };
 
   const validateForm = () => {
@@ -339,6 +506,7 @@ export default function AdviceNotePage() {
   };
 
   const handleEdit = (note: AdviceNoteRecord) => {
+    discardAdviceNoteDraft(false);
     const storeInItem = eligibleDispatchItems.find(i => i.storeInRecordId === note.storeInRecordId);
     if (storeInItem) {
       setSelStyle(storeInItem.styleNo);
@@ -434,6 +602,31 @@ export default function AdviceNotePage() {
       {pageError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           <AlertCircle className="mr-1 inline h-4 w-4" />{pageError}
+        </div>
+      )}
+      {successMsg && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {successMsg}
+        </div>
+      )}
+      {showDraftPrompt && pendingDraft && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-black text-amber-900">Unsaved Gatepass draft found</p>
+              <p className="text-xs text-amber-700">
+                Saved at {new Date(pendingDraft.savedAt).toLocaleString()}. Continue it or discard it before entering a new Gatepass.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => discardAdviceNoteDraft()} className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100">
+                Discard Draft
+              </button>
+              <button type="button" onClick={() => restoreAdviceNoteDraft()} className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-800">
+                Continue Draft
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
