@@ -627,7 +627,7 @@ function WorkerDashboard({
     { label: 'Dispatch', value: Number(worker.todayDispatch) || 0, color: '#10b981' },
   ];
 
-  const selectedDateTotal = selectedDateBreakdown.reduce((sum, item) => sum + item.value, 0);
+  const selectedDateTotal = Math.max(0, ...selectedDateBreakdown.map(item => item.value));
   const totalDailyOutput = Number(worker.totalDailyOutput) || 0;
   const selectedDateEntries = Number(worker.todayOutput) || 0;
   const pendingDowntime = Number(worker.pendingDowntime) || 0;
@@ -1096,13 +1096,15 @@ export default function Dashboard() {
     : '';
 
   const stageCount = styles.reduce((acc, s) => { acc[s.stage] = (acc[s.stage] || 0) + 1; return acc; }, {} as Record<string, number>);
-  const totalWorkerToday =
-    (Number(data.worker?.todaySeating) || 0) +
-    (Number(data.worker?.todayPrinting) || 0) +
-    (Number(data.worker?.todayCuring) || 0) +
-    (Number(data.worker?.todayChecking) || 0) +
-    (Number(data.worker?.todayPacking) || 0) +
-    (Number(data.worker?.todayDispatch) || 0);
+  const totalWorkerToday = Math.max(
+    0,
+    Number(data.worker?.todaySeating) || 0,
+    Number(data.worker?.todayPrinting) || 0,
+    Number(data.worker?.todayCuring) || 0,
+    Number(data.worker?.todayChecking) || 0,
+    Number(data.worker?.todayPacking) || 0,
+    Number(data.worker?.todayDispatch) || 0,
+  );
   
   // FIX: Admin now tracks data.development.pendingSubmissions specifically to catch new submissions
   const pendingApprovals = Number(data.development?.pendingSubmissions) || Number(data.approvals?.pending) || 0;

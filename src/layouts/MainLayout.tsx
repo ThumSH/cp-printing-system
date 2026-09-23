@@ -106,6 +106,7 @@ const NAV_GROUPS: NavGroup[] = [
       { name: 'Daily Output', href: '/worker', icon: Factory, roles: ['Admin', 'Worker'], exact: true },
       { name: 'Downtime', href: '/worker/downtime', icon: Clock, roles: ['Admin', 'Worker'] },
       { name: 'History', href: '/worker/history', icon: History, roles: ['Admin', 'Worker'] },
+      { name: 'Cut Reports', href: '/worker/cut-reports', icon: Search, roles: ['Admin', 'Worker'] },
     ],
   },
 

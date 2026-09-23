@@ -361,6 +361,54 @@ function escapeHtml(value: unknown) {
     .replace(/'/g, '&#039;');
 }
 
+
+function escapeSpreadsheetCell(value: unknown) {
+  const text = String(value ?? '');
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function safeSpreadsheetFilePart(value: unknown) {
+  const cleaned = String(value ?? '')
+    .trim()
+    .replace(/[^a-zA-Z0-9-_]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return cleaned || 'report';
+}
+
+function downloadSpreadsheetCsv(fileName: string, rows: Array<Array<string | number | null | undefined>>) {
+  const csv = rows
+    .map(row => row.map(escapeSpreadsheetCell).join(','))
+    .join('\r\n');
+
+  const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const downloadName = fileName.endsWith('.csv') ? fileName : `${fileName}.csv`;
+
+  // Keep the object URL alive briefly after the click. Some production browsers/webviews
+  // cancel the download when the URL is revoked immediately.
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = downloadName;
+  link.style.display = 'none';
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+
+  link.dispatchEvent(new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+  }));
+
+  window.setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, 1500);
+}
+
 function getLastNumber<T extends { [key: string]: any }>(rows: T[], field: keyof T) {
   if (rows.length === 0) return 0;
   return num(rows[rows.length - 1][field]);
@@ -974,6 +1022,117 @@ export default function ReconciliationReportPage() {
     }
   };
 
+  const exportSpreadsheet = () => {
+    setPageError('');
+    setSuccessMsg('');
+
+    if (!reportReady) {
+      setPageError('Please select customer, style, colour, component and schedule before exporting the spreadsheet.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    if (maxRows === 0) {
+      setPageError('No reconciliation rows found for the selected report. Nothing to export.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    try {
+      const rows: Array<Array<string | number | null | undefined>> = [
+        [COMPANY_NAME],
+        [REPORT_TITLE],
+        [],
+        ['Customer', reportMeta.customer, 'Colour', reportMeta.colour, 'Component', reportMeta.component],
+        ['Style No', reportMeta.styleNo, 'Schedule No', reportMeta.scheduleNo || '(No Schedule)', 'Job No(s)', reportMeta.jobNos || '—'],
+        ['Invoice No', reportMeta.invoiceNo || '—', 'PO No', reportMeta.poNo || '—', 'Exported Date', new Date().toLocaleString()],
+        [],
+        [
+          'Received Date',
+          'Received AD No',
+          'Received Job No',
+          'Received Cut No',
+          'Received Qty',
+          'Received Running Total',
+          'Sent Date',
+          'Sent AD No',
+          'Sent Job No',
+          'Sent Cut No',
+          'Sent Total',
+          'PD',
+          'FD',
+          'Sample / Testing',
+          'RTN',
+          'Good Qty',
+          'Good Running Total',
+        ],
+      ];
+
+      for (let index = 0; index < maxRows; index += 1) {
+        const received = receivedRows[index];
+        const sent = sentRows[index];
+
+        rows.push([
+          received?.date || '',
+          received?.adNo || '',
+          received?.jobNo || '',
+          received?.cutNo || '',
+          received ? received.qty : '',
+          received ? received.runningTotal : '',
+          sent?.date || '',
+          sent?.adNo || '',
+          sent?.jobNo || '',
+          sent?.cutNo || '',
+          sent ? sent.total : '',
+          sent ? sent.pd : '',
+          sent ? sent.fd : '',
+          sent ? sent.sampleTesting : '',
+          sent ? sent.rtn : '',
+          sent ? sent.goodQty : '',
+          sent ? sent.goodTotal : '',
+        ]);
+      }
+
+      rows.push([]);
+      rows.push([
+        '',
+        '',
+        '',
+        'TOTAL',
+        totals.receivedQty,
+        lastReceivedRunningTotal,
+        '',
+        '',
+        '',
+        'TOTAL',
+        totals.sentTotal,
+        totals.pd,
+        totals.fd,
+        totals.sampleTesting,
+        totals.rtn,
+        totals.goodQty,
+        lastSentGoodTotal,
+      ]);
+
+      const fileName = [
+        'Reconciliation-Report',
+        reportMeta.styleNo,
+        reportMeta.customer,
+        reportMeta.component,
+        new Date().toISOString().slice(0, 10),
+      ]
+        .map(safeSpreadsheetFilePart)
+        .join('_');
+
+      downloadSpreadsheetCsv(fileName, rows);
+      setSuccessMsg('Spreadsheet export started. Check your Downloads folder if it does not open automatically.');
+      window.setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : 'Failed to export spreadsheet.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const printReport = () => {
     if (!reportReady) return;
 
@@ -1123,6 +1282,7 @@ export default function ReconciliationReportPage() {
         <div className="flex gap-2">
           <button type="button" onClick={loadData} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"><RefreshCw className="h-4 w-4" />Refresh</button>
           <button type="button" onClick={saveReport} disabled={!reportReady || maxRows === 0 || isSavingReport} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"><Save className="h-4 w-4" />{isSavingReport ? 'Saving...' : 'Save'}</button>
+          <button type="button" onClick={exportSpreadsheet} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"><FileSpreadsheet className="h-4 w-4" />Export Spreadsheet</button>
           <button type="button" onClick={printReport} disabled={!reportReady} className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"><Printer className="h-4 w-4" />Print</button>
         </div>
       </div>

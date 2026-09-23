@@ -11,6 +11,7 @@ import { API, getAuthHeaders } from '../../api/client';
 import { useDashboardStore } from '../../store/dashboardStore';
 
 const API_BASE = API.WORKER;
+const WORKER_CUT_REPORT_API = `${API.BASE}/api/worker-cut-reports`;
 const getHeaders = getAuthHeaders;
 
 // ==========================================
@@ -132,6 +133,7 @@ interface WorkerCutReportCut {
 interface WorkerCutReport {
   id: string;
   storeInRecordId: string;
+  productionRecordId?: string;
   submissionId: string;
   revisionNo: number;
   styleNo: string;
@@ -147,6 +149,49 @@ interface WorkerCutReport {
   inQty: number;
   totalCutQty: number;
   cut: WorkerCutReportCut;
+}
+
+
+interface SavedWorkerCutReportRow {
+  bundleId: string;
+  bundleNo: string;
+  bundleQty: number;
+  size: string;
+  numberRange: string;
+  bundleOrder?: number;
+  productionIn: boolean;
+  productionOut: boolean;
+  handedOverToQc: boolean;
+  checkingStatus: boolean;
+  curingStatus: boolean;
+}
+
+interface SavedWorkerCutReport {
+  id: string;
+  storeInRecordId: string;
+  productionRecordId: string;
+  submissionId: string;
+  revisionNo: number;
+  styleNo: string;
+  customerName: string;
+  bodyColour: string;
+  printColour: string;
+  component: string;
+  season: string;
+  inAdNo: string;
+  scheduleNo: string;
+  jobNo: string;
+  cutInDate: string;
+  inQty: number;
+  totalCutQty: number;
+  cutNo: string;
+  cutQty: number;
+  bundleCount: number;
+  reportDate: string;
+  workerName: string;
+  createdAt: string;
+  updatedAt: string;
+  rows: SavedWorkerCutReportRow[];
 }
 
 type CutReportCheckField =
@@ -249,6 +294,32 @@ function formatCutReportQty(value: unknown) {
 
 function makeCutReportBundleKey(bundle: WorkerCutReportBundle, index: number) {
   return `${bundle.id || bundle.bundleNo || 'bundle'}_${index}`;
+}
+
+
+function tickStateFromSavedReport(report: SavedWorkerCutReport): CutReportTickState {
+  const next: CutReportTickState = {};
+
+  (report.rows || []).forEach((row, index) => {
+    const key = makeCutReportBundleKey({
+      id: row.bundleId || `${report.id}-bundle-${index}`,
+      bundleNo: row.bundleNo || `b-${index + 1}`,
+      bundleQty: row.bundleQty || 0,
+      size: row.size || '',
+      numberRange: row.numberRange || '',
+      bundleOrder: row.bundleOrder || index + 1,
+    }, index);
+
+    next[key] = {
+      productionIn: !!row.productionIn,
+      productionOut: !!row.productionOut,
+      handedOverToQc: !!row.handedOverToQc,
+      checkingStatus: !!row.checkingStatus,
+      curingStatus: !!row.curingStatus,
+    };
+  });
+
+  return next;
 }
 
 function printWorkerCutReport(report: WorkerCutReport, tickState: CutReportTickState) {
@@ -427,6 +498,9 @@ export default function DailyOutputPage() {
   const [isCutReportLoading, setIsCutReportLoading] = useState(false);
   const [cutReportError, setCutReportError] = useState('');
   const [cutReportTicks, setCutReportTicks] = useState<CutReportTickState>({});
+  const [isSavingCutReport, setIsSavingCutReport] = useState(false);
+  const [activeSavedCutReportId, setActiveSavedCutReportId] = useState<string | null>(null);
+  const [cutReportSaveNotice, setCutReportSaveNotice] = useState('');
 
   const [confirmModal, setConfirmModal] = useState<{ rowIndex: number; slot: TimeSlot } | null>(null);
 
@@ -692,6 +766,29 @@ export default function DailyOutputPage() {
 
   const effectiveStoreInId = selectedItem?.storeInRecordId || '';
 
+  const findSavedCutReportForScope = async (storeInRecordId: string, cutNo: string): Promise<SavedWorkerCutReport | null> => {
+    if (!storeInRecordId || !cutNo) return null;
+
+    const params = new URLSearchParams({
+      storeInRecordId,
+      cutNo,
+    });
+
+    const response = await fetch(`${WORKER_CUT_REPORT_API}?${params.toString()}`, {
+      headers: getHeaders(),
+    });
+
+    if (!response.ok) return null;
+
+    const data: SavedWorkerCutReport[] = await response.json();
+    const exact = (Array.isArray(data) ? data : []).find(report =>
+      String(report.storeInRecordId || '').trim() === storeInRecordId &&
+      String(report.cutNo || '').trim().toLowerCase() === cutNo.toLowerCase()
+    );
+
+    return exact || null;
+  };
+
   const loadWorkerCutReport = async (item: EligibleStyle | null, resetTicks = true) => {
     const storeInRecordId = item?.storeInRecordId?.trim() || '';
     const cutNo = item?.cutNo?.trim() || '';
@@ -717,10 +814,13 @@ export default function DailyOutputPage() {
       }
 
       const data = await response.json();
+      const saved = await findSavedCutReportForScope(storeInRecordId, cutNo);
       setWorkerCutReport(data);
-      if (resetTicks) setCutReportTicks({});
+      setActiveSavedCutReportId(saved?.id || null);
+      if (resetTicks) setCutReportTicks(saved ? tickStateFromSavedReport(saved) : {});
     } catch (error) {
       setWorkerCutReport(null);
+      setActiveSavedCutReportId(null);
       setCutReportError(error instanceof Error ? error.message : 'Failed to load Store-In cut report.');
       if (resetTicks) setCutReportTicks({});
     } finally {
@@ -739,6 +839,7 @@ export default function DailyOutputPage() {
         setWorkerCutReport(null);
         setCutReportError('');
         setCutReportTicks({});
+        setActiveSavedCutReportId(null);
         return;
       }
 
@@ -757,7 +858,12 @@ export default function DailyOutputPage() {
         }
 
         const data = await response.json();
-        if (!cancelled) setWorkerCutReport(data);
+        const saved = await findSavedCutReportForScope(storeInRecordId, cutNo);
+        if (!cancelled) {
+          setWorkerCutReport(data);
+          setActiveSavedCutReportId(saved?.id || null);
+          setCutReportTicks(saved ? tickStateFromSavedReport(saved) : {});
+        }
       } catch (error) {
         if (!cancelled) {
           setWorkerCutReport(null);
@@ -783,6 +889,88 @@ export default function DailyOutputPage() {
         [field]: !prev[bundleKey]?.[field],
       },
     }));
+  };
+
+
+  const buildWorkerCutReportSavePayload = (report: WorkerCutReport) => {
+    const bundles = Array.isArray(report.cut?.bundles) ? report.cut.bundles : [];
+
+    return {
+      storeInRecordId: report.storeInRecordId || selectedItem?.storeInRecordId || '',
+      productionRecordId: (report as any).productionRecordId || selectedItem?.productionRecordId || selectedItem?.id || '',
+      submissionId: report.submissionId || selectedItem?.submissionId || '',
+      revisionNo: report.revisionNo || 1,
+      styleNo: report.styleNo || selectedItem?.styleNo || '',
+      customerName: report.customerName || selectedItem?.customerName || '',
+      bodyColour: report.bodyColour || selectedItem?.bodyColour || '',
+      printColour: report.printColour || '',
+      component: report.component || selectedItem?.component || '',
+      season: report.season || '',
+      inAdNo: report.inAdNo || '',
+      scheduleNo: report.scheduleNo || selectedItem?.scheduleNo || '',
+      jobNo: report.jobNo || '',
+      cutInDate: report.cutInDate || '',
+      inQty: report.inQty || 0,
+      totalCutQty: report.totalCutQty || 0,
+      cutNo: report.cut?.cutNo || selectedItem?.cutNo || '',
+      cutQty: report.cut?.cutQty || 0,
+      bundleCount: bundles.length,
+      reportDate: date || getColomboDateString(),
+      workerName: workerName || localStorage.getItem('operatorName') || '',
+      rows: bundles.map((bundle, index) => {
+        const bundleKey = makeCutReportBundleKey(bundle, index);
+        const ticks = cutReportTicks[bundleKey] || {};
+
+        return {
+          bundleId: bundle.id || '',
+          bundleNo: bundle.bundleNo || `b-${index + 1}`,
+          bundleQty: bundle.bundleQty || 0,
+          size: bundle.size || '',
+          numberRange: bundle.numberRange || '',
+          bundleOrder: bundle.bundleOrder || index + 1,
+          productionIn: !!ticks.productionIn,
+          productionOut: !!ticks.productionOut,
+          handedOverToQc: !!ticks.handedOverToQc,
+          checkingStatus: !!ticks.checkingStatus,
+          curingStatus: !!ticks.curingStatus,
+        };
+      }),
+    };
+  };
+
+  const saveWorkerCutReport = async () => {
+    if (!workerCutReport) return;
+
+    const payload = buildWorkerCutReportSavePayload(workerCutReport);
+    if (!payload.storeInRecordId || !payload.cutNo) {
+      setCutReportError('Store-In record and Cut No are required before saving the cut report.');
+      return;
+    }
+
+    setIsSavingCutReport(true);
+    setCutReportError('');
+    setCutReportSaveNotice('');
+
+    try {
+      const response = await fetch(WORKER_CUT_REPORT_API, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text() || 'Failed to save cut report.');
+      }
+
+      const saved: SavedWorkerCutReport = await response.json();
+      setActiveSavedCutReportId(saved.id);
+      setCutReportSaveNotice('Cut report saved successfully. You can fetch and edit it from Worker Cut Reports Search.');
+      window.setTimeout(() => setCutReportSaveNotice(''), 5000);
+    } catch (error) {
+      setCutReportError(error instanceof Error ? error.message : 'Failed to save cut report.');
+    } finally {
+      setIsSavingCutReport(false);
+    }
   };
 
   const distinctStyles = useMemo(() => {
@@ -1182,6 +1370,7 @@ export default function DailyOutputPage() {
           <div className="flex items-center justify-between border-b border-teal-200 pb-2">
             <h4 className="text-sm font-bold uppercase tracking-wider text-teal-800">Style & Setup</h4>
             {activeRecordId && <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">EDITING EXISTING RECORD</span>}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
@@ -1314,6 +1503,12 @@ export default function DailyOutputPage() {
             </div>
           </div>
         </div>
+
+        {cutReportSaveNotice && (
+          <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-700">
+            {cutReportSaveNotice}
+          </div>
+        )}
 
         {selectedItem && (
           <div className="space-y-3">
@@ -1496,7 +1691,7 @@ export default function DailyOutputPage() {
           </div>
         )}
 
-        {selectedItem && (
+        {(selectedItem || workerCutReport) && (
           <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
               <div>
@@ -1511,12 +1706,21 @@ export default function DailyOutputPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => void loadWorkerCutReport(selectedItem, false)}
-                  disabled={isCutReportLoading}
+                  onClick={() => selectedItem && void loadWorkerCutReport(selectedItem, false)}
+                  disabled={!selectedItem || isCutReportLoading}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${isCutReportLoading ? 'animate-spin' : ''}`} />
                   Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={saveWorkerCutReport}
+                  disabled={!workerCutReport || isCutReportLoading || isSavingCutReport}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  {isSavingCutReport ? 'Saving...' : activeSavedCutReportId ? 'Update Saved Report' : 'Save Cut Report'}
                 </button>
                 <button
                   type="button"
@@ -1572,6 +1776,12 @@ export default function DailyOutputPage() {
                   <span className="font-bold text-slate-700">Job:</span> {workerCutReport.jobNo || '-'}
                   <span className="mx-2 text-slate-300">|</span>
                   <span className="font-bold text-slate-700">Date:</span> {workerCutReport.cutInDate || '-'}
+                  {activeSavedCutReportId && (
+                    <>
+                      <span className="mx-2 text-slate-300">|</span>
+                      <span className="font-bold text-teal-700">Saved report loaded</span>
+                    </>
+                  )}
                 </div>
 
                 <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -1631,7 +1841,7 @@ export default function DailyOutputPage() {
             )}
           </div>
         )}
-      </div>
+
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="border-b border-slate-100 px-5 py-3 flex items-center justify-between">
@@ -1742,5 +1952,5 @@ export default function DailyOutputPage() {
         )}
       </AnimatePresence>
     </motion.div>
-  );
-}
+    );
+  }
