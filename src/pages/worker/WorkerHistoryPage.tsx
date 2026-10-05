@@ -283,14 +283,6 @@ export default function WorkerHistoryPage() {
     totals.dispatch,
   ];
 
-  const maxStageAllocated = (totals: ReturnType<typeof getAggregateStageTotals>) =>
-    Math.max(...stageValues(totals));
-
-  const lowestStageRemaining = (
-    record: DailyOutputRecord,
-    totals: ReturnType<typeof getAggregateStageTotals>
-  ) => Math.min(...stageValues(totals).map((value) => Math.max(0, record.orderQty - value)));
-
   const isAllocationComplete = (
     record: DailyOutputRecord,
     totals = getAggregateStageTotals(record)
@@ -546,8 +538,14 @@ export default function WorkerHistoryPage() {
             {records.map((r) => {
               const isExpanded = expandedId === r.id;
               const aggregateTotals = getAggregateStageTotals(r);
-              const maxAllocated = maxStageAllocated(aggregateTotals);
-              const lowestRemaining = lowestStageRemaining(r, aggregateTotals);
+              const remainingStages = [
+                { label: 'Seating', value: Math.max(0, r.orderQty - aggregateTotals.seating) },
+                { label: 'Printing', value: Math.max(0, r.orderQty - aggregateTotals.printing) },
+                { label: 'Curing', value: Math.max(0, r.orderQty - aggregateTotals.curing) },
+                { label: 'Checking', value: Math.max(0, r.orderQty - aggregateTotals.checking) },
+                { label: 'Packing', value: Math.max(0, r.orderQty - aggregateTotals.packing) },
+                { label: 'Dispatch', value: Math.max(0, r.orderQty - aggregateTotals.dispatch) },
+              ].filter((stage) => stage.value > 0);
               const allocationComplete = isAllocationComplete(r, aggregateTotals);
               const manualCompletion = getManualCompletionMeta(r);
               const unavailableCompleted =
@@ -624,16 +622,29 @@ export default function WorkerHistoryPage() {
                       )}
                     </button>
 
-                    <div className="text-right space-y-0.5 shrink-0">
+                    <div className="w-72 shrink-0 text-right">
                       <div className="text-xs">
                         <Package className="inline h-3 w-3 mr-1 text-orange-500" />
                         Issue: <span className="font-bold text-orange-600">{r.orderQty}</span>
                       </div>
-                      <div className="text-xs">
-                        Max stage: <span className="font-bold text-emerald-700">{maxAllocated}</span>
+                      <div className="mt-1 flex flex-wrap justify-end gap-1">
+                        {remainingStages.length > 0 ? (
+                          remainingStages.map((stage) => (
+                            <span
+                              key={stage.label}
+                              className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700"
+                            >
+                              {stage.label}: {stage.value}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" /> No stage qty remaining
+                          </span>
+                        )}
                       </div>
-                      <div className="text-xs text-slate-500">
-                        Lowest rem: <span className="font-bold text-blue-700">{lowestRemaining}</span> · {r.timeSlots?.length || 0} slot{(r.timeSlots?.length || 0) !== 1 ? 's' : ''}
+                      <div className="mt-1 text-[10px] text-slate-400">
+                        {r.timeSlots?.length || 0} slot{(r.timeSlots?.length || 0) !== 1 ? 's' : ''}
                       </div>
                     </div>
                   </div>

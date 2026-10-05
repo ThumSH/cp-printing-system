@@ -5,7 +5,7 @@ import {
   Palette, Plus, ChevronDown, ChevronRight, MessageSquare,
   CheckCircle2, AlertCircle, Send, Building2, Lock, Calendar,
   GitBranch, Image, ArrowRight, PackagePlus, Info, X, Edit2, Trash2, Save,
-  Filter, RotateCcw,
+  Filter, RotateCcw, ZoomIn, ZoomOut, Maximize2,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 import { useSampleStyleStore, SampleStyle, SampleStyleRevision } from '../../store/sampleStyleStore';
@@ -57,30 +57,30 @@ function StatusBadge({ style }: { style: SampleStyle }) {
   return <span className="rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5">No Revisions</span>;
 }
 
-function StyleImage({ imagePath, alt, size = 'md' }: { imagePath?: string | null; alt: string; size?: 'sm' | 'md' | 'lg' }) {
+function StyleImage({ imagePath, alt, size = 'md', onClick }: { imagePath?: string | null; alt: string; size?: 'sm' | 'md' | 'lg'; onClick?: () => void }) {
   const [err, setErr] = useState(false);
   const src = imgSrc(imagePath);
   const cls = size === 'lg' ? 'h-full w-full' : size === 'sm' ? 'h-full w-full' : 'h-full w-full';
   if (!src || err)
     return <div className="flex h-full w-full items-center justify-center rounded-lg bg-slate-100 text-slate-300"><Image className="h-6 w-6" /></div>;
-  return <img src={src} alt={alt} className={`${cls} rounded-lg object-cover`} onError={() => setErr(true)} />;
+  return <img src={src} alt={alt} className={`${cls} rounded-lg object-cover ${onClick ? 'cursor-zoom-in' : ''}`} onError={() => setErr(true)} onClick={onClick} />;
 }
 
 // ── Artwork thumbnail ─────────────────────────────────────────────────────────
-function ArtworkThumb({ url, label }: { url?: string | null; label: string }) {
+function ArtworkThumb({ url, label, onClick }: { url?: string | null; label: string; onClick?: () => void }) {
   const [err, setErr] = useState(false);
   const src = imgSrc(url);
   if (!src || err) return null;
   return (
     <div className="flex flex-col items-center gap-1">
-      <img src={src} alt={label} className="h-16 w-16 object-cover rounded-lg border border-slate-200 shadow-sm" onError={() => setErr(true)} />
+      <img src={src} alt={label} className={`h-16 w-16 object-cover rounded-lg border border-slate-200 shadow-sm ${onClick ? 'cursor-zoom-in' : ''}`} onError={() => setErr(true)} onClick={onClick} />
       <span className="text-[9px] text-slate-400 font-medium">{label}</span>
     </div>
   );
 }
 
 // ── FIXED: Revision entry — comment shown beside artwork ──────────────────────
-function RevisionEntry({ rev }: { rev: SampleStyleRevision }) {
+function RevisionEntry({ rev, onOpenImage }: { rev: SampleStyleRevision; onOpenImage?: (path: string, title: string) => void }) {
   const hasArtworkChange = !!rev.artworkUrl;
   const hasPrevious      = !!rev.previousArtworkUrl;
 
@@ -100,18 +100,18 @@ function RevisionEntry({ rev }: { rev: SampleStyleRevision }) {
           <div className="flex items-center gap-3 mt-1">
             {hasPrevious && (
               <>
-                <ArtworkThumb url={rev.previousArtworkUrl} label="Before" />
+                <ArtworkThumb url={rev.previousArtworkUrl} label="Before" onClick={() => rev.previousArtworkUrl && onOpenImage?.(rev.previousArtworkUrl, `Revision ${rev.revisionNo} — Before`)} />
                 <ArrowRight className="h-4 w-4 text-slate-300 shrink-0" />
               </>
             )}
-            <ArtworkThumb url={rev.artworkUrl} label="New artwork" />
+            <ArtworkThumb url={rev.artworkUrl} label="New artwork" onClick={() => rev.artworkUrl && onOpenImage?.(rev.artworkUrl, `Revision ${rev.revisionNo} — New artwork`)} />
           </div>
         )}
 
         {/* No new artwork — show previous art with label for context */}
         {!hasArtworkChange && hasPrevious && (
           <div className="mt-1">
-            <ArtworkThumb url={rev.previousArtworkUrl} label="Artwork (unchanged)" />
+            <ArtworkThumb url={rev.previousArtworkUrl} label="Artwork (unchanged)" onClick={() => rev.previousArtworkUrl && onOpenImage?.(rev.previousArtworkUrl, `Revision ${rev.revisionNo} — Artwork`)} />
           </div>
         )}
 
@@ -192,6 +192,11 @@ export default function SampleStylePage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAll, setShowAll]       = useState(false);
+  const [imageViewer, setImageViewer] = useState<{ path: string; title: string } | null>(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 });
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   // Filters — added only for this page view. No save/approval/revision logic is changed.
   const [filterStyle, setFilterStyle]       = useState('');
@@ -448,6 +453,28 @@ export default function SampleStylePage() {
     }
   };
 
+  const openImageViewer = (path: string, title: string) => {
+    setImageViewer({ path, title });
+    setImageZoom(1);
+    setImageOffset({ x: 0, y: 0 });
+  };
+
+  const closeImageViewer = () => {
+    setImageViewer(null);
+    setImageZoom(1);
+    setImageOffset({ x: 0, y: 0 });
+    setIsDraggingImage(false);
+  };
+
+  useEffect(() => {
+    if (!imageViewer) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeImageViewer();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [imageViewer]);
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-4xl space-y-6 pb-12">
 
@@ -682,7 +709,7 @@ export default function SampleStylePage() {
                               <div>
                                 <p className="text-[9px] font-medium uppercase text-slate-400 mb-1">Current Artwork</p>
                                 <div className="h-32 w-32 overflow-hidden rounded-xl border border-slate-200 shadow-sm">
-                                  <StyleImage imagePath={style.imagePath} alt={style.styleNo} />
+                                  <StyleImage imagePath={style.imagePath} alt={style.styleNo} onClick={() => style.imagePath && openImageViewer(style.imagePath, `${style.styleNo} — Current Artwork`)} />
                                 </div>
                               </div>
                             )}
@@ -690,7 +717,7 @@ export default function SampleStylePage() {
                               <div>
                                 <p className="text-[9px] font-medium uppercase text-slate-400 mb-1">Original</p>
                                 <div className="h-20 w-20 overflow-hidden rounded-lg border border-slate-200 opacity-70">
-                                  <StyleImage imagePath={style.originalImagePath} alt="Original" />
+                                  <StyleImage imagePath={style.originalImagePath} alt="Original" onClick={() => style.originalImagePath && openImageViewer(style.originalImagePath, `${style.styleNo} — Original Artwork`)} />
                                 </div>
                               </div>
                             )}
@@ -782,7 +809,7 @@ export default function SampleStylePage() {
                             // ALL revisions shown — no slice/truncation
                             <div className="space-y-2">
                               {style.revisions.map(rev => (
-                                <RevisionEntry key={rev.id} rev={rev} />
+                                <RevisionEntry key={rev.id} rev={rev} onOpenImage={openImageViewer} />
                               ))}
                             </div>
                           )}
@@ -886,7 +913,7 @@ export default function SampleStylePage() {
               <div className="mb-5 flex gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 {approveModal.imagePath && (
                   <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-slate-200">
-                    <StyleImage imagePath={approveModal.imagePath} alt={approveModal.styleNo} />
+                    <StyleImage imagePath={approveModal.imagePath} alt={approveModal.styleNo} onClick={() => approveModal.imagePath && openImageViewer(approveModal.imagePath, `${approveModal.styleNo} — Artwork`)} />
                   </div>
                 )}
                 <div><p className="font-bold text-slate-800">{approveModal.styleNo} — {approveModal.component}</p>
@@ -930,7 +957,7 @@ export default function SampleStylePage() {
               <div className="px-6 py-5 space-y-4 max-h-[80vh] overflow-y-auto">
                 <div className="flex gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                   <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-emerald-200">
-                    <StyleImage imagePath={submitModal.imagePath} alt={submitModal.styleNo} />
+                    <StyleImage imagePath={submitModal.imagePath} alt={submitModal.styleNo} onClick={() => submitModal.imagePath && openImageViewer(submitModal.imagePath, `${submitModal.styleNo} — Artwork`)} />
                   </div>
                   <div>
                     <p className="font-bold text-slate-800">{submitModal.styleNo} — {submitModal.component}</p>
@@ -995,7 +1022,7 @@ export default function SampleStylePage() {
                 {/* Style info */}
                 <div className="flex gap-4 rounded-xl border border-orange-200 bg-orange-50 p-4">
                   <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-orange-200">
-                    <StyleImage imagePath={reviseModal.imagePath} alt={reviseModal.styleNo} />
+                    <StyleImage imagePath={reviseModal.imagePath} alt={reviseModal.styleNo} onClick={() => reviseModal.imagePath && openImageViewer(reviseModal.imagePath, `${reviseModal.styleNo} — Artwork`)} />
                   </div>
                   <div>
                     <p className="font-bold text-slate-800">{reviseModal.styleNo} — {reviseModal.component}</p>
@@ -1079,6 +1106,63 @@ export default function SampleStylePage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {imageViewer && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-100 flex flex-col bg-slate-950/95"
+            onClick={closeImageViewer}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 text-white" onClick={e => e.stopPropagation()}>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">{imageViewer.title}</p>
+                <p className="text-[10px] text-white/50">{Math.round(imageZoom * 100)}%</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setImageZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2)))} className="rounded-lg border border-white/15 bg-white/10 p-2 hover:bg-white/15" title="Zoom out"><ZoomOut className="h-4 w-4" /></button>
+                <button type="button" onClick={() => { setImageZoom(1); setImageOffset({ x: 0, y: 0 }); }} className="rounded-lg border border-white/15 bg-white/10 p-2 hover:bg-white/15" title="Reset zoom"><Maximize2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setImageZoom(z => Math.min(5, +(z + 0.25).toFixed(2)))} className="rounded-lg border border-white/15 bg-white/10 p-2 hover:bg-white/15" title="Zoom in"><ZoomIn className="h-4 w-4" /></button>
+                <button type="button" onClick={closeImageViewer} className="rounded-lg border border-white/15 bg-white/10 p-2 hover:bg-white/15" title="Close"><X className="h-4 w-4" /></button>
+              </div>
+            </div>
+            <div
+              className="relative flex flex-1 items-center justify-center overflow-hidden"
+              onClick={e => e.stopPropagation()}
+              onWheel={e => {
+                e.preventDefault();
+                setImageZoom(z => Math.min(5, Math.max(0.5, +(z + (e.deltaY < 0 ? 0.2 : -0.2)).toFixed(2))));
+              }}
+              onMouseDown={e => {
+                if (imageZoom <= 1) return;
+                setIsDraggingImage(true);
+                setDragStart({ x: e.clientX - imageOffset.x, y: e.clientY - imageOffset.y });
+              }}
+              onMouseMove={e => {
+                if (!isDraggingImage) return;
+                setImageOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+              }}
+              onMouseUp={() => setIsDraggingImage(false)}
+              onMouseLeave={() => setIsDraggingImage(false)}
+            >
+              <img
+                src={imgSrc(imageViewer.path)}
+                alt={imageViewer.title}
+                draggable={false}
+                className={`max-h-[calc(100vh-72px)] max-w-[calc(100vw-32px)] select-none object-contain ${imageZoom > 1 ? (isDraggingImage ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-zoom-in'}`}
+                style={{ transform: `translate(${imageOffset.x}px, ${imageOffset.y}px) scale(${imageZoom})`, transformOrigin: 'center center' }}
+                onDoubleClick={() => {
+                  if (imageZoom === 1) setImageZoom(2);
+                  else { setImageZoom(1); setImageOffset({ x: 0, y: 0 }); }
+                }}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </motion.div>
   );
 }

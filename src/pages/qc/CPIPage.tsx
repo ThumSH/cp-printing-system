@@ -378,6 +378,17 @@ export default function CPIPage() {
       const newTotalDefected = globalDefects.reduce((s, d) => s + (parseFloat(d.defectedQty) || 0), 0);
       const newTotalCutQty = cuts.reduce((s, c) => s + c.cutQty, 0);
 
+      // Store bundle measurement direction in the sign of the existing numeric fields.
+      // Positive = + column, negative = - column. This keeps the existing API/model intact
+      // while preserving all Before/After L+/L-/W+/W- values for historical printing.
+      const signedMeasurement = (plus?: string, minus?: string) => {
+        const plusVal = parseFloat(plus || '');
+        if (!Number.isNaN(plusVal) && plusVal !== 0) return Math.abs(plusVal);
+        const minusVal = parseFloat(minus || '');
+        if (!Number.isNaN(minusVal) && minusVal !== 0) return -Math.abs(minusVal);
+        return 0;
+      };
+
       const newCutInspections = cuts.map(cut => ({
         cutRecordId:  '',
         cutNo:        cut.cutNo,
@@ -387,23 +398,27 @@ export default function CPIPage() {
         numberRanges: cut.bundles.map(b => b.numberRange).join(', '),
         part:         cut.component,
         sampleSize:   Math.ceil(cut.cutQty * 0.1),
-        defectRows: globalDefects.map((d, i) => {
-          const bundleForThisRow = flatBundles[i];
-          
-          // PACK THE DATA SO THE BACKEND DOES NOT DROP IT
-          const encodedRemarks = `${d.check || ''}|||${d.sampleSize || ''}|||${d.remarks || ''}`;
+        defectRows: Array.from({ length: Math.max(DEFECTS.length, cut.bundles.length) }, (_, i) => {
+          const d = globalDefects[i];
+          const defectInfo = DEFECTS[i];
+          const bundleForThisRow = cut.bundles[i];
+
+          // Keep the existing packed defect metadata exactly as before for the 14 defect rows.
+          const encodedRemarks = d
+            ? `${d.check || ''}|||${d.sampleSize || ''}|||${d.remarks || ''}`
+            : '';
 
           return {
-            defectCode:   DEFECTS[i].code,
-            defectName:   DEFECTS[i].label,
-            check:        d.check, 
-            beforeLength: parseFloat(bundleForThisRow?.beforeL_plus)  || 0,
-            beforeWidth:  parseFloat(bundleForThisRow?.beforeW_plus)  || 0,
-            afterLength:  parseFloat(bundleForThisRow?.afterL_plus)   || 0,
-            afterWidth:   parseFloat(bundleForThisRow?.afterW_plus)   || 0,
-            defectedQty:  parseFloat(d.defectedQty)   || 0,
-            percentage:   d.percentage,
-            remarks:      encodedRemarks, 
+            defectCode:   defectInfo?.code  || '',
+            defectName:   defectInfo?.label || '',
+            check:        d?.check || '',
+            beforeLength: signedMeasurement(bundleForThisRow?.beforeL_plus, bundleForThisRow?.beforeL_minus),
+            beforeWidth:  signedMeasurement(bundleForThisRow?.beforeW_plus, bundleForThisRow?.beforeW_minus),
+            afterLength:  signedMeasurement(bundleForThisRow?.afterL_plus, bundleForThisRow?.afterL_minus),
+            afterWidth:   signedMeasurement(bundleForThisRow?.afterW_plus, bundleForThisRow?.afterW_minus),
+            defectedQty:  d ? (parseFloat(d.defectedQty) || 0) : 0,
+            percentage:   d?.percentage || '',
+            remarks:      encodedRemarks,
           };
         }),
         totalDefectedQty: newTotalDefected,

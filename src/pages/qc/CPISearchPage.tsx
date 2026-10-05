@@ -352,6 +352,7 @@ function printCPIReport(report: CPIReport) {
               bundleNo: bNo,
               size: sizes[bIdx] || sizes[0] || '',
               numberRange: ranges[bIdx] || ranges[0] || '',
+              defectRow: c.defectRows?.[bIdx],
           });
       });
   });
@@ -362,17 +363,32 @@ function printCPIReport(report: CPIReport) {
     currentCutNo = b.cutNo;
   });
 
-  flatBundles.forEach((b, i) => {
-      const dr = report.cutInspections?.[0]?.defectRows?.[i];
+  // New reports store + / - direction in the sign of the existing measurement fields.
+  // Older reports (which only stored + values) remain backward compatible.
+  const splitSignedMeasurement = (value: unknown) => {
+    const n = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
+    if (!Number.isFinite(n) || n === 0) return { plus: '', minus: '' };
+    return n > 0
+      ? { plus: String(Math.abs(n)), minus: '' }
+      : { plus: '', minus: String(Math.abs(n)) };
+  };
+
+  flatBundles.forEach(b => {
+      const dr = b.defectRow;
       if (dr) {
-          b.beforeL_plus = dr.beforeLength || '';
-          b.beforeL_minus = '';
-          b.beforeW_plus = dr.beforeWidth || '';
-          b.beforeW_minus = '';
-          b.afterL_plus = dr.afterLength || '';
-          b.afterL_minus = '';
-          b.afterW_plus = dr.afterWidth || '';
-          b.afterW_minus = '';
+          const beforeL = splitSignedMeasurement(dr.beforeLength);
+          const beforeW = splitSignedMeasurement(dr.beforeWidth);
+          const afterL  = splitSignedMeasurement(dr.afterLength);
+          const afterW  = splitSignedMeasurement(dr.afterWidth);
+
+          b.beforeL_plus  = beforeL.plus;
+          b.beforeL_minus = beforeL.minus;
+          b.beforeW_plus  = beforeW.plus;
+          b.beforeW_minus = beforeW.minus;
+          b.afterL_plus   = afterL.plus;
+          b.afterL_minus  = afterL.minus;
+          b.afterW_plus   = afterW.plus;
+          b.afterW_minus  = afterW.minus;
       }
   });
 
@@ -429,7 +445,7 @@ function printCPIReport(report: CPIReport) {
       + td(bundle?.afterW_plus  ?? '') + td(bundle?.afterW_minus  ?? '')
       + td(bundle?.numberRange ?? '', 'font-size:9px;')
       + td(sampleVal) 
-      + td(dr?.defectedQty ?? '')
+      + td(dr && parseFloat(dr.defectedQty as any) > 0 ? dr.defectedQty : '')
       + td(dr?.percentage  ?? '')
       + td(remarkVal, 'text-align:left;')
       + '</tr>';

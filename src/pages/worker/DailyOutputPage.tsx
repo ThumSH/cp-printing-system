@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePaginatedSearch } from '../../hooks/usePaginatedSearch';
 import { PaginationControls } from '../../components/PaginatedTable';
 import {
   Factory, Save, Trash2, AlertCircle, CheckCircle2, X, Clock,
-  TrendingDown, Package, Printer, RefreshCw,
+  TrendingDown, Package, Printer, RefreshCw, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 import { useDashboardStore } from '../../store/dashboardStore';
@@ -105,6 +105,26 @@ interface DailyOutputRecord {
   totalPacking: number;
   totalDispatch: number;
   workerName: string;
+}
+
+interface OutputSummaryRecord {
+  id: string;
+  productionRecordId: string;
+  date: string;
+  styleNo: string;
+  customerName: string;
+  cutNo: string;
+  component: string;
+  orderQty: number;
+  tableNo: string;
+  workerName: string;
+  totalSeating: number;
+  totalPrinting: number;
+  totalCuring: number;
+  totalChecking: number;
+  totalPacking: number;
+  totalDispatch: number;
+  sourceRecords: DailyOutputRecord[];
 }
 
 interface WorkerResumePayload {
@@ -503,9 +523,54 @@ export default function DailyOutputPage() {
   const [cutReportSaveNotice, setCutReportSaveNotice] = useState('');
 
   const [confirmModal, setConfirmModal] = useState<{ rowIndex: number; slot: TimeSlot } | null>(null);
+  const [expandedOutputSummaryKey, setExpandedOutputSummaryKey] = useState<string | null>(null);
+
+  // DISPLAY ONLY: combine existing DailyOutput rows by ProductionRecordId for the
+  // worker-facing summary. The underlying records, save behaviour and API logic
+  // remain unchanged.
+  const outputSummaries = useMemo<OutputSummaryRecord[]>(() => {
+    const groups = new Map<string, DailyOutputRecord[]>();
+
+    records.forEach((record) => {
+      const key = record.productionRecordId || record.id;
+      const existing = groups.get(key);
+      if (existing) existing.push(record);
+      else groups.set(key, [record]);
+    });
+
+    return Array.from(groups.entries()).map(([key, group]) => {
+      const sorted = [...group].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      const representative = sorted[0];
+      const uniqueTables = [...new Set(group.map(r => r.tableNo).filter(Boolean))];
+      const uniqueWorkers = [...new Set(group.map(r => r.workerName).filter(Boolean))];
+      const uniqueDates = [...new Set(group.map(r => r.date).filter(Boolean))].sort();
+
+      return {
+        id: key,
+        productionRecordId: representative.productionRecordId,
+        date: uniqueDates.length <= 1
+          ? (uniqueDates[0] || representative.date)
+          : `${uniqueDates[0]} – ${uniqueDates[uniqueDates.length - 1]}`,
+        styleNo: representative.styleNo,
+        customerName: representative.customerName,
+        cutNo: representative.cutNo,
+        component: representative.component,
+        orderQty: Math.max(...group.map(r => Number(r.orderQty) || 0)),
+        tableNo: uniqueTables.join(', '),
+        workerName: uniqueWorkers.join(', '),
+        totalSeating: group.reduce((sum, r) => sum + (Number(r.totalSeating) || 0), 0),
+        totalPrinting: group.reduce((sum, r) => sum + (Number(r.totalPrinting) || 0), 0),
+        totalCuring: group.reduce((sum, r) => sum + (Number(r.totalCuring) || 0), 0),
+        totalChecking: group.reduce((sum, r) => sum + (Number(r.totalChecking) || 0), 0),
+        totalPacking: group.reduce((sum, r) => sum + (Number(r.totalPacking) || 0), 0),
+        totalDispatch: group.reduce((sum, r) => sum + (Number(r.totalDispatch) || 0), 0),
+        sourceRecords: sorted,
+      };
+    });
+  }, [records]);
 
   const workerPagination = usePaginatedSearch({
-    data: records,
+    data: outputSummaries,
     searchFields: ['styleNo' as any, 'customerName' as any, 'tableNo' as any, 'component' as any],
     pageSize: 25,
   });
@@ -1847,11 +1912,14 @@ export default function DailyOutputPage() {
         <div className="border-b border-slate-100 px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-slate-400" />
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">All Output Records</h3>
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Output Summary</h3>
+              <p className="mt-0.5 text-[11px] text-slate-400">One summary per production allocation. Expand a row to view the original saved records.</p>
+            </div>
           </div>
         </div>
 
-        {records.length === 0 ? (
+        {outputSummaries.length === 0 ? (
           <div className="py-12 text-center"><Factory className="mx-auto mb-2 h-10 w-10 text-slate-200" /><p className="text-sm text-slate-400">No output records yet.</p></div>
         ) : (
           <>
@@ -1859,57 +1927,132 @@ export default function DailyOutputPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-[11px] font-semibold text-slate-500 border-b border-slate-100">
+                    <th className="w-8 px-2 py-2.5"></th>
                     <th className="px-4 py-2.5 text-left">Date</th>
                     <th className="px-4 py-2.5 text-left">Style</th>
                     <th className="px-4 py-2.5 text-left">Customer</th>
                     <th className="px-4 py-2.5 text-left">Component</th>
+                    <th className="px-4 py-2.5 text-left">Cut</th>
                     <th className="px-4 py-2.5 text-left">Table</th>
                     <th className="px-4 py-2.5 text-right">Issue</th>
-                    <th className="px-4 py-2.5 text-right">Max Stage</th>
-                    <th className="px-4 py-2.5 text-right">Lowest Rem.</th>
+                    <th className="px-4 py-2.5 text-left">Stage Summary</th>
                     <th className="px-4 py-2.5 text-left">Worker</th>
-                    <th className="px-4 py-2.5 text-right"></th>
+                    <th className="px-4 py-2.5 text-right">Entries</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {workerPagination.paginated.map((r) => {
-                    const rec = r as DailyOutputRecord;
-                    const recStageTotals = {
-                      seating: rec.totalSeating || 0,
-                      printing: rec.totalPrinting || 0,
-                      curing: rec.totalCuring || 0,
-                      checking: rec.totalChecking || 0,
-                      packing: rec.totalPacking || 0,
-                      dispatch: rec.totalDispatch || 0,
-                    };
-                    const recCompleted = Math.max(...Object.values(recStageTotals));
-                    const rem = Math.min(...Object.values(recStageTotals).map(v => Math.max(0, rec.orderQty - v)));
-                    
+                  {workerPagination.paginated.map((row) => {
+                    const summary = row as OutputSummaryRecord;
+                    const isExpanded = expandedOutputSummaryKey === summary.id;
+                    const stageSummary = [
+                      { label: 'Seating', used: summary.totalSeating },
+                      { label: 'Printing', used: summary.totalPrinting },
+                      { label: 'Curing', used: summary.totalCuring },
+                      { label: 'Checking', used: summary.totalChecking },
+                      { label: 'Packing', used: summary.totalPacking },
+                      { label: 'Dispatch', used: summary.totalDispatch },
+                    ];
+
                     return (
-                      <tr key={rec.id} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-2.5 text-slate-600 text-xs">{rec.date}</td>
-                        <td className="px-4 py-2.5 font-bold text-slate-800">{rec.styleNo}</td>
-                        <td className="px-4 py-2.5 text-slate-500">{rec.customerName}</td>
-                        <td className="px-4 py-2.5 text-slate-600">{rec.component}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{rec.tableNo}</td>
-                        <td className="px-4 py-2.5 text-right font-semibold text-orange-600">{rec.orderQty}</td>
-                        <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{recCompleted}</td>
-                        <td className={`px-4 py-2.5 text-right font-bold ${rem <= 0 ? 'text-slate-400' : 'text-blue-600'}`}>{rem}</td>
-                        <td className="px-4 py-2.5 text-slate-600 text-xs">{rec.workerName}</td>
-                        <td className="px-4 py-2.5 text-right">
-                          <button onClick={() => handleDelete(rec.id)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"><Trash2 className="h-4 w-4" /></button>
-                        </td>
-                      </tr>
+                      <Fragment key={summary.id}>
+                        <tr
+                          className="cursor-pointer hover:bg-slate-50/50"
+                          onClick={() => setExpandedOutputSummaryKey(isExpanded ? null : summary.id)}
+                        >
+                          <td className="px-2 py-3 text-center text-slate-400">
+                            {isExpanded ? <ChevronDown className="mx-auto h-4 w-4" /> : <ChevronRight className="mx-auto h-4 w-4" />}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">{summary.date}</td>
+                          <td className="px-4 py-3 font-bold text-slate-800">{summary.styleNo}</td>
+                          <td className="px-4 py-3 text-slate-500">{summary.customerName}</td>
+                          <td className="px-4 py-3 text-slate-600">{summary.component}</td>
+                          <td className="px-4 py-3 text-slate-600">{summary.cutNo || '—'}</td>
+                          <td className="px-4 py-3 font-mono text-xs">{summary.tableNo || '—'}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-orange-600">{summary.orderQty}</td>
+                          <td className="min-w-136 px-4 py-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              {stageSummary.map((stage) => {
+                                const remaining = Math.max(0, summary.orderQty - stage.used);
+                                return (
+                                  <span
+                                    key={stage.label}
+                                    className={`rounded-full border px-2 py-1 text-[10px] font-bold ${
+                                      remaining <= 0
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        : 'border-blue-200 bg-blue-50 text-blue-700'
+                                    }`}
+                                  >
+                                    {stage.label}: {stage.used}/{summary.orderQty}
+                                    {remaining > 0 ? ` · rem ${remaining}` : ' ✓'}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">{summary.workerName || '—'}</td>
+                          <td className="px-4 py-3 text-right font-bold text-slate-600">{summary.sourceRecords.length}</td>
+                        </tr>
+
+                        {isExpanded && (
+                          <tr className="bg-slate-50/60">
+                            <td colSpan={11} className="px-5 py-4">
+                              <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">Original saved records</div>
+                              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="bg-slate-100 text-slate-500">
+                                      <th className="px-3 py-2 text-left">Date</th>
+                                      <th className="px-3 py-2 text-left">Table</th>
+                                      <th className="px-3 py-2 text-left">Worker</th>
+                                      <th className="px-3 py-2 text-center">Seating</th>
+                                      <th className="px-3 py-2 text-center">Printing</th>
+                                      <th className="px-3 py-2 text-center">Curing</th>
+                                      <th className="px-3 py-2 text-center">Checking</th>
+                                      <th className="px-3 py-2 text-center">Packing</th>
+                                      <th className="px-3 py-2 text-center">Dispatch</th>
+                                      <th className="px-3 py-2 text-right"></th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {summary.sourceRecords.map((rec) => (
+                                      <tr key={rec.id}>
+                                        <td className="px-3 py-2 text-slate-600">{rec.date}</td>
+                                        <td className="px-3 py-2 font-mono">{rec.tableNo}</td>
+                                        <td className="px-3 py-2 text-slate-600">{rec.workerName || '—'}</td>
+                                        <td className="px-3 py-2 text-center">{rec.totalSeating || '—'}</td>
+                                        <td className="px-3 py-2 text-center">{rec.totalPrinting || '—'}</td>
+                                        <td className="px-3 py-2 text-center">{rec.totalCuring || '—'}</td>
+                                        <td className="px-3 py-2 text-center">{rec.totalChecking || '—'}</td>
+                                        <td className="px-3 py-2 text-center">{rec.totalPacking || '—'}</td>
+                                        <td className="px-3 py-2 text-center">{rec.totalDispatch || '—'}</td>
+                                        <td className="px-3 py-2 text-right">
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); void handleDelete(rec.id); }}
+                                            className="rounded p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                                            title="Delete this original record"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <PaginationControls 
-              onSearchChange={workerPagination.setSearch} 
-              onPageChange={workerPagination.goToPage} 
-              {...workerPagination} 
-              placeholder="Search records..." 
+            <PaginationControls
+              onSearchChange={workerPagination.setSearch}
+              onPageChange={workerPagination.goToPage}
+              {...workerPagination}
+              placeholder="Search summaries..."
             />
           </>
         )}

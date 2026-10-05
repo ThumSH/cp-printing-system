@@ -41,6 +41,7 @@ import InvoiceSecurityPage from './pages/superadmin/InvoiceSecurityPage';
 import CustomerRegistrationPage from './pages/admin/CustomerRegistrationPage';
 import ReportCenterPage from './pages/report/ReportCenterPage';
 import WorkerCutReportSearchPage from './pages/worker/WorkerCutReportSearchPage';
+import WorkerProductionReportPage from './pages/worker/WorkerProductionReportPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -220,6 +221,7 @@ function App() {
           <Route path="worker/downtime" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><DowntimeReportPage /></RoleRoute>} />
           <Route path="worker/history" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><WorkerHistoryPage /></RoleRoute>} />
           <Route path="worker/cut-reports" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><WorkerCutReportSearchPage /></RoleRoute>} />
+          <Route path="worker/reports" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><WorkerProductionReportPage /></RoleRoute>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
