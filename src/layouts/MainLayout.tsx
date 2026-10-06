@@ -30,7 +30,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Overview',
     items: [
-      { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores', 'Worker'], exact: true },
+      { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores', 'Worker','Accounts'], exact: true },
     ],
   },
   {
@@ -124,6 +124,17 @@ const NAV_GROUPS: NavGroup[] = [
       { name: 'Report Center', href: '/reports', icon: Activity, roles: ['SuperAdmin'] },
       { name: 'Report', href: '/report', icon: Receipt, roles: ['Admin', 'QC', 'Gatepass', 'Stores'] },
       { name: 'Report Search', href: '/report-search', icon: Receipt, roles: ['Admin', 'QC', 'Gatepass', 'Stores'] },
+    ],
+  },
+
+  {
+    label: 'Accounts',
+    items: [
+      { name: 'Invoice', href: '/invoice', icon: Receipt, roles: ['Accounts'], exact: true },
+      { name: 'Invoice Search', href: '/invoice/search', icon: Search, roles: ['Accounts'] },
+      { name: 'Customers', href: '/admin/customers', icon: Users, roles: ['Accounts'] },
+      { name: 'Report', href: '/report', icon: Receipt, roles: ['Accounts'] },
+      { name: 'Report Search', href: '/report-search', icon: Search, roles: ['Accounts'] },
     ],
   },
 ];

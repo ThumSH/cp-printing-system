@@ -1,6 +1,6 @@
 // src/types/index.ts
 
-export const ROLES = ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores','Worker'] as const;
+export const ROLES = ['Admin', 'Developer', 'QC', 'Gatepass', 'Audit', 'Stores','Worker','Accounts'] as const;
 
 export type ManagedRole = typeof ROLES[number];
 export type Role = ManagedRole | 'SuperAdmin';

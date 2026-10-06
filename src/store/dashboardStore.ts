@@ -25,6 +25,43 @@ export interface DashboardData {
   recent: { storeIn: any[]; dispatches: any[]; audits: any[] };
 }
 
+
+export interface AccountsDashboardData {
+  totalInvoices: number;
+  invoicesToday: number;
+  invoicesThisMonth: number;
+  totalInvoiceValue: number;
+  monthInvoiceValue: number;
+  monthVatAmount: number;
+  totalCustomers: number;
+  totalReports: number;
+  reportsThisMonth: number;
+  recentInvoices: {
+    id: string;
+    invoiceNumber: string;
+    invoiceDate: string;
+    purchaserName: string;
+    totalAmountIncludingVat: string;
+    createdBy: string;
+  }[];
+  recentCustomers: {
+    id: string;
+    customerName: string;
+    customerCode: string;
+    tinNumber: string;
+    createdAt: string;
+  }[];
+  recentReports: {
+    id: string;
+    customerName: string;
+    styleNo: string;
+    component: string;
+    invoiceNo: string;
+    reportDate: string;
+    updatedAt: string;
+  }[];
+}
+
 export interface StyleOverview {
   styleNo: string; customerName: string; scheduleNo: string; bulkQty: number; stage: string;
   storeInCount: number; totalReceived: number; remainingBulk: number; receivedPct: number; totalCuts: number;
@@ -41,16 +78,21 @@ export interface StyleOverview {
 
 interface DashboardState {
   data:            DashboardData | null;
+  accountsData:    AccountsDashboardData | null;
   styles:          StyleOverview[];
   storeInRecords:  StoreInRecord[];
   loading:         boolean;
+  accountsLoading: boolean;
   error:           string;
+  accountsError:   string;
   /** Non-null when optional secondary data (styles / storeIn) failed but main KPIs loaded */
   partialError:    string;
   lastFetched:     number | null;
   lastWorkerDate:  string;
+  lastAccountsFetched: number | null;
 
-  fetch:      (force?: boolean, includeStoreIn?: boolean, workerDate?: string) => Promise<void>;
+  fetch:         (force?: boolean, includeStoreIn?: boolean, workerDate?: string) => Promise<void>;
+  fetchAccounts: (force?: boolean) => Promise<void>;
   invalidate: () => void;
 }
 
@@ -58,15 +100,66 @@ const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   data:           null,
+  accountsData:   null,
   styles:         [],
   storeInRecords: [],
   loading:        false,
+  accountsLoading:false,
   error:          '',
+  accountsError:  '',
   partialError:   '',
   lastFetched:    null,
   lastWorkerDate: '',
+  lastAccountsFetched: null,
 
-  invalidate: () => set({ lastFetched: null, lastWorkerDate: '' }),
+  invalidate: () => set({ lastFetched: null, lastWorkerDate: '', lastAccountsFetched: null }),
+
+
+  fetchAccounts: async (force = false) => {
+    const state = get();
+    const isFresh =
+      state.lastAccountsFetched &&
+      Date.now() - state.lastAccountsFetched < CACHE_TTL_MS;
+
+    if (!force && isFresh && state.accountsData) return;
+    if (state.accountsLoading) return;
+
+    set({ accountsLoading: true, accountsError: '' });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+
+    try {
+      const res = await fetch(`${API.BASE}/api/dashboard/accounts`, {
+        headers: getAuthHeaders(),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
+      }
+
+      const accountsData: AccountsDashboardData = await res.json();
+
+      set({
+        accountsData,
+        lastAccountsFetched: Date.now(),
+        accountsError: '',
+      });
+    } catch (e) {
+      const msg =
+        e instanceof Error
+          ? e.name === 'AbortError'
+            ? 'Accounts dashboard timed out. Check that the backend is running.'
+            : e.message
+          : 'Failed to load Accounts dashboard.';
+
+      set({ accountsError: msg });
+    } finally {
+      clearTimeout(timeout);
+      set({ accountsLoading: false });
+    }
+  },
 
   fetch: async (force = false, includeStoreIn = true, workerDate = '') => {
     const state = get();

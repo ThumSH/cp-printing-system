@@ -8,12 +8,12 @@ import {
   ChevronDown, BarChart2, Activity, Shield, Layers,
   CheckCircle2, XCircle, Inbox, Send,
   Eye, PieChart as PieIcon, LayoutDashboard,
-  Boxes, Gauge, Building2, ListFilter,
+  Boxes, Gauge, Building2, ListFilter, Receipt, Users, Search, PlusCircle,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { PieChart, MiniDonut, ProgressBar, HorizontalBarChart } from '../components/MiniChart';
 import { StoreInRecord } from '../store/inventoryStore';
-import { useDashboardStore, DashboardData, StyleOverview } from '../store/dashboardStore';
+import { useDashboardStore, DashboardData, StyleOverview, AccountsDashboardData } from '../store/dashboardStore';
 
 interface StoreInStyleSummary {
   key: string; styleNo: string; customerName: string; bulkQty: number;
@@ -789,6 +789,198 @@ function WorkerDashboard({
   );
 }
 
+
+function AccountsDashboard({
+  data,
+}: {
+  data: AccountsDashboardData;
+}) {
+  const money = (value: number) =>
+    new Intl.NumberFormat('en-LK', {
+      style: 'currency',
+      currency: 'LKR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(value) || 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard
+          icon={Receipt}
+          label="Total Invoices"
+          value={data.totalInvoices}
+          sub={`${data.invoicesToday} today`}
+          color="blue"
+          href="/invoice/search"
+          delay={0.05}
+        />
+        <KpiCard
+          icon={TrendingUp}
+          label="Invoice Value This Month"
+          value={money(data.monthInvoiceValue)}
+          sub={`${data.invoicesThisMonth} invoices`}
+          color="emerald"
+          href="/invoice/search"
+          delay={0.1}
+        />
+        <KpiCard
+          icon={Users}
+          label="Registered Customers"
+          value={data.totalCustomers}
+          color="purple"
+          href="/admin/customers"
+          delay={0.15}
+        />
+        <KpiCard
+          icon={FileText}
+          label="Saved Reports"
+          value={data.totalReports}
+          sub={`${data.reportsThisMonth} this month`}
+          color="teal"
+          href="/report-search"
+          delay={0.2}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card title="Monthly Accounts Snapshot" icon={BarChart2} className="lg:col-span-2">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile
+              label="Invoices Today"
+              value={data.invoicesToday}
+              color="text-blue-700"
+              bg="bg-blue-50"
+            />
+            <StatTile
+              label="Invoices This Month"
+              value={data.invoicesThisMonth}
+              color="text-indigo-700"
+              bg="bg-indigo-50"
+            />
+            <StatTile
+              label="VAT This Month"
+              value={money(data.monthVatAmount)}
+              color="text-amber-700"
+              bg="bg-amber-50"
+            />
+            <StatTile
+              label="All-Time Invoice Value"
+              value={money(data.totalInvoiceValue)}
+              color="text-emerald-700"
+              bg="bg-emerald-50"
+            />
+          </div>
+        </Card>
+
+        <Card title="Quick Actions" icon={Activity}>
+          <div className="grid grid-cols-1 gap-2">
+            {[
+              { label: 'Create Invoice', href: '/invoice', icon: PlusCircle },
+              { label: 'Search Invoices', href: '/invoice/search', icon: Search },
+              { label: 'Register / Manage Customers', href: '/admin/customers', icon: Users },
+              { label: 'Create Report', href: '/report', icon: FileText },
+              { label: 'Search Reports', href: '/report-search', icon: Search },
+            ].map(item => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="flex-1">{item.label}</span>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                </Link>
+              );
+            })}
+          </div>
+        </Card>
+      </div>
+
+      <Card
+        title="Recent Invoices"
+        icon={Receipt}
+        action={
+          <Link
+            to="/invoice/search"
+            className="flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline"
+          >
+            View all <ArrowRight className="h-3 w-3" />
+          </Link>
+        }
+      >
+        <SimpleTable
+          headers={['Invoice No', 'Customer', 'Date', 'Amount', 'Created By', '']}
+          rows={data.recentInvoices.map(invoice => [
+            <span className="font-bold text-slate-800">{invoice.invoiceNumber}</span>,
+            <span className="text-slate-600">{invoice.purchaserName || '—'}</span>,
+            <span className="text-slate-500">{invoice.invoiceDate || '—'}</span>,
+            <span className="font-bold text-emerald-700">
+              {invoice.totalAmountIncludingVat || '0.00'}
+            </span>,
+            <span className="text-slate-500">{invoice.createdBy || '—'}</span>,
+            <Link
+              to={`/invoice/${invoice.id}`}
+              className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
+            >
+              View <ArrowRight className="h-3 w-3" />
+            </Link>,
+          ])}
+        />
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card
+          title="Recent Customers"
+          icon={Users}
+          action={
+            <Link
+              to="/admin/customers"
+              className="flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline"
+            >
+              Manage <ArrowRight className="h-3 w-3" />
+            </Link>
+          }
+        >
+          <SimpleTable
+            headers={['Customer', 'Code', 'TIN']}
+            rows={data.recentCustomers.map(customer => [
+              <span className="font-bold text-slate-800">{customer.customerName}</span>,
+              <span className="text-slate-600">{customer.customerCode}</span>,
+              <span className="text-slate-500">{customer.tinNumber || '—'}</span>,
+            ])}
+          />
+        </Card>
+
+        <Card
+          title="Recent Reconciliation Reports"
+          icon={FileText}
+          action={
+            <Link
+              to="/report-search"
+              className="flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline"
+            >
+              View all <ArrowRight className="h-3 w-3" />
+            </Link>
+          }
+        >
+          <SimpleTable
+            headers={['Customer', 'Style', 'Component', 'Date']}
+            rows={data.recentReports.map(report => [
+              <span className="font-bold text-slate-800">{report.customerName}</span>,
+              <span className="text-slate-600">{report.styleNo}</span>,
+              <span className="text-slate-500">{report.component}</span>,
+              <span className="text-slate-400">{report.reportDate || '—'}</span>,
+            ])}
+          />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 // ==========================================
 // ADMIN PIPELINE TABLE
 // ==========================================
@@ -1009,7 +1201,7 @@ function PipelineTable({ styles, storeInRecords }: { styles: StyleOverview[]; st
 // ==========================================
 // ADMIN ROLE TABS
 // ==========================================
-type RoleTab = 'overview' | 'Developer' | 'Stores' | 'QC' | 'Gatepass' | 'Audit' | 'Worker';
+type RoleTab = 'overview' | 'Developer' | 'Stores' | 'QC' | 'Gatepass' | 'Audit' | 'Worker' | 'Accounts';
 
 const ROLE_TABS: { key: RoleTab; label: string; icon: any; color: string }[] = [
   { key: 'overview',  label: 'Overview',  icon: LayoutDashboard, color: 'text-slate-600'   },
@@ -1019,6 +1211,7 @@ const ROLE_TABS: { key: RoleTab; label: string; icon: any; color: string }[] = [
   { key: 'Gatepass',  label: 'Gatepass',  icon: Truck,           color: 'text-amber-600'   },
   { key: 'Audit',     label: 'Audit',     icon: Shield,          color: 'text-indigo-600'  },
   { key: 'Worker',    label: 'Worker',    icon: Factory,         color: 'text-orange-600'  },
+  { key: 'Accounts',  label: 'Accounts',  icon: Receipt,         color: 'text-cyan-600'    },
 ];
 
 function RoleTabBar({ active, onChange }: { active: RoleTab; onChange: (t: RoleTab) => void }) {
@@ -1044,7 +1237,20 @@ function RoleTabBar({ active, onChange }: { active: RoleTab; onChange: (t: RoleT
 // ==========================================
 export default function Dashboard() {
   const { user } = useAuthStore();
-  const { data, styles, storeInRecords, loading, error, fetch: fetchDashboard, lastFetched } = useDashboardStore();
+  const {
+    data,
+    accountsData,
+    styles,
+    storeInRecords,
+    loading,
+    accountsLoading,
+    error,
+    accountsError,
+    fetch: fetchDashboard,
+    fetchAccounts,
+    lastFetched,
+    lastAccountsFetched,
+  } = useDashboardStore();
   const [adminTab, setAdminTab] = useState<RoleTab>('overview');
   const [workerDate, setWorkerDate] = useState(getColomboDateString);
 
@@ -1057,21 +1263,154 @@ export default function Dashboard() {
     rawRole === 'gatepass' ? 'Gatepass' :
     rawRole === 'audit' ? 'Audit' :
     rawRole === 'worker' ? 'Worker' :
+    rawRole === 'accounts' ? 'Accounts' :
     '';
 
   const isAdmin = role === 'Admin';
+  const isAccounts = role === 'Accounts';
   const includeStoreIn = isAdmin || role === 'Stores';
 
   useEffect(() => {
+    if (isAccounts) {
+      void fetchAccounts(true);
+      return;
+    }
+
     // Force a fresh dashboard read whenever the dashboard/role is entered.
     // This avoids showing the two-minute cached worker totals after saving output.
     void fetchDashboard(true, includeStoreIn, workerDate);
-  }, [fetchDashboard, includeStoreIn, workerDate]);
 
-  const load = (force = false) => fetchDashboard(force, includeStoreIn, workerDate);
+    // Admin can also open the Accounts tab, so preload the Accounts summary.
+    if (isAdmin) {
+      void fetchAccounts(true);
+    }
+  }, [fetchAccounts, fetchDashboard, includeStoreIn, isAccounts, isAdmin, workerDate]);
+
+  const load = async (force = false) => {
+    if (isAccounts) {
+      await fetchAccounts(force);
+      return;
+    }
+
+    await fetchDashboard(force, includeStoreIn, workerDate);
+
+    if (isAdmin) {
+      await fetchAccounts(force);
+    }
+  };
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+  if (isAccounts) {
+    if (accountsLoading && !accountsData) {
+      return (
+        <div className="flex flex-col items-center justify-center py-32 gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+          <p className="text-sm text-slate-400">Loading Accounts dashboard...</p>
+        </div>
+      );
+    }
+
+    if (accountsError && !accountsData) {
+      return (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6">
+          <p className="font-semibold text-red-800">Failed to load Accounts dashboard</p>
+          <p className="mt-1 text-sm text-red-600">{accountsError}</p>
+          <button
+            onClick={() => load(true)}
+            className="mt-3 text-xs font-bold text-red-700 underline"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+
+    if (!accountsData) return null;
+
+    const accountCacheAge = lastAccountsFetched
+      ? Math.round((Date.now() - lastAccountsFetched) / 1000)
+      : null;
+
+    const accountCacheLabel =
+      accountCacheAge !== null
+        ? accountCacheAge < 60
+          ? 'Just now'
+          : `${Math.round(accountCacheAge / 60)}m ago`
+        : '';
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="space-y-6 pb-12"
+      >
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="relative overflow-hidden rounded-2xl bg-linear-to-br from-slate-900 via-blue-950 to-slate-900 p-6 text-white shadow-lg"
+        >
+          <div className="absolute -right-12 -top-12 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
+          <div className="absolute -bottom-12 -left-12 h-48 w-48 rounded-full bg-blue-500/10 blur-3xl" />
+
+          <div className="relative flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="mb-1 flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-cyan-300" />
+                <p className="text-xs font-bold uppercase tracking-widest text-cyan-200">
+                  Accounts Control Center
+                </p>
+              </div>
+              <h1 className="text-3xl font-black tracking-tight">
+                {greeting}, {user?.name}
+              </h1>
+              <p className="mt-1 text-sm text-slate-300">{todayStr}</p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-lg border border-white/10 bg-white/10 px-4 py-2.5 backdrop-blur">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                  This Month
+                </p>
+                <p className="text-2xl font-black">
+                  {accountsData.invoicesThisMonth} invoices
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-white/10 bg-white/10 px-4 py-2.5 backdrop-blur">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                  Customers
+                </p>
+                <p className="text-2xl font-black">{accountsData.totalCustomers}</p>
+              </div>
+
+              <button
+                onClick={() => load(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/10 px-3 py-2.5 text-xs font-semibold text-white backdrop-blur transition-all hover:bg-white/20"
+              >
+                {accountsLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                {accountsLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+
+        {accountCacheLabel && !accountsLoading && (
+          <div className="-mt-3 text-right text-[10px] text-slate-400">
+            Updated {accountCacheLabel}
+          </div>
+        )}
+
+        <AccountsDashboard data={accountsData} />
+      </motion.div>
+    );
+  }
 
   if (loading && !data) return (
     <div className="flex flex-col items-center justify-center py-32 gap-3">
@@ -1357,6 +1696,32 @@ export default function Dashboard() {
               onDateChange={setWorkerDate}
               loading={loading}
             />
+          </motion.div>
+        )}
+
+        {adminTab === 'Accounts' && (
+          <motion.div key="accounts" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <div className="mb-4 flex items-center gap-2 rounded-lg bg-cyan-50 border border-cyan-100 px-4 py-2.5">
+              <Eye className="h-4 w-4 text-cyan-600" />
+              <p className="text-xs font-bold text-cyan-800">Viewing as Accounts</p>
+            </div>
+
+            {accountsLoading && !accountsData ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <Loader2 className="h-7 w-7 animate-spin text-cyan-500" />
+                <p className="text-sm text-slate-400">Loading Accounts dashboard...</p>
+              </div>
+            ) : accountsError && !accountsData ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-5">
+                <p className="font-semibold text-red-800">Failed to load Accounts dashboard</p>
+                <p className="mt-1 text-sm text-red-600">{accountsError}</p>
+                <button onClick={() => fetchAccounts(true)} className="mt-3 text-xs font-bold text-red-700 underline">
+                  Retry
+                </button>
+              </div>
+            ) : accountsData ? (
+              <AccountsDashboard data={accountsData} />
+            ) : null}
           </motion.div>
         )}
       </AnimatePresence>

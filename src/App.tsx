@@ -95,17 +95,17 @@ function App() {
            {/* ── Tax Invoice: Admin and SuperAdmin only ── */}
           <Route path="invoice">
             <Route index element={
-              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin','Accounts']}>
                 <InvoicePage />
               </RoleRoute>
             } />
             <Route path="search" element={
-              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin','Accounts']}>
                 <InvoiceSearchPage />
               </RoleRoute>
             } />
             <Route path=":id" element={
-              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin','Accounts']}>
                 <InvoiceDetailPage />
               </RoleRoute>
             } />
@@ -181,7 +181,7 @@ function App() {
             } />
 
               <Route path="customers" element={
-              <RoleRoute allowedRoles={['Admin']}>
+              <RoleRoute allowedRoles={['Admin','Accounts']}>
                 <CustomerRegistrationPage />
               </RoleRoute>
             } />
