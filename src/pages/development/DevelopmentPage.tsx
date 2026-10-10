@@ -202,6 +202,7 @@ export default function DevelopmentPage() {
   
   const [isOtherComponent, setIsOtherComponent] = useState(false);
   const [otherComponentText, setOtherComponentText] = useState('');
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -281,12 +282,12 @@ export default function DevelopmentPage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-    if (errors[name]) setErrors((prev) => ({ ...prev, [name]: '' }));
+    if (errors[name] || errors.submit) setErrors((prev) => ({ ...prev, [name]: '', submit: '' }));
   };
 
   const handleBodyColourChange = (value: string) => {
     setFormData((prev) => ({ ...prev, bodyColour: value }));
-    if (errors.bodyColour) setErrors((prev) => ({ ...prev, bodyColour: '' }));
+    if (errors.bodyColour || errors.submit) setErrors((prev) => ({ ...prev, bodyColour: '', submit: '' }));
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -308,6 +309,46 @@ export default function DevelopmentPage() {
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     return data.url.startsWith('http') ? data.url : `${API.BASE}${data.url}`;
+  };
+
+
+  const normalizeJobValue = (value?: string) =>
+    (value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+  const normalizeColourList = (value?: string) =>
+    (value || '')
+      .split(',')
+      .map(v => normalizeJobValue(v))
+      .filter(Boolean)
+      .sort()
+      .join('|');
+
+  const findExactDuplicateJob = (
+    component: string,
+    artworkUrl: string,
+    hasNewArtwork: boolean
+  ) => {
+    if (hasNewArtwork) return undefined;
+
+    return submissions.find(existing => {
+      if (editingId && existing.id === editingId) return false;
+
+      return (
+        normalizeJobValue(existing.customer) === normalizeJobValue(formData.customer) &&
+        normalizeJobValue(existing.styleNo) === normalizeJobValue(formData.styleNo) &&
+        normalizeJobValue(existing.season) === normalizeJobValue(formData.season) &&
+        normalizeJobValue(existing.printingTechnique) === normalizeJobValue(formData.printingTechnique) &&
+        normalizeJobValue(existing.washingStandard) === normalizeJobValue(formData.washingStandard) &&
+        normalizeColourList(existing.bodyColour) === normalizeColourList(formData.bodyColour) &&
+        normalizeJobValue(existing.printColour) === normalizeJobValue(formData.printColour) &&
+        normalizeJobValue(existing.printColourQty) === normalizeJobValue(formData.printColourQty) &&
+        normalizeJobValue(existing.sampleOrderedDate) === normalizeJobValue(formData.sampleOrderedDate) &&
+        normalizeJobValue(existing.sampleDeliveryDate) === normalizeJobValue(formData.sampleDeliveryDate) &&
+        normalizeJobValue(existing.component) === normalizeJobValue(component) &&
+        normalizeJobValue(existing.artworkFileName) === normalizeJobValue(formData.artworkFileName) &&
+        normalizeJobValue(existing.artworkPreviewUrl) === normalizeJobValue(artworkUrl)
+      );
+    });
   };
 
   const validateForm = (): boolean => {
@@ -337,9 +378,8 @@ export default function DevelopmentPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validateForm()) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  const saveDevelopmentJob = async () => {
+    const finalComponent = isOtherComponent ? otherComponentText.trim() : formData.component;
 
     let serverArtworkUrl = formData.artworkPreviewUrl;
     if (artworkFile) {
@@ -349,12 +389,11 @@ export default function DevelopmentPage() {
       } catch {
         setErrors((prev) => ({ ...prev, artwork: 'Failed to upload artwork. Please try again.' }));
         setUploadingArtwork(false);
+        setShowConfirmModal(false);
         return;
       }
       setUploadingArtwork(false);
     }
-
-    const finalComponent = isOtherComponent ? otherComponentText.trim() : formData.component;
 
     const jobData = {
       ...formData,
@@ -372,11 +411,13 @@ export default function DevelopmentPage() {
       }
     } catch (e) {
       setErrors(prev => ({ ...prev, submit: e instanceof Error ? e.message : 'Failed to save.' }));
+      setShowConfirmModal(false);
       return;
     }
 
     await fetchStyles(true);
 
+    setShowConfirmModal(false);
     setFormData(INITIAL_FORM_STATE);
     setArtworkFile(null);
     setArtworkBlobUrl('');
@@ -384,6 +425,38 @@ export default function DevelopmentPage() {
     setCopyApplied(false);
     setIsOtherComponent(false);
     setOtherComponentText('');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const finalComponent = isOtherComponent ? otherComponentText.trim() : formData.component;
+
+    const duplicateBeforeUpload = findExactDuplicateJob(
+      finalComponent,
+      formData.artworkPreviewUrl,
+      !!artworkFile
+    );
+
+    if (duplicateBeforeUpload) {
+      setErrors(prev => ({
+        ...prev,
+        submit: 'Duplicate version exists. This exact development job already exists. Change at least one value before creating another job.',
+      }));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    if (editingId) {
+      await saveDevelopmentJob();
+      return;
+    }
+
+    setShowConfirmModal(true);
   };
 
   const handleEdit = (submission: DevelopmentForm) => {
@@ -431,6 +504,7 @@ export default function DevelopmentPage() {
     setCopyApplied(false);
     setIsOtherComponent(false);
     setOtherComponentText('');
+    setShowConfirmModal(false);
     setErrors({});
   };
 
@@ -487,7 +561,7 @@ export default function DevelopmentPage() {
               </p>
             </div>
             <p className="text-xs text-slate-500 mb-3">
-              Select an existing job to copy all shared fields. Then just pick the new <strong>Component</strong> and <strong>Body Colour</strong>.
+              Select an existing job to copy all shared fields. Then choose the new <strong>Component</strong> and <strong>Body Colour</strong>. You can also change the <strong>Season</strong> and other editable job details.
             </p>
             <div className="flex items-center gap-3 flex-wrap">
               <select
@@ -512,7 +586,7 @@ export default function DevelopmentPage() {
             {copyApplied && (
               <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Shared fields copied. Now select the Component and Body Colour for this new job.
+                Shared fields copied. Select the Component and Body Colour. Season and the other editable job details can also be changed.
               </div>
             )}
           </div>
@@ -526,7 +600,7 @@ export default function DevelopmentPage() {
             {[
               { label: 'Customer', name: 'customer', type: 'text', placeholder: 'e.g. Boss' },
               { label: 'Style No', name: 'styleNo', type: 'text', placeholder: 'e.g. BO-9090' },
-              { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. SS26' },
+              { label: 'Season', name: 'season', type: 'text', placeholder: 'e.g. SS26', alwaysEditable: true },
               { label: 'Printing Technique', name: 'printingTechnique', type: 'text', placeholder: 'e.g. High Density', alwaysEditable: true },
               { label: 'Washing Standard', name: 'washingStandard', type: 'text', placeholder: 'e.g. 40°C Machine Wash', alwaysEditable: true },
               { label: 'Print Colour', name: 'printColour', type: 'text', placeholder: 'e.g. White & Red', alwaysEditable: true },
@@ -659,7 +733,7 @@ export default function DevelopmentPage() {
                         setOtherComponentText('');
                         setFormData((prev) => ({ ...prev, component: opt }));
                       }
-                      if (errors.component) setErrors((prev) => ({ ...prev, component: '' }));
+                      if (errors.component || errors.submit) setErrors((prev) => ({ ...prev, component: '', submit: '' }));
                     }}
                     className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all ${
                       (!isOtherComponent && formData.component === opt) || (isOtherComponent && opt === 'Other')
@@ -701,6 +775,14 @@ export default function DevelopmentPage() {
             </div>
           </div>
 
+
+          {errors.submit && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{errors.submit}</span>
+            </div>
+          )}
+
           <div className="flex justify-end pt-4 space-x-3">
             {(editingId || copyApplied) && (
               <button type="button" onClick={resetForm}
@@ -720,6 +802,121 @@ export default function DevelopmentPage() {
           </div>
         </form>
       </div>
+
+
+      <AnimatePresence>
+        {showConfirmModal && !editingId && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget && !uploadingArtwork) {
+                setShowConfirmModal(false);
+              }
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.97, y: 10 }}
+              transition={{ duration: 0.18 }}
+              className="w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            >
+              <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">Final Review</p>
+                  <h3 className="mt-1 text-xl font-bold text-slate-900">Confirm Development Job</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Please double-check the details below before creating this job.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  disabled={uploadingArtwork}
+                  className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    ['Customer', formData.customer],
+                    ['Style No', formData.styleNo],
+                    ['Season', formData.season],
+                    ['Component', isOtherComponent ? otherComponentText.trim() : formData.component],
+                    ['Body Colour', formData.bodyColour],
+                    ['Printing Technique', formData.printingTechnique],
+                    ['Washing Standard', formData.washingStandard],
+                    ['Print Colour', formData.printColour],
+                    ['Print Colour QTY', formData.printColourQty],
+                    ['Sample Ordered Date', formData.sampleOrderedDate],
+                    ['Sample Delivery Date', formData.sampleDeliveryDate],
+                    ['Artwork File', formData.artworkFileName || '—'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+                      <p className="mt-1 wrap-break-word text-sm font-semibold text-slate-800">{value || '—'}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {previewUrl && (
+                  <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                    <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Artwork Preview</p>
+                    <div className="flex justify-center">
+                      <img
+                        src={previewUrl}
+                        alt="Artwork preview"
+                        className="max-h-56 rounded-lg border border-slate-200 bg-white object-contain shadow-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-800">
+                    Confirm only after checking all details. Once created, this job will also create its linked Sample Style.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  disabled={uploadingArtwork}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Go Back & Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={saveDevelopmentJob}
+                  disabled={uploadingArtwork}
+                  className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {uploadingArtwork ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Confirm & Create Job
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── JOBS TABLE ───────────────────────────────────────────────────────── */}
       {submissions.length > 0 && (
