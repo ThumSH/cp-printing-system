@@ -40,7 +40,7 @@ const formatMoneyValue = (
  * browser calendar, backend, searching and sorting
  * continue to work correctly.
  *
- * The printed Tax Invoice displays dates as MM/DD/YY.
+ * The printed Tax Invoice displays dates as MM-DD-YYYY.
  */
 const formatInvoiceDate = (
   value?: string | null
@@ -62,7 +62,7 @@ const formatInvoiceDate = (
 
   const [, year, month, day] = isoDateMatch;
 
-  return `${month}/${day}/${year.slice(-2)}`;
+  return `${month}-${day}-${year}`;
 };
 
 const INVOICE_STYLES = `
