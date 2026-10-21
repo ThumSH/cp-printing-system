@@ -263,8 +263,8 @@ export default function DevelopmentPage() {
       sampleDeliveryDate: source.sampleDeliveryDate,
       artworkFileName:    source.artworkFileName,
       artworkPreviewUrl:  source.artworkPreviewUrl,
-      bodyColour: '',
-      component:  '',
+      bodyColour:         source.bodyColour,
+      component:          source.component,
     });
 
     setArtworkBlobUrl(source.artworkPreviewUrl
@@ -275,8 +275,13 @@ export default function DevelopmentPage() {
     setArtworkFile(null);
     setCopyApplied(true);
     setErrors({});
-    setIsOtherComponent(false);
-    setOtherComponentText('');
+
+    const sourceIsStandard =
+      COMPONENT_OPTIONS.includes(source.component) &&
+      source.component !== 'Other';
+
+    setIsOtherComponent(!sourceIsStandard);
+    setOtherComponentText(!sourceIsStandard ? source.component : '');
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -514,7 +519,7 @@ export default function DevelopmentPage() {
     return `${API.BASE}/api/development/image?path=${encodeURIComponent(path)}`;
   };
   const previewUrl = artworkBlobUrl || buildImageUrl(formData.artworkPreviewUrl);
-  const lockedFields = copyApplied && !editingId;
+  const lockedFields = false; // Copied jobs remain fully editable.
 
   const filteredJobs = useMemo(() => {
     let list = [...submissions];
@@ -561,7 +566,7 @@ export default function DevelopmentPage() {
               </p>
             </div>
             <p className="text-xs text-slate-500 mb-3">
-              Select an existing job to copy all shared fields. Then choose the new <strong>Component</strong> and <strong>Body Colour</strong>. You can also change the <strong>Season</strong> and other editable job details.
+              Select an existing job to copy all of its details. <strong>Every field remains editable</strong>, so if the same specifications apply to another style you can simply change the <strong>Style No</strong>.
             </p>
             <div className="flex items-center gap-3 flex-wrap">
               <select
@@ -586,7 +591,7 @@ export default function DevelopmentPage() {
             {copyApplied && (
               <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Shared fields copied. Select the Component and Body Colour. Season and the other editable job details can also be changed.
+                All details copied. Every field is editable — change the Style No or any other value needed for the new job.
               </div>
             )}
           </div>
@@ -613,7 +618,7 @@ export default function DevelopmentPage() {
               <div key={field.name} className="space-y-1">
                 <label className="block text-sm font-medium text-slate-700">
                   {field.label} <span className="text-red-500">*</span>
-                  {lockedFields && (field as any).alwaysEditable && (
+                  {copyApplied && !editingId && (
                     <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
                       Editable
                     </span>
@@ -651,7 +656,7 @@ export default function DevelopmentPage() {
             <div className="space-y-1">
               <label className="block text-sm font-medium text-slate-700">
                 Body Colour <span className="text-red-500">*</span>
-                {copyApplied && <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">Pick new colour</span>}
+                {copyApplied && <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">Editable</span>}
               </label>
               <ColourMasterSelect value={formData.bodyColour} onChange={handleBodyColourChange} error={errors.bodyColour} />
             </div>
@@ -710,7 +715,7 @@ export default function DevelopmentPage() {
               </h4>
               {copyApplied && (
                 <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-medium">
-                  Pick the new component for this job
+                  Editable
                 </span>
               )}
               {errors.component && (

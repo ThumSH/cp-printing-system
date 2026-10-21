@@ -796,9 +796,9 @@ function AccountsDashboard({
   data: AccountsDashboardData;
 }) {
   const money = (value: number) =>
-    new Intl.NumberFormat('en-LK', {
+    new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'LKR',
+      currency: 'USD',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(Number(value) || 0);
