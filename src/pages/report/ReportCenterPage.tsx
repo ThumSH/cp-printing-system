@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   AlertCircle,
@@ -17,7 +18,7 @@ import {
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 
-type DepartmentKey = 'Development' | 'Stores' | 'QC' | 'Gatepass' | 'Worker';
+type DepartmentKey = 'Admin' | 'Development' | 'Stores' | 'QC' | 'Gatepass' | 'Worker' | 'Accounts';
 type ReportView = 'Overview' | DepartmentKey | 'Users';
 type PrintMode = 'summary' | 'summary-details';
 type PeriodKey = 'today' | 'this-week' | 'this-month' | 'last-month' | 'this-year' | 'custom';
@@ -175,7 +176,7 @@ type Filters = {
 };
 
 const API_BASE = API.REPORTS;
-const SECTIONS: DepartmentKey[] = ['Development', 'Stores', 'QC', 'Gatepass', 'Worker'];
+const SECTIONS: DepartmentKey[] = ['Admin', 'Development', 'Stores', 'QC', 'Gatepass', 'Worker', 'Accounts'];
 const PAGE_SIZES = [25, 50, 100, 200];
 const PRINT_MODES: { value: PrintMode; label: string }[] = [
   { value: 'summary', label: 'Summary only' },
@@ -298,11 +299,13 @@ function clamp(value: number) {
 }
 
 function chartSeries(chart: ReportChart) {
+  if (chart.key.includes('admin')) return ['Approved', 'Rejected', 'Other actions'];
   if (chart.key.includes('development')) return ['Created', 'Submitted', 'Approved'];
   if (chart.key.includes('stores')) return ['Received', 'Issued'];
   if (chart.key.includes('qc')) return ['Checked', 'Rejected'];
   if (chart.key.includes('gatepass')) return ['Dispatched', 'Good'];
   if (chart.key.includes('worker')) return ['Output', 'Dispatch'];
+  if (chart.key.includes('accounts')) return ['Invoices', 'Reconciliation', 'Customers'];
   if (chart.key.includes('company')) return ['Styles', 'Store received', 'Dispatched'];
   return ['Value', 'Value 2', 'Value 3'];
 }
@@ -386,6 +389,7 @@ function FilterPanel({
   onPageSize,
   onPrintMode,
   onRefresh,
+  onPrint,
 }: {
   period: PeriodKey;
   dateFrom: string;
@@ -404,6 +408,7 @@ function FilterPanel({
   onPageSize: (value: number) => void;
   onPrintMode: (value: PrintMode) => void;
   onRefresh: () => void;
+  onPrint: () => void;
 }) {
   const sectionMode = view !== 'Overview' && view !== 'Users';
   const workerMode = view === 'Worker';
@@ -515,7 +520,7 @@ function FilterPanel({
 
         <button
           type="button"
-          onClick={() => window.print()}
+          onClick={onPrint}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
         >
           <Printer className="h-4 w-4" />
@@ -616,6 +621,269 @@ function ChartGrid({ charts }: { charts: ReportChart[] }) {
     </div>
   );
 }
+
+function PrintCharts({ charts }: { charts: ReportChart[] }) {
+  const selected = charts.filter((chart) => chart.type === 'line' || chart.type === 'pie');
+  if (selected.length === 0) return null;
+
+  return (
+    <div className="print-visual-page">
+      <PrintSectionHeading title="Visual summary" />
+
+      <table className="print-chart-layout-table">
+        <tbody>
+          <tr>
+            {selected.slice(0, 2).map((chart) => (
+              <td key={chart.key || chart.title}>
+                <PrintChartCard chart={chart} />
+              </td>
+            ))}
+            {selected.length === 1 && <td />}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PrintChartCard({ chart }: { chart: ReportChart }) {
+  return (
+    <div className="print-chart-card">
+      <div className="print-chart-title">{chart.title}</div>
+      <div className="print-chart-description">{chart.description}</div>
+      {chart.type === 'line' && <PrintLineChart chart={chart} />}
+      {chart.type === 'pie' && <PrintPieChart chart={chart} />}
+    </div>
+  );
+}
+
+function PrintLineChart({ chart }: { chart: ReportChart }) {
+  const points = chart.points || [];
+  if (points.length === 0) {
+    return <div className="print-chart-empty">No chart data for the selected filters.</div>;
+  }
+
+  const labels = chartSeries(chart);
+  const seriesKeys: (keyof ChartPoint)[] = ['value', 'value2', 'value3'];
+  const width = 460;
+  const height = 185;
+  const padding = { left: 38, right: 12, top: 12, bottom: 34 };
+
+  const allValues = points.flatMap((point) =>
+    seriesKeys.map((key) => Number(point[key]) || 0)
+  );
+  const max = Math.max(...allValues, 1);
+
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  const x = (index: number) =>
+    padding.left +
+    (points.length === 1
+      ? chartWidth / 2
+      : (index / (points.length - 1)) * chartWidth);
+
+  const y = (value: number) =>
+    padding.top + chartHeight - ((value || 0) / max) * chartHeight;
+
+  const pathFor = (key: keyof ChartPoint) =>
+    points
+      .map(
+        (point, index) =>
+          `${index === 0 ? 'M' : 'L'} ${x(index)} ${y(Number(point[key]) || 0)}`
+      )
+      .join(' ');
+
+  const visibleTickIndexes =
+    points.length <= 6
+      ? points.map((_, index) => index)
+      : [
+          0,
+          Math.floor((points.length - 1) * 0.25),
+          Math.floor((points.length - 1) * 0.5),
+          Math.floor((points.length - 1) * 0.75),
+          points.length - 1,
+        ];
+
+  return (
+    <div className="print-line-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width="100%"
+        height="158"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+          const yy = padding.top + chartHeight - ratio * chartHeight;
+          return (
+            <g key={ratio}>
+              <line
+                x1={padding.left}
+                x2={width - padding.right}
+                y1={yy}
+                y2={yy}
+                stroke="#cbd5e1"
+                strokeWidth="1"
+              />
+              <text
+                x={padding.left - 7}
+                y={yy + 3}
+                textAnchor="end"
+                fontSize="8"
+                fill="#475569"
+              >
+                {formatNumber(Math.round(max * ratio))}
+              </text>
+            </g>
+          );
+        })}
+
+        {seriesKeys.map((key, index) => (
+          <path
+            key={key}
+            d={pathFor(key)}
+            fill="none"
+            stroke={CHART_COLORS[index]}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ))}
+
+        {points.map((point, index) =>
+          seriesKeys.map((key, seriesIndex) => (
+            <circle
+              key={`${index}-${key}`}
+              cx={x(index)}
+              cy={y(Number(point[key]) || 0)}
+              r="2.2"
+              fill={CHART_COLORS[seriesIndex]}
+            />
+          ))
+        )}
+
+        {visibleTickIndexes.map((index) => (
+          <text
+            key={index}
+            x={x(index)}
+            y={height - 14}
+            textAnchor="middle"
+            fontSize="7.5"
+            fill="#475569"
+          >
+            {points[index]?.label}
+          </text>
+        ))}
+      </svg>
+
+      <div className="print-chart-legend">
+        {seriesKeys.map((key, index) => (
+          <span key={key}>
+            <i style={{ backgroundColor: CHART_COLORS[index] }} />
+            {labels[index]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PrintPieChart({ chart }: { chart: ReportChart }) {
+  const points = (chart.points || []).filter((point) => Number(point.value) > 0);
+  const total = points.reduce((sum, point) => sum + (Number(point.value) || 0), 0);
+
+  if (total <= 0) {
+    return <div className="print-chart-empty">No chart data for the selected filters.</div>;
+  }
+
+  const size = 150;
+  const center = 75;
+  const radius = 56;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  const segments = points.map((point, index) => {
+    const fraction = (Number(point.value) || 0) / total;
+    const dash = fraction * circumference;
+    const currentOffset = offset;
+    offset += dash;
+
+    return {
+      point,
+      color: CHART_COLORS[index % CHART_COLORS.length],
+      dash,
+      gap: circumference - dash,
+      offset: -currentOffset,
+      pct: fraction * 100,
+    };
+  });
+
+  return (
+    <div className="print-pie-layout">
+      <svg
+        viewBox={`0 0 ${size} ${size}`}
+        width="150"
+        height="150"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth="30"
+        />
+        {segments.map((segment, index) => (
+          <circle
+            key={`${segment.point.label}-${index}`}
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke={segment.color}
+            strokeWidth="30"
+            strokeDasharray={`${segment.dash} ${segment.gap}`}
+            strokeDashoffset={segment.offset}
+            transform={`rotate(-90 ${center} ${center})`}
+          />
+        ))}
+        <circle cx={center} cy={center} r="34" fill="#ffffff" />
+        <text
+          x={center}
+          y={center - 2}
+          textAnchor="middle"
+          fontSize="13"
+          fontWeight="700"
+          fill="#0f172a"
+        >
+          {formatNumber(total)}
+        </text>
+        <text
+          x={center}
+          y={center + 12}
+          textAnchor="middle"
+          fontSize="7"
+          fill="#64748b"
+        >
+          TOTAL
+        </text>
+      </svg>
+
+      <div className="print-pie-legend">
+        {segments.map((segment, index) => (
+          <div key={`${segment.point.label}-${index}`}>
+            <span className="print-pie-dot" style={{ backgroundColor: segment.color }} />
+            <span className="print-pie-name">{segment.point.label}</span>
+            <strong>{formatNumber(segment.point.value)}</strong>
+            <span>{formatPercent(segment.pct)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 function ChartCard({ chart }: { chart: ReportChart }) {
   return (
@@ -834,7 +1102,7 @@ function ScoreBar({ score }: { score: number }) {
   );
 }
 
-function HistoryTable({ report, onPage }: { report: SectionReport; onPage: (page: number) => void }) {
+function HistoryTable({ report, onPage, onPrintAll, printingAll }: { report: SectionReport; onPage: (page: number) => void; onPrintAll: () => void; printingAll: boolean }) {
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
@@ -842,7 +1110,16 @@ function HistoryTable({ report, onPage }: { report: SectionReport; onPage: (page
           <h3 className="text-base font-black text-slate-950">{report.section} work history</h3>
           <p className="text-sm text-slate-500">Showing {report.rows.length} of {formatNumber(report.totalRows)} records. Use page buttons for the rest.</p>
         </div>
-        <div className="screen-only flex items-center gap-2">
+        <div className="screen-only flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onPrintAll}
+            disabled={printingAll || report.totalRows === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
+          >
+            {printingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+            {printingAll ? 'Preparing...' : 'Print full history'}
+          </button>
           <button
             type="button"
             disabled={report.page <= 1}
@@ -960,6 +1237,37 @@ function NotesPanel({ notes }: { notes: string[] }) {
   );
 }
 
+function PrintHistoryDocument({
+  title, dateFrom, dateTo, generatedAt, report,
+}: {
+  title: string; dateFrom: string; dateTo: string; generatedAt?: string; report: SectionReport;
+}) {
+  return (
+    <div className="print-only">
+      <div className="print-document">
+        <div className="print-title-row">
+          <div>
+            <div className="print-company">Colour Plus Printing Systems (Pvt) Ltd</div>
+            <div className="print-title">{title} - Full Work History</div>
+            <div className="print-subtitle">Period: {dateFrom} to {dateTo} · Generated: {generatedAt || '—'} · Total records: {formatNumber(report.rows.length)}</div>
+          </div>
+          <img src="/logo.svg" alt="Colour Plus" className="print-logo" />
+        </div>
+        {report.appliedFilters?.length > 0 && (<>
+          <PrintSectionHeading title="Applied filters" />
+          <div className="print-filter-grid">{report.appliedFilters.map((item) => <div key={`${item.label}-${item.value}`}><strong>{item.label}:</strong> {item.value}</div>)}</div>
+        </>)}
+        <PrintSectionHeading title={`${report.section} full work history`} />
+        <table className="print-table compact">
+          <thead><tr>{report.columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
+          <tbody>{report.rows.map((row, index) => <tr key={index}>{report.columns.map((c) => <td key={c.key} className={c.type === 'number' ? 'num' : ''}>{valueToText(row[c.key]) || '—'}</td>)}</tr>)}</tbody>
+        </table>
+        <div className="print-signatures"><div>Prepared By</div><div>Checked By</div><div>Authorized By</div></div>
+      </div>
+    </div>
+  );
+}
+
 function PrintReport({
   title,
   dateFrom,
@@ -997,6 +1305,7 @@ function PrintReport({
           <>
             <PrintSectionHeading title="Management summary" />
             <PrintMetricTable cards={dashboard.headlineCards} />
+            <PrintCharts charts={dashboard.charts} />
             <PrintSectionHeading title="Department performance" />
             <table className="print-table">
               <thead><tr><th>Department</th><th>Completed</th><th>Pending</th><th>Completion</th><th>Workload</th><th>Notes</th></tr></thead>
@@ -1021,6 +1330,7 @@ function PrintReport({
             <PrintSectionHeading title="Summary" />
             <p className="print-note-text">{sectionReport.description}</p>
             <PrintMetricTable cards={sectionReport.metrics} />
+            <PrintCharts charts={sectionReport.charts} />
 
             {sectionReport.appliedFilters?.length > 0 && (
               <>
@@ -1118,6 +1428,9 @@ export default function ReportCenterPage() {
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
   const [printMode, setPrintMode] = useState<PrintMode>('summary');
+  const [printTarget, setPrintTarget] = useState<'report' | 'history'>('report');
+  const [historyPrintReport, setHistoryPrintReport] = useState<SectionReport | null>(null);
+  const [printingHistory, setPrintingHistory] = useState(false);
 
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [sectionReport, setSectionReport] = useState<SectionReport | null>(null);
@@ -1238,16 +1551,75 @@ export default function ReportCenterPage() {
     setPage(1);
   };
 
+  const printCurrentReport = () => {
+    setPrintTarget('report');
+    setHistoryPrintReport(null);
+    setTimeout(() => window.print(), 0);
+  };
+
+  const printFullHistory = async () => {
+    if (view === 'Overview' || view === 'Users' || !sectionReport) return;
+    setPrintingHistory(true); setError('');
+    try {
+      const makeQuery = (p: number) => toQuery({
+        dateFrom, dateTo, page: p, pageSize: 200, role: filters.role, employee: filters.employee, status: filters.status,
+        styleNo: filters.styleNo, customer: filters.customer, scheduleNo: filters.scheduleNo, timeSlot: view === 'Worker' ? filters.timeSlot : '',
+      });
+      const first = await fetchJson<SectionReport>(`${API_BASE}/sections/${view}?${makeQuery(1)}`);
+      const allRows = [...first.rows];
+      for (let nextPage = 2; nextPage <= first.totalPages; nextPage += 1) {
+        const next = await fetchJson<SectionReport>(`${API_BASE}/sections/${view}?${makeQuery(nextPage)}`);
+        allRows.push(...next.rows);
+      }
+      setHistoryPrintReport({ ...first, rows: allRows, page: 1, pageSize: allRows.length, totalRows: allRows.length, totalPages: 1 });
+      setPrintTarget('history');
+      setTimeout(() => window.print(), 50);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to prepare full work history for printing.');
+    } finally { setPrintingHistory(false); }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-7xl space-y-6 pb-12">
       <style>{`
         .print-only { display: none; }
         @media print {
           @page { size: A4 landscape; margin: 10mm; }
-          body { background: white !important; }
+
+          html,
+          body {
+            width: auto !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            background: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          /* The app shell uses h-screen / overflow-hidden.
+             Print content is portaled directly under body, outside that shell. */
+          body > #root,
+          body > #app {
+            display: none !important;
+          }
+
+          body > .print-only,
+          .print-only {
+            display: block !important;
+            position: static !important;
+            width: auto !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            transform: none !important;
+            opacity: 1 !important;
+          }
+
           .screen-only, .report-screen { display: none !important; }
-          .print-only { display: block !important; }
-          .print-document { color: #0f172a; font-family: Arial, sans-serif; font-size: 10px; }
+          .print-document { color: #0f172a; font-family: Arial, sans-serif; font-size: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .print-title-row { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 12px; }
           .print-logo { height: 42px; object-fit: contain; }
           .print-company { font-size: 18px; font-weight: 800; }
@@ -1264,11 +1636,32 @@ export default function ReportCenterPage() {
           .metric-table td:nth-child(2) { width: 16%; font-size: 13px; font-weight: 800; }
           .print-filter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 8px; }
           .print-filter-grid div { border: 1px solid #cbd5e1; padding: 5px; }
+          .print-visual-page { page-break-before: always; break-before: page; page-break-after: auto; break-after: auto; }
+          .print-chart-layout-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 8px 0; margin: 0; }
+          .print-chart-layout-table td { width: 50%; padding: 0; vertical-align: top; border: 0; }
+          .print-chart-card { height: 235px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; background: #fff; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
+          .print-chart-title { font-size: 10px; font-weight: 800; color: #0f172a; margin-bottom: 2px; }
+          .print-chart-description { height: 22px; overflow: hidden; font-size: 7.5px; line-height: 1.25; color: #64748b; margin-bottom: 3px; }
+          .print-line-chart { width: 100%; height: 184px; overflow: hidden; }
+          .print-line-chart svg { display: block !important; width: 100% !important; height: 158px !important; overflow: visible !important; }
+          .print-chart-legend { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 1px; font-size: 7px; font-weight: 700; color: #475569; }
+          .print-chart-legend span { display: inline-flex; align-items: center; gap: 3px; }
+          .print-chart-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 999px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          .print-pie-layout { display: table; width: 100%; height: 180px; table-layout: fixed; }
+          .print-pie-layout > svg { display: table-cell !important; width: 145px !important; height: 145px !important; vertical-align: middle; }
+          .print-pie-legend { display: table-cell; vertical-align: middle; width: auto; padding-left: 8px; font-size: 7.5px; }
+          .print-pie-legend > div { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 4px; padding: 4px 2px; border-bottom: 1px solid #e2e8f0; }
+          .print-pie-dot { width: 7px; height: 7px; border-radius: 999px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          .print-pie-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: #334155; }
+          .print-chart-empty { display: flex; align-items: center; justify-content: center; height: 170px; border: 1px dashed #cbd5e1; color: #64748b; font-size: 8px; }
           .print-notes { margin-top: 10px; padding: 8px; border: 1px solid #f59e0b; background: #fffbeb; }
           .print-notes ul { margin: 5px 0 0 18px; padding: 0; }
           .print-signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 24px; page-break-inside: avoid; }
           .print-signatures div { border-top: 1px solid #0f172a; padding-top: 6px; text-align: center; font-weight: 700; }
-          tr { page-break-inside: avoid; }
+          .print-section-heading { break-after: avoid; page-break-after: avoid; }
+          .print-visual-page .print-section-heading { page-break-after: avoid; break-after: avoid; }
+          .print-table { break-inside: auto; page-break-inside: auto; }
+          tr { break-inside: avoid; page-break-inside: avoid; }
           thead { display: table-header-group; }
         }
       `}</style>
@@ -1294,6 +1687,7 @@ export default function ReportCenterPage() {
           onPageSize={handlePageSize}
           onPrintMode={setPrintMode}
           onRefresh={handleRefresh}
+          onPrint={printCurrentReport}
         />
 
         {error && (
@@ -1356,7 +1750,7 @@ export default function ReportCenterPage() {
             <ChartGrid charts={sectionReport.charts} />
             <EmployeePerformanceTable rows={sectionReport.employeeRows} />
             <NotesPanel notes={sectionReport.notes} />
-            <HistoryTable report={sectionReport} onPage={changePage} />
+            <HistoryTable report={sectionReport} onPage={changePage} onPrintAll={printFullHistory} printingAll={printingHistory} />
           </div>
         )}
 
@@ -1371,17 +1765,35 @@ export default function ReportCenterPage() {
         )}
       </div>
 
-      <PrintReport
-        title={title}
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-        generatedAt={generatedAt}
-        dashboard={dashboard}
-        sectionReport={sectionReport}
-        users={users}
-        view={view}
-        printMode={printMode}
-      />
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <>
+            {printTarget === 'report' && (
+              <PrintReport
+                title={title}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                generatedAt={generatedAt}
+                dashboard={dashboard}
+                sectionReport={sectionReport}
+                users={users}
+                view={view}
+                printMode={printMode}
+              />
+            )}
+
+            {printTarget === 'history' && historyPrintReport && (
+              <PrintHistoryDocument
+                title={title}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                generatedAt={historyPrintReport.generatedAt || generatedAt}
+                report={historyPrintReport}
+              />
+            )}
+          </>,
+          document.body
+        )}
     </motion.div>
   );
 }
