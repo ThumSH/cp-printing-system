@@ -1,0 +1,241 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useAuthStore } from './store/authStore';
+import MainLayout from './layouts/MainLayout';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import DevelopmentPage from './pages/development/DevelopmentPage';
+import DevelopmentSubmission from './pages/development/DevelopmentSubmission';
+import SubmissionSearch from './pages/development/SubmissionSearch';
+import SampleStylePage from './pages/development/SampleStylePage';
+import SampleStyleSearchPage from './pages/development/Samplestylesearchpage';
+import ApproveSubmission from './pages/admin/ApproveSubmission';
+import ApprovalSearch from './pages/admin/ApprovalSearch';
+import StoreInPage from './pages/inventory/StoreInPage';
+import StoreInSearchPage from './pages/inventory/StoreInSearchPage';
+import ProductionSearchPage from './pages/inventory/ProductionSearchPage';
+import CPIPage from './pages/qc/CPIPage';
+import CPISearchPage from './pages/qc/CPISearchPage';
+import DeliveryTrackerSearchPage from './pages/qc/DeliveryTrackerSearchPage';
+import StoreProductionPage from './pages/inventory/StoreProductionPage';
+import AdviceNotePage from './pages/gatepass/AdviceNotePage';
+import AdviceNoteSearchPage from './pages/gatepass/Advicenotesearchpage';
+import AuditPage from './pages/audit/AuditPage';
+import AuditSearchPage from './pages/audit/Auditsearchpage';
+import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
+import UserManagementPage from './pages/admin/UserManagement';
+import OperatorManagementPage from './pages/admin/OperatorManagementPage';
+import DailyOutputPage from './pages/worker/DailyOutputPage';
+import DowntimeReportPage from './pages/worker/DowntimeReportPage';
+import WorkerHistoryPage from './pages/worker/WorkerHistoryPage';
+import ActivityLogPage from './pages/admin/ActivityLogPage';
+import SplashScreen from './components/SplashScreen';
+import OperatorSelect from './pages/OperatorSelect';
+import ColourMasterPage from './pages/admin/ColourMasterPage';
+import AboutUsPage from './pages/AboutUsPage';
+import ReconciliationReportPage from './pages/report/ReconciliationReportPage';
+import ReconciliationReportSearchPage from './pages/report/ReconciliationReportSearchPage';
+import InvoicePage from './pages/invoice/InvoicePage';
+import InvoiceSearchPage from './pages/invoice/InvoiceSearchPage';
+import InvoiceDetailPage from './pages/invoice/InvoiceDetailPage';
+import InvoiceSecurityPage from './pages/superadmin/InvoiceSecurityPage';
+import CustomerRegistrationPage from './pages/admin/CustomerRegistrationPage';
+import ReportCenterPage from './pages/report/ReportCenterPage';
+import WorkerCutReportSearchPage from './pages/worker/WorkerCutReportSearchPage';
+import WorkerProductionReportPage from './pages/worker/WorkerProductionReportPage';
+
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+};
+
+const PublicRoute = ({ children }: { children: React.ReactNode }) => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  if (isAuthenticated) return <Navigate to="/" replace />;
+  return <>{children}</>;
+};
+
+const RoleRoute = ({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles: string[];
+}) => {
+  const user = useAuthStore((state) => state.user);
+  if (!user) return <Navigate to="/login" replace />;
+  if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />;
+  return <>{children}</>;
+};
+
+function App() {
+  const [showSplash, setShowSplash] = useState(true);
+  const { needsOperatorSelect } = useAuthStore();
+
+  if (showSplash) return <SplashScreen onComplete={() => setShowSplash(false)} />;
+  if (needsOperatorSelect) return <OperatorSelect />;
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+
+        <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
+          <Route index element={<Dashboard />} />
+
+          <Route path="about" element={<AboutUsPage />} />
+          <Route path="report" element={<ReconciliationReportPage />} />
+          <Route path="report-search" element={<ReconciliationReportSearchPage />} />
+           <Route path="reports" element={
+            <RoleRoute allowedRoles={['SuperAdmin']}>
+              <ReportCenterPage />
+            </RoleRoute>
+          } />
+
+           {/* ── Tax Invoice: Admin and SuperAdmin only ── */}
+          <Route path="invoice">
+            <Route index element={
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin','Accounts']}>
+                <InvoicePage />
+              </RoleRoute>
+            } />
+            <Route path="search" element={
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin','Accounts']}>
+                <InvoiceSearchPage />
+              </RoleRoute>
+            } />
+            <Route path=":id" element={
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin','Accounts']}>
+                <InvoiceDetailPage />
+              </RoleRoute>
+            } />
+          </Route>
+
+           <Route path="superadmin/invoice-security" element={
+            <RoleRoute allowedRoles={['SuperAdmin']}>
+              <InvoiceSecurityPage />
+            </RoleRoute>
+          } />
+
+          {/* ── Development ── */}
+          <Route path="development">
+            <Route index element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <DevelopmentPage />
+              </RoleRoute>
+            } />
+
+            {/* IMPORTANT: samples/search must come BEFORE samples
+                so React Router matches the more specific path first */}
+            <Route path="samples/search" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <SampleStyleSearchPage />
+              </RoleRoute>
+            } />
+
+            <Route path="samples" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <SampleStylePage />
+              </RoleRoute>
+            } />
+
+            <Route path="submit" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin']}>
+                <DevelopmentSubmission />
+              </RoleRoute>
+            } />
+
+            <Route path="search" element={
+              <RoleRoute allowedRoles={['Developer', 'Admin', 'QC']}>
+                <SubmissionSearch />
+              </RoleRoute>
+            } />
+          </Route>
+
+          {/* ── Admin ── */}
+          <Route path="admin">
+            <Route path="approve" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <ApproveSubmission />
+              </RoleRoute>
+            } />
+            <Route path="activity-log" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <ActivityLogPage />
+              </RoleRoute>
+            } />
+            <Route path="colours" element={
+              <RoleRoute allowedRoles={['Admin', 'Developer']}>
+                <ColourMasterPage />
+              </RoleRoute>
+            } />
+            <Route path="users" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <UserManagementPage />
+              </RoleRoute>
+            } />
+            <Route path="operators" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <OperatorManagementPage />
+              </RoleRoute>
+            } />
+            <Route path="search" element={
+              <RoleRoute allowedRoles={['Admin']}>
+                <ApprovalSearch />
+              </RoleRoute>
+            } />
+
+              <Route path="customers" element={
+              <RoleRoute allowedRoles={['Admin','Accounts']}>
+                <CustomerRegistrationPage />
+              </RoleRoute>
+            } />
+          </Route>
+
+          {/* ── Inventory / Stores ── */}
+          <Route path="inventory">
+            <Route index element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreInPage /></RoleRoute>} />
+            <Route path="in" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreInPage /></RoleRoute>} />
+            <Route path="production" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreProductionPage /></RoleRoute>} />
+            <Route path="search" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><StoreInSearchPage /></RoleRoute>} />
+            <Route path="production/search" element={<RoleRoute allowedRoles={['Stores', 'Admin']}><ProductionSearchPage /></RoleRoute>} />
+          </Route>
+
+          {/* ── QC ── */}
+          <Route path="qc">
+            <Route index element={<RoleRoute allowedRoles={['QC', 'Admin']}><CPIPage /></RoleRoute>} />
+            <Route path="cpi" element={<RoleRoute allowedRoles={['QC', 'Admin']}><CPIPage /></RoleRoute>} />
+            <Route path="delivery-tracker" element={<RoleRoute allowedRoles={['QC', 'Admin']}><DeliveryTrackerPage /></RoleRoute>} />
+            <Route path="cpi/search" element={<RoleRoute allowedRoles={['QC', 'Admin']}><CPISearchPage /></RoleRoute>} />
+            <Route path="delivery-tracker/search" element={<RoleRoute allowedRoles={['QC', 'Admin']}><DeliveryTrackerSearchPage /></RoleRoute>} />
+          </Route>
+
+          {/* ── Audit ── */}
+          <Route path="audit" element={<RoleRoute allowedRoles={['Audit', 'Admin']}><AuditPage /></RoleRoute>} />
+          <Route path="audit/search" element={<RoleRoute allowedRoles={['Audit', 'Admin']}><AuditSearchPage /></RoleRoute>} />
+
+          {/* ── Gatepass ── */}
+          <Route path="gatepass">
+            <Route index element={<RoleRoute allowedRoles={['Gatepass', 'Admin']}><AdviceNotePage /></RoleRoute>} />
+            <Route path="advicenote" element={<RoleRoute allowedRoles={['Gatepass', 'Admin']}><AdviceNotePage /></RoleRoute>} />
+            <Route path="search" element={<RoleRoute allowedRoles={['Gatepass', 'Admin']}><AdviceNoteSearchPage /></RoleRoute>} />
+          </Route>
+
+          {/* ── Worker ── */}
+          <Route path="worker" element={<DailyOutputPage />} />
+          <Route path="worker/downtime" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><DowntimeReportPage /></RoleRoute>} />
+          <Route path="worker/history" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><WorkerHistoryPage /></RoleRoute>} />
+          <Route path="worker/cut-reports" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><WorkerCutReportSearchPage /></RoleRoute>} />
+          <Route path="worker/reports" element={<RoleRoute allowedRoles={['Worker', 'Admin']}><WorkerProductionReportPage /></RoleRoute>} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;

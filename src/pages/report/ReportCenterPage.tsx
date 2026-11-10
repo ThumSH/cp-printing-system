@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../../api/client';
 
-type DepartmentKey = 'Admin' | 'Development' | 'Stores' | 'QC' | 'Gatepass' | 'Worker' | 'Accounts';
+type DepartmentKey = 'Admin' | 'Development' | 'Stores' | 'QC' | 'Gatepass' | 'Audit' | 'Worker' | 'Accounts';
 type ReportView = 'Overview' | DepartmentKey | 'Users';
 type PrintMode = 'summary' | 'summary-details';
 type PeriodKey = 'today' | 'this-week' | 'this-month' | 'last-month' | 'this-year' | 'custom';
@@ -176,7 +176,7 @@ type Filters = {
 };
 
 const API_BASE = API.REPORTS;
-const SECTIONS: DepartmentKey[] = ['Admin', 'Development', 'Stores', 'QC', 'Gatepass', 'Worker', 'Accounts'];
+const SECTIONS: DepartmentKey[] = ['Admin', 'Development', 'Stores', 'QC', 'Gatepass', 'Audit', 'Worker', 'Accounts'];
 const PAGE_SIZES = [25, 50, 100, 200];
 const PRINT_MODES: { value: PrintMode; label: string }[] = [
   { value: 'summary', label: 'Summary only' },
@@ -305,6 +305,7 @@ function chartSeries(chart: ReportChart) {
   if (chart.key.includes('qc')) return ['Checked', 'Rejected'];
   if (chart.key.includes('gatepass')) return ['Dispatched', 'Good'];
   if (chart.key.includes('worker')) return ['Output', 'Dispatch'];
+  if (chart.key.includes('audit')) return ['Created', 'Updated', 'Deleted'];
   if (chart.key.includes('accounts')) return ['Invoices', 'Reconciliation', 'Customers'];
   if (chart.key.includes('company')) return ['Styles', 'Store received', 'Dispatched'];
   return ['Value', 'Value 2', 'Value 3'];
@@ -1347,7 +1348,7 @@ function PrintReport({
             <table className="print-table compact">
               <thead><tr><th>Employee</th><th>Role</th><th>System Login Time</th><th>Idle Time</th><th>Logout Time - User</th><th>Logout Time - System</th><th>Total Login Time</th><th>Total Idle Time</th><th>Records</th><th>Output</th><th>Completed</th><th>Pending</th><th>Defects</th><th>Score</th></tr></thead>
               <tbody>
-                {sectionReport.employeeRows.slice(0, 12).map((r, idx) => (
+                {sectionReport.employeeRows.map((r, idx) => (
                   <tr key={`${r.employeeName}-${idx}`}>
                     <td>{r.employeeName}</td><td>{r.role}</td><td>{r.systemLoginTime || '—'}</td><td>{r.idleTime || '—'}</td><td>{r.userLogoutTime || '—'}</td><td>{r.systemLogoutTime || '—'}</td><td>{r.totalLoginTime || '—'}</td><td>{r.totalIdleTime || '—'}</td><td className="num">{formatNumber(r.recordCount)}</td><td className="num">{formatNumber(r.outputQty)}</td><td className="num">{formatNumber(r.completedQty)}</td><td className="num">{formatNumber(r.pendingQty)}</td><td className="num">{formatNumber(r.defectQty)}</td><td className="num">{formatNumber(r.score)} /100</td>
                   </tr>

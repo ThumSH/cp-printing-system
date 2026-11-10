@@ -62,7 +62,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { name: 'Approve', href: '/admin/approve', icon: ClipboardCheck, roles: ['Admin'] },
       { name: 'Approval Search', href: '/admin/search', icon: Search, roles: ['Admin'] },
-      { name: 'Users', href: '/admin/users', icon: Users, roles: ['Admin'] },
+      { name: 'Users', href: '/admin/users', icon: Users, roles: ['Admin', 'SuperAdmin'] },
+      { name: 'Operators', href: '/admin/operators', icon: Users, roles: ['Admin', 'SuperAdmin'] },
       { name: 'Activity Log', href: '/admin/activity-log', icon: Activity, roles: ['Admin'] },
       { name: 'Colour Master', href: '/admin/colours', icon: Palette, roles: ['Admin', 'Developer'] },
       { name: 'Customers',href: '/admin/customers',icon: Users,roles: ['Admin'] },

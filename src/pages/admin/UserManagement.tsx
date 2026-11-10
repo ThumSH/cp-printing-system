@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { ROLES, Role, User } from '../../types';
 import { getUsers, createUser, updateUser, deleteUser, resetPassword } from '../../services/services';
+import { useAuthStore } from '../../store/authStore';
 
 const ROLE_COLORS: Record<string, string> = {
   Admin: 'bg-red-100 text-red-700 border-red-200',
@@ -20,6 +21,9 @@ const ROLE_COLORS: Record<string, string> = {
 const emptyForm = { id: '', username: '', password: '', name: '', role: 'Developer' as Role };
 
 export default function UserManagementPage() {
+  const loggedInUser = useAuthStore((state) => state.user);
+  const isSuperAdmin = loggedInUser?.role === 'SuperAdmin';
+  const availableRoles = isSuperAdmin ? ROLES : ROLES.filter((role) => role !== 'SuperAdmin');
   const [users, setUsers] = useState<User[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -44,10 +48,11 @@ export default function UserManagementPage() {
   useEffect(() => { loadUsers(); }, []);
 
   const filteredUsers = users.filter((u) =>
-    !searchQuery.trim() ||
-    u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.role.toLowerCase().includes(searchQuery.toLowerCase())
+    (isSuperAdmin || u.role !== 'SuperAdmin') &&
+    (!searchQuery.trim() ||
+     u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+     u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+     u.role.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -175,7 +180,7 @@ export default function UserManagementPage() {
                     <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">Role *</label>
                     <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
                       className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all">
-                      {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                      {availableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
                 </div>

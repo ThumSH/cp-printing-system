@@ -1,5 +1,4 @@
 // src/api/client.ts
-
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 export const API = {
@@ -22,6 +21,7 @@ export const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
   Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
   'X-Operator-Name': localStorage.getItem('operatorName') || '',
+  'X-Session-Id': localStorage.getItem('sessionId') || '',
 });
 
 export const apiCall = async (endpoint: string, options: RequestInit = {}) => {
@@ -29,7 +29,7 @@ export const apiCall = async (endpoint: string, options: RequestInit = {}) => {
     const response = await fetch(`${API_URL}/api${endpoint}`, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
         ...options.headers,
       },
     });

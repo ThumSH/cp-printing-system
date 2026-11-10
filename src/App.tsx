@@ -24,6 +24,7 @@ import AuditPage from './pages/audit/AuditPage';
 import AuditSearchPage from './pages/audit/Auditsearchpage';
 import DeliveryTrackerPage from './pages/qc/DeliveryTrackerPage';
 import UserManagementPage from './pages/admin/UserManagement';
+import OperatorManagementPage from './pages/admin/OperatorManagementPage';
 import DailyOutputPage from './pages/worker/DailyOutputPage';
 import DowntimeReportPage from './pages/worker/DowntimeReportPage';
 import WorkerHistoryPage from './pages/worker/WorkerHistoryPage';
@@ -170,8 +171,13 @@ function App() {
               </RoleRoute>
             } />
             <Route path="users" element={
-              <RoleRoute allowedRoles={['Admin']}>
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
                 <UserManagementPage />
+              </RoleRoute>
+            } />
+            <Route path="operators" element={
+              <RoleRoute allowedRoles={['Admin', 'SuperAdmin']}>
+                <OperatorManagementPage />
               </RoleRoute>
             } />
             <Route path="search" element={

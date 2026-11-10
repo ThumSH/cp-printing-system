@@ -1,264 +1,128 @@
-// src/pages/OperatorSelect.tsx
-// "Who is using this session?" — shown after login, before entering the app
-import { useState, useEffect, useRef } from 'react';
+// Every role uses the same Admin-managed list and server-verified operator session.
+// No cached names, generic defaults, or unrestricted text entry.
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Users, LogIn, Loader2, UserCheck } from 'lucide-react';
+import { Users, LogIn, Loader2, AlertCircle, UserCheck } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { API, getAuthHeaders } from '../api/client';
 
-interface OperatorInfo {
-  id: string;
-  name: string;
-  role: string;
-}
-
+type OperatorInfo = { id: string; name: string; role: string };
 const ROLE_COLORS: Record<string, string> = {
   Admin: 'from-red-500 to-red-600',
+  SuperAdmin: 'from-slate-700 to-slate-900',
   Developer: 'from-blue-500 to-blue-600',
   QC: 'from-emerald-500 to-emerald-600',
   Gatepass: 'from-amber-500 to-amber-600',
   Audit: 'from-purple-500 to-purple-600',
   Stores: 'from-teal-500 to-teal-600',
   Worker: 'from-orange-500 to-orange-600',
+  Accounts: 'from-cyan-500 to-cyan-600',
 };
 
-// Persist custom names in localStorage so they survive logout and appear in dropdown next time
-const RECENT_NAMES_KEY = 'recentOperatorNames';
-// Cache key for operator list (per role)
-const OPERATOR_CACHE_KEY = (role: string) => `operatorCache_${role}`;
-const OPERATOR_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-function getRecentNames(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_NAMES_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-function saveRecentName(name: string) {
-  const names = getRecentNames().filter((n) => n.toLowerCase() !== name.toLowerCase());
-  names.unshift(name);
-  localStorage.setItem(RECENT_NAMES_KEY, JSON.stringify(names.slice(0, 10)));
-}
-
-interface OperatorCache {
-  operators: OperatorInfo[];
-  fetchedAt: number;
-}
-
-function getCachedOperators(role: string): OperatorInfo[] | null {
-  try {
-    const raw = localStorage.getItem(OPERATOR_CACHE_KEY(role));
-    if (!raw) return null;
-    const cache: OperatorCache = JSON.parse(raw);
-    if (Date.now() - cache.fetchedAt > OPERATOR_CACHE_TTL_MS) {
-      localStorage.removeItem(OPERATOR_CACHE_KEY(role));
-      return null;
-    }
-    return cache.operators;
-  } catch { return null; }
-}
-
-function setCachedOperators(role: string, operators: OperatorInfo[]) {
-  try {
-    const cache: OperatorCache = { operators, fetchedAt: Date.now() };
-    localStorage.setItem(OPERATOR_CACHE_KEY(role), JSON.stringify(cache));
-  } catch { /* localStorage full — fail silently */ }
+function isGeneric(name: string, role: string) {
+  const v = name.trim().toLowerCase();
+  const r = role.trim().toLowerCase();
+  const singular = r === 'stores' ? 'store' : r === 'developer' ? 'development' : r;
+  return !v || ['user','unknown','operator','employee','staff',
+    'store','stores','store person','store account','stores account',
+    'admin','superadmin','super admin','master administrator','worker person',
+    r, singular, `${r} account`, `${r} person`, `${singular} account`, `${singular} person`].includes(v);
 }
 
 export default function OperatorSelect() {
-  const { user, setOperator, logout } = useAuthStore();
+  const { user, sessionId, setOperator, logout } = useAuthStore();
+  const role = user?.role || '';
   const [operators, setOperators] = useState<OperatorInfo[]>([]);
-  const [recentNames, setRecentNames] = useState<string[]>(getRecentNames());
-  const [customName, setCustomName] = useState('');
   const [loading, setLoading] = useState(true);
-  const fetchedRef = useRef(false);
+  const [selecting, setSelecting] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!user?.role || fetchedRef.current) return;
-    fetchedRef.current = true;
-
-    const role = user.role;
-
-    // Check cache first — avoids the "Loading operators..." flash entirely
-    const cached = getCachedOperators(role);
-    if (cached) {
-      setOperators(cached);
-      setLoading(false);
-      // Background refresh so cache stays warm for next time
-      refreshInBackground(role);
-      return;
-    }
-
-    // No cache — fetch and show spinner
+    if (!role) return;
+    let cancelled = false;
     const load = async () => {
+      setLoading(true); setError(''); setOperators([]);
       try {
-        const res = await fetch(
-          `${API.BASE}/api/operator/by-role/${role}`,
-          { headers: getAuthHeaders() }
-        );
-        if (res.ok) {
-          const data: OperatorInfo[] = await res.json();
-          setCachedOperators(role, data);
-          setOperators(data);
-        }
-      } catch { /* non-critical — user can still type their name */ }
-      finally { setLoading(false); }
+        const res = await fetch(`${API.BASE}/api/operator/by-role/${encodeURIComponent(role)}`, {
+          headers: getAuthHeaders(),
+        });
+        if (!res.ok) throw new Error('Could not load registered employees. Contact Admin.');
+        const list = await res.json() as OperatorInfo[];
+        if (!cancelled) setOperators(list.filter(op => !isGeneric(op.name, role)));
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load employees.');
+      } finally { if (!cancelled) setLoading(false); }
     };
-    load();
-  }, [user?.role]);
+    void load();
+    return () => { cancelled = true; };
+  }, [role]);
 
-  const refreshInBackground = async (role: string) => {
+  const choose = async (operator: OperatorInfo) => {
+    if (selecting) return;
+    setError(''); setSelecting(true);
     try {
-      const res = await fetch(
-        `${API.BASE}/api/operator/by-role/${role}`,
-        { headers: getAuthHeaders() }
-      );
-      if (res.ok) {
-        const data: OperatorInfo[] = await res.json();
-        setCachedOperators(role, data);
-        setOperators(data);
+      if (!sessionId) throw new Error('Your login session is missing. Sign out and sign in again.');
+      const res = await fetch(`${API.AUTH}/select-operator`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ sessionId, operatorId: operator.id }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || 'Unable to verify employee for this session.');
       }
-    } catch { /* silent */ }
+      const data = await res.json() as { name: string; sessionId: string; role: string };
+      if (data.sessionId !== sessionId || data.role !== role)
+        throw new Error('Session identity mismatch. Please sign in again.');
+      setOperator(data.name); // Only after server verifies the active operator and current session.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Employee selection failed.');
+    } finally { setSelecting(false); }
   };
 
-  const handleSelect = (name: string) => {
-    if (!name.trim()) return;
-    const trimmed = name.trim();
-    saveRecentName(trimmed);
-    setRecentNames(getRecentNames());
-    setOperator(trimmed);
-  };
-
-  const gradient = ROLE_COLORS[user?.role || ''] || 'from-slate-500 to-slate-600';
-  const initials = user?.role?.slice(0, 2).toUpperCase() || '??';
+  const gradient = ROLE_COLORS[role] || 'from-slate-500 to-slate-600';
+  const initials = role.slice(0, 2).toUpperCase() || '??';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-md"
-      >
-        {/* Header card */}
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.35 }} className="w-full max-w-md">
         <div className={`rounded-t-2xl bg-linear-to-r ${gradient} px-6 py-5 text-white`}>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-lg font-bold backdrop-blur-sm">
-              {initials}
-            </div>
-            <div>
-              <p className="text-sm opacity-80">Logged in as</p>
-              <p className="text-lg font-bold">{user?.role} Account</p>
-            </div>
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-lg font-bold">{initials}</div>
+            <div><p className="text-sm opacity-80">Logged in as</p><p className="text-lg font-bold">{role} Account</p></div>
           </div>
         </div>
-
-        {/* Selection area */}
-        <div className="rounded-b-2xl bg-white border border-t-0 border-slate-200 shadow-lg p-6">
-          <div className="flex items-center gap-2 mb-5">
+        <div className="rounded-b-2xl border border-t-0 border-slate-200 bg-white p-6 shadow-lg">
+          <div className="mb-5 flex items-center gap-2">
             <Users className="h-5 w-5 text-slate-400" />
             <h2 className="text-base font-bold text-slate-900">Who is using this session?</h2>
           </div>
-
           {loading ? (
-            <div className="py-8 flex items-center justify-center gap-2 text-slate-400">
-              <Loader2 className="h-5 w-5 animate-spin" /> Loading operators...
-            </div>
+            <div className="flex items-center justify-center gap-2 py-8 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /> Loading employees...</div>
           ) : (
             <div className="space-y-4">
-              {/* Operator buttons */}
-              {operators.length > 0 && (
+              {error && <p role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p>}
+              {operators.length ? (
                 <div className="grid grid-cols-2 gap-2">
-                  {operators.map((op, i) => (
-                    <motion.button
-                      key={op.id}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.04 }}
-                      onClick={() => handleSelect(op.name)}
-                      className="flex items-center gap-2.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all"
-                    >
-                      <div className={`w-9 h-9 rounded-full bg-linear-to-br ${gradient} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
-                        {op.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
-                      </div>
-                      <span className="text-sm font-semibold text-slate-800 truncate">{op.name}</span>
-                    </motion.button>
+                  {operators.map(op => (
+                    <button key={op.id} type="button" disabled={selecting} onClick={() => void choose(op)}
+                      className="flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50">
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-br ${gradient} text-xs font-bold text-white`}>
+                        {op.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                      </div><span className="truncate text-sm font-semibold text-slate-800">{op.name}</span>
+                      {selecting && <UserCheck className="ml-auto h-4 w-4 shrink-0 text-slate-400" />}
+                    </button>
                   ))}
                 </div>
+              ) : !error && (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  No registered active employees for <strong>{role}</strong>. Ask Admin to register the names in <strong>Admin → Operators</strong> before using this account.
+                </p>
               )}
-
-              {/* Recent custom names (from previous sessions on this device) */}
-              {recentNames.filter((n) => !operators.some((op) => op.name.toLowerCase() === n.toLowerCase())).length > 0 && (
-                <>
-                  {operators.length > 0 && (
-                    <div className="flex items-center gap-3">
-                      <div className="h-px flex-1 bg-slate-200" />
-                      <span className="text-[10px] text-slate-400 font-medium">recently used on this device</span>
-                      <div className="h-px flex-1 bg-slate-200" />
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-2">
-                    {recentNames
-                      .filter((n) => !operators.some((op) => op.name.toLowerCase() === n.toLowerCase()))
-                      .map((name, i) => (
-                        <motion.button
-                          key={name}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.04 }}
-                          onClick={() => handleSelect(name)}
-                          className="flex items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 active:scale-[0.98] transition-all"
-                        >
-                          <div className="w-9 h-9 rounded-full bg-slate-300 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                            {name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
-                          </div>
-                          <span className="text-sm font-semibold text-slate-600 truncate">{name}</span>
-                        </motion.button>
-                      ))}
-                  </div>
-                </>
-              )}
-
-              {/* Divider */}
-              <div className="flex items-center gap-3">
-                <div className="h-px flex-1 bg-slate-200" />
-                <span className="text-[10px] text-slate-400 font-medium">or type your name</span>
-                <div className="h-px flex-1 bg-slate-200" />
-              </div>
-
-              {/* Custom name input */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && customName.trim()) handleSelect(customName); }}
-                  placeholder={operators.length > 0 ? "Not in the list? Type your name..." : "Enter your name to continue..."}
-                  className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-medium outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all"
-                  autoFocus={operators.length === 0}
-                />
-                <button
-                  onClick={() => handleSelect(customName)}
-                  disabled={!customName.trim()}
-                  className={`rounded-xl px-4 py-3 text-sm font-bold text-white bg-linear-to-r ${gradient} hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40`}
-                >
-                  <UserCheck className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Info text */}
-              <p className="text-[11px] text-slate-400 text-center">
-                Your name will be recorded with every action you take in the system.
-              </p>
-
-              {/* Logout option */}
-              <button
-               onClick={() => {
-                void logout();
-              }}
-                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors mt-2"
-              >
+              <p className="text-center text-[11px] text-slate-500">Only registered employees can use this session. Work and attendance will be attributed to the selected name.</p>
+              <button type="button" disabled={selecting} onClick={() => void logout()}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 disabled:opacity-50">
                 <LogIn className="h-3.5 w-3.5 rotate-180" /> Sign out and switch account
               </button>
             </div>

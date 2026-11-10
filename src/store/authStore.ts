@@ -45,6 +45,8 @@ const storedToken    = localStorage.getItem('token');
 const storedUser     = getStoredUser();
 const storedOperator = localStorage.getItem('operatorName');
 const storedSession  = localStorage.getItem('sessionId');
+const verifiedOperatorSession = localStorage.getItem('verifiedOperatorSessionId');
+const operatorIsVerified = !!storedOperator && !!storedSession && verifiedOperatorSession === storedSession;
 
 // FIX: If token is expired on boot, clear storage immediately so the
 // user is sent to the login screen rather than hitting a 401 mid-session.
@@ -53,6 +55,7 @@ if (tokenExpired && (storedToken || storedUser)) {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   localStorage.removeItem('operatorName');
+  localStorage.removeItem('verifiedOperatorSessionId');
   localStorage.removeItem('sessionId');
   localStorage.removeItem('sessionActiveSeconds');
   localStorage.removeItem('sessionIdleSeconds');
@@ -90,6 +93,7 @@ const clearLocalStorage = () => {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   localStorage.removeItem('operatorName');
+  localStorage.removeItem('verifiedOperatorSessionId');
   localStorage.removeItem('sessionId');
   localStorage.removeItem('sessionActiveSeconds');
   localStorage.removeItem('sessionIdleSeconds');
@@ -101,9 +105,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user:                validSession ? storedUser    : null,
   token:               validSession ? storedToken   : null,
   sessionId:           validSession ? storedSession : null,
-  isAuthenticated:     validSession && !!storedOperator,
-  operatorName:        validSession ? storedOperator : null,
-  needsOperatorSelect: validSession && !storedOperator,
+  isAuthenticated:     validSession && operatorIsVerified,
+  operatorName:        validSession && operatorIsVerified ? storedOperator : null,
+  needsOperatorSelect: validSession && !operatorIsVerified,
   idleWarningSeconds:  toNumber(localStorage.getItem('idleWarningSeconds')) || 300,
   idleLogoutGraceSeconds: toNumber(localStorage.getItem('idleLogoutGraceSeconds')) || 60,
 
@@ -118,6 +122,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       const data = await res.json();
 
+      localStorage.removeItem('operatorName');
+      localStorage.removeItem('verifiedOperatorSessionId');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user',  JSON.stringify(data.user));
 
@@ -153,7 +159,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setOperator: (name) => {
+    const verifiedSession = get().sessionId;
+    if (!verifiedSession) return;
     localStorage.setItem('operatorName', name);
+    localStorage.setItem('verifiedOperatorSessionId', verifiedSession);
     set({ operatorName: name, isAuthenticated: true, needsOperatorSelect: false });
   },
 

@@ -1,0 +1,141 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, Plus, RefreshCw, Users, UserX, UserCheck } from 'lucide-react';
+import { API, getAuthHeaders } from '../../api/client';
+
+type Operator = { id: string; name: string; role: string; isActive: boolean };
+const API_URL = `${API.BASE}/api/operator`;
+const ROLES = ['Admin', 'SuperAdmin', 'Developer', 'Stores', 'QC', 'Gatepass', 'Audit', 'Worker', 'Accounts'];
+function isGeneric(name: string, role: string) {
+  const value = name.trim().toLowerCase();
+  const department = role.toLowerCase();
+  const singular = department === 'stores' ? 'store' : department === 'developer' ? 'development' : department;
+  return !value || ['user','unknown','operator','employee','staff',
+    'store','stores','store person','store account','stores account',
+    'admin','superadmin','super admin','master administrator','worker person',
+    department, singular, `${department} person`, `${department} account`,
+    `${singular} person`, `${singular} account`].includes(value);
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { ...init, headers: { ...getAuthHeaders(), ...(init?.headers || {}) } });
+  if (!res.ok) {
+    const raw = await res.text();
+    throw new Error(raw || `Request failed (${res.status})`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export default function OperatorManagementPage() {
+  const [operators, setOperators] = useState<Operator[]>([]);
+  const [role, setRole] = useState('Stores');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try { setOperators(await request<Operator[]>(API_URL)); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Unable to load operators.'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const displayed = useMemo(() => operators.filter((op) => op.role === role).sort((a, b) => a.name.localeCompare(b.name)), [operators, role]);
+
+  const add = async () => {
+    const cleaned = name.trim().replace(/\s+/g, ' ');
+    setError(''); setNotice('');
+    if (!cleaned) { setError('Enter the employee’s real name.'); return; }
+    if (isGeneric(cleaned, role)) {
+      setError('A real employee name is required, not a department or shared-account name.'); return;
+    }
+    if (operators.some((op) => op.role === role && op.name.trim().toLowerCase() === cleaned.toLowerCase())) {
+      setError('That employee already exists. Reactivate their record instead of creating a duplicate.'); return;
+    }
+    setSaving(true);
+    try {
+      await request<Operator>(API_URL, { method: 'POST', body: JSON.stringify({ name: cleaned, role }) });
+      setName(''); setNotice('Employee registered. Their name is now available at the next login.');
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not create operator.'); }
+    finally { setSaving(false); }
+  };
+
+  const toggle = async (op: Operator) => {
+    setError(''); setNotice(''); setSaving(true);
+    try {
+      await request<Operator>(`${API_URL}/${encodeURIComponent(op.id)}`, {
+        method: 'PUT', body: JSON.stringify({ ...op, isActive: !op.isActive }),
+      });
+      setNotice(`${op.name} ${op.isActive ? 'deactivated' : 'activated'}. Existing history was not deleted.`);
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not update operator.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-6 pb-12">
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-black text-slate-900"><Users className="h-6 w-6 text-blue-600" /> Operator Management</h1>
+            <p className="mt-1 text-sm text-slate-500">Register real employees who use shared department accounts. This is separate from Users (account passwords and roles).</p>
+          </div>
+          <button type="button" onClick={() => void load()} disabled={loading || saving}
+            className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
+            <RefreshCw className="h-4 w-4" /> Refresh
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[200px_1fr_auto]">
+          <label className="space-y-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+            Department
+            <select value={role} onChange={(e) => setRole(e.target.value)} className="block w-full rounded-xl border border-slate-200 p-3 text-sm font-semibold text-slate-900">
+              {ROLES.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+            Employee’s full name
+            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void add(); }}
+              placeholder="e.g. Sithum Perera" className="block w-full rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-900" />
+          </label>
+          <div className="flex items-end">
+            <button type="button" onClick={() => void add()} disabled={saving}
+              className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add employee
+            </button>
+          </div>
+        </div>
+        {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        {notice && <p role="status" className="mt-3 rounded-xl bg-green-50 p-3 text-sm text-green-700">{notice}</p>}
+      </div>
+
+      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-900">{role} employees</h2>
+          <span className="text-sm text-slate-500">{displayed.filter((op) => op.isActive).length} active</span>
+        </div>
+        {loading ? <p className="p-6 text-sm text-slate-500">Loading operators...</p> : displayed.length === 0 ?
+          <p className="p-6 text-sm text-slate-500">No operators in this department. Register employees above before they sign in.</p> :
+          displayed.map((op) => (
+            <div key={op.id} className="flex items-center justify-between gap-4 border-b border-slate-100 px-6 py-4 last:border-0">
+              <div>
+                <p className="font-semibold text-slate-900">{op.name}</p>
+                <p className="text-xs text-slate-500">{op.isActive ? 'Active — available at next login' : 'Inactive — cannot be selected'}</p>
+              </div>
+              <button type="button" onClick={() => void toggle(op)} disabled={saving}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${op.isActive ? 'border-red-200 text-red-700' : 'border-green-200 text-green-700'}`}>
+                {op.isActive ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                {op.isActive ? 'Deactivate' : 'Reactivate'}
+              </button>
+            </div>
+          ))}
+      </div>
+      <p className="text-sm text-slate-500">Do not delete historical operator records. Deactivation removes an employee from future selection without changing past work history.</p>
+    </div>
+  );
+}
