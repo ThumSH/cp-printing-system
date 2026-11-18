@@ -23,7 +23,9 @@ const emptyForm = { id: '', username: '', password: '', name: '', role: 'Develop
 export default function UserManagementPage() {
   const loggedInUser = useAuthStore((state) => state.user);
   const isSuperAdmin = loggedInUser?.role === 'SuperAdmin';
-  const availableRoles = isSuperAdmin ? ROLES : ROLES.filter((role) => role !== 'SuperAdmin');
+  const availableRoles: Role[] = isSuperAdmin
+  ? [...ROLES, 'SuperAdmin']
+  : [...ROLES];
   const [users, setUsers] = useState<User[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
