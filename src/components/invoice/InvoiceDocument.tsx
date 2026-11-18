@@ -62,7 +62,7 @@ const formatInvoiceDate = (
 
   const [, year, month, day] = isoDateMatch;
 
-  return `${month}-${day}-${year}`;
+  return `${month}/${day}/${year}`;
 };
 
 const INVOICE_STYLES = `
